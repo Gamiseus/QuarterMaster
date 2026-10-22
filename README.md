@@ -7,16 +7,16 @@ Named after the military logistics officer responsible for provisioning supplies
 ---
 
 
-**Self-Contained Portable Mod Discovery**:
+1. **Self-Contained Portable Mod Discovery**:
    - Checks local `<game_dir>/Mods` first before falling back to system `%APPDATA%/mnb/Mods`. The game and mods run 100% portably from any directory, external drive, or custom installation.
-**Dedicated Mod Manifests & Variables**:
+2. **Dedicated Mod Manifests & Variables**:
    - Uses native `qm.toml` (or `quartermaster.toml`) patch manifests.
    - Interpolates `{{qm:VAR}}` and `{{quartermaster:VAR}}` tokens.
-**Auto-Rotating Log Architecture**:
+3. **Auto-Rotating Log Architecture**:
    - **`latest.log` & `prev.log`**: Automatically rotates the previous log to `prev.log` upon each launch, preventing file clutter.
    - **`err.log` & `prev_err.log`**: Errors and unhandled warnings are mirrored into a dedicated `err.log` for immediate visibility.
    - **`crashes/` Directory**: Captures full crash dumps and panics into `Mods/qm/log/crashes/crash-{timestamp}.log`, capped at a maximum of 10 logs (oldest pruned automatically).
-**Hardened Safety & Export Forwarding**:
+4. **Hardened Safety & Export Forwarding**:
    - Safe UTF-16 panic hooks prevent secondary crashes during unhandled errors.
    - Windows Multimedia API exports (`timeGetTime`, etc.) forward directly to `C:\Windows\System32\winmm.dll`.
 
