@@ -48,33 +48,6 @@ impl PatternPatch {
         }
     }
 
-    pub fn get_steam_safety_patch() -> PatternPatch {
-        PatternPatch {
-            pattern: "Steam.init()".to_string(),
-            position: InsertPosition::After,
-            target: Target::Single("main.lua".to_string()), // <-- Changed here
-            match_indent: true,
-            times: Some(1),
-            overwrite: false,
-            name: Some("QM_Disable_Steam_Stats_And_Boards".to_string()),
-            payload: r#"if Steam and Steam.userStats then
-  Steam.userStats.setAchievement = function() return true end
-  Steam.userStats.clearAchievement = function() return true end
-  Steam.userStats.setStatInt = function() return true end
-  Steam.userStats.setStatFloat = function() return true end
-  Steam.userStats.storeStats = function() return true end
-  Steam.userStats.uploadLeaderboardScore = function(h, m, s, d, cb)
-    if cb then cb({ success = false, globalRankNew = 0 }, "Quartermaster: Disabled") end
-    return true
-  end
-  Steam.userStats.findLeaderboard = function(n, cb)
-    if cb then cb({ leaderboardFound = false, steamLeaderboard = 0 }, "Quartermaster: Disabled") end
-    return true
-  end
-end"#.to_string(),
-        }
-    }
-
     /// Apply the pattern patch onto the rope.
     /// Returns `Some(ByteDebugEntry)` if the rope was modified, `None` otherwise.
     pub fn apply(&self, target: &str, rope: &mut Rope, path: &Path) -> Option<ByteDebugEntry> {

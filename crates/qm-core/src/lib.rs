@@ -31,6 +31,92 @@ pub const QM_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 pub static RUNTIME: OnceLock<QuarterMaster> = OnceLock::new();
 
+const STEAM_SAFETY_PAYLOAD: &str = r#"
+-- Quartermaster: Steam Safety Lockdown
+print("[QM] *** STEAM SAFETY HOOK INITIALIZED ***")
+
+local function qm_neuter_steam()
+  if Steam and Steam.userStats then
+    Steam.userStats.uploadLeaderboardScore = function(h, m, s, d, cb)
+      print("[QM] BLOCKED: Steam.userStats.uploadLeaderboardScore")
+      if cb then cb({ success = false, globalRankNew = 0 }, "Quartermaster: Disabled") end
+      return false
+    end
+    Steam.userStats.findLeaderboard = function(n, cb)
+      print("[QM] BLOCKED: Steam.userStats.findLeaderboard (" .. tostring(n) .. ")")
+      if cb then cb({ leaderboardFound = false, steamLeaderboard = 0 }, "Quartermaster: Disabled") end
+      return false
+    end
+    Steam.userStats.setAchievement = function() return true end
+    Steam.userStats.clearAchievement = function() return true end
+    Steam.userStats.getAchievement = function() return false, false end
+    Steam.userStats.setStatInt = function() return true end
+    Steam.userStats.setStatFloat = function() return true end
+    Steam.userStats.storeStats = function() return true end
+    Steam.userStats.requestCurrentStats = function() return false end
+    Steam.userStats.getStatInt = function() return false, 0 end
+    Steam.userStats.getStatFloat = function() return false, 0.0 end
+  end
+  if Steam and Steam.apps then
+    Steam.apps.isDlcInstalled = function() return false end
+  end
+end
+
+qm_neuter_steam()
+
+local blocked_globals = {
+  uploadScoresHelper = true,
+  steam_campaignTime = true,
+  steam_classicWaves = true,
+  steam_branderburging = true,
+  steam_increaseClassicWins = true,
+  steam_increaseCampaignWins = true,
+  steam_campaignGG = true,
+  steam_keener = true,
+  steam_counterSnipe = true,
+  steam_sink = true,
+  steam_marquis = true,
+  steam_mudBleed = true,
+  steam_chunk = true,
+  steam_comChallenge = true,
+  steam_officerClub = true,
+  steam_tigerHunter = true,
+  steam_increaseBranderburg = true,
+  steam_victoryDay = true,
+}
+
+for name, _ in pairs(blocked_globals) do
+  _G[name] = function(...)
+    print("[QM] BLOCKED CALL: " .. tostring(name))
+    return false
+  end
+end
+
+local prev_mt = getmetatable(_G) or {}
+local prev_newindex = prev_mt.__newindex
+
+setmetatable(_G, {
+  __index = prev_mt.__index,
+  __newindex = function(t, k, v)
+    if blocked_globals[k] then
+      rawset(t, k, function(...)
+        print("[QM] BLOCKED CALL: " .. tostring(k))
+        return false
+      end)
+    elseif k == "Steam" then
+      rawset(t, k, v)
+      qm_neuter_steam()
+    else
+      if type(prev_newindex) == "function" then
+        prev_newindex(t, k, v)
+      else
+        rawset(t, k, v)
+      end
+    end
+  end
+})
+"#;
+
 type LoadBuffer =
     dyn Fn(*mut LuaState, *const u8, usize, *const u8, *const u8) -> u32 + Send + Sync + 'static;
 
@@ -249,40 +335,7 @@ impl QuarterMaster {
 
         let patch_table = self.patch_table.read().unwrap();
 
-        // Check if main.lua is loading, inject QuarterMaster APIs and module patches
         let c_str = unsafe { CStr::from_ptr(name_ptr as _) };
-        if let Ok(name) = c_str.to_str() {
-            if name.ends_with("main.lua") {
-                unsafe {
-                    // Hook print so Lua prints output to the QM logger
-                    let closure: LuaFunc = sys::override_print;
-                    state.push(closure);
-                    sys::lua_setfield(state, sys::LUA_GLOBALSINDEX, c"print".as_ptr());
-
-                    // Inject QuarterMaster metadata into Lua runtime
-                    patch_table.inject_metadata(state);
-
-                    // Inject registered mod modules into runtime
-                    let module_patches: Vec<_> = patch_table
-                        .patches
-                        .iter()
-                        .filter_map(|(x, prio, path)| match x {
-                            Patch::Module(patch) => Some((patch, prio, path)),
-                            _ => None,
-                        })
-                        .filter(|(x, _, _)| !x.load_now)
-                        .sorted_by_key(|(_, &prio, _)| prio)
-                        .map(|(x, _, path)| (x, path))
-                        .collect();
-
-                    for (patch, path) in module_patches {
-                        let patch: &ModulePatch = patch;
-                        let _ = patch.apply("", state, path);
-                    }
-                }
-            }
-        }
-
         let name = match c_str.to_str() {
             Ok(x) => x,
             Err(e) => {
@@ -291,12 +344,38 @@ impl QuarterMaster {
             }
         };
 
-        // Stop here if no valid patch exists for this target.
-        if !patch_table.needs_patching(name) && !self.dump_all.load(std::sync::atomic::Ordering::Relaxed) {
-            return (self.loadbuffer)(state, buf_ptr, size, name_ptr, mode_ptr);
+        // Check if main.lua is loading, inject QuarterMaster APIs and module patches
+        if name.ends_with("main.lua") {
+            unsafe {
+                // Hook print so Lua prints output to the QM logger
+                let closure: LuaFunc = sys::override_print;
+                state.push(closure);
+                sys::lua_setfield(state, sys::LUA_GLOBALSINDEX, c"print".as_ptr());
+
+                // Inject QuarterMaster metadata into Lua runtime
+                patch_table.inject_metadata(state);
+
+                // Inject registered mod modules into runtime
+                let module_patches: Vec<_> = patch_table
+                    .patches
+                    .iter()
+                    .filter_map(|(x, prio, path)| match x {
+                        Patch::Module(patch) => Some((patch, prio, path)),
+                        _ => None,
+                    })
+                    .filter(|(x, _, _)| !x.load_now)
+                    .sorted_by_key(|(_, &prio, _)| prio)
+                    .map(|(x, _, path)| (x, path))
+                    .collect();
+
+                for (patch, path) in module_patches {
+                    let patch: &ModulePatch = patch;
+                    let _ = patch.apply("", state, path);
+                }
+            }
         }
 
-        // Prepare buffer for patching
+        // Prepare buffer for inspection and patching
         let buf = unsafe { slice::from_raw_parts(buf_ptr, size) };
         let buf_str = match std::str::from_utf8(buf) {
             Ok(s) => s,
@@ -316,16 +395,51 @@ impl QuarterMaster {
             name.replace("@", "")
         };
 
-        // Apply patches onto this buffer
-        write_dump(&self.mod_dir, "game-dump", &pretty_name, buf_str, None);
-        let res = unsafe { patch_table.apply_patches(name, buf_str, state) };
-        if res.is_err() {
-            unsafe { state.push(res.unwrap_err()) };
-            return 3; // LUA_ERRSYNTAX
-        }
-        let (patched, debug) = res.unwrap();
+        // --- BUILT-IN STEAM SAFETY INJECTION ---
+        let mut current_buf = buf_str.to_string();
+        let mut was_safety_patched = false;
 
-        write_dump(&self.mod_dir, "dump", &pretty_name, &patched, Some(&debug));
+        if name.ends_with("main.lua") {
+            info!("[QM] Injecting Steam safety hook into {}", name);
+            current_buf.insert_str(0, STEAM_SAFETY_PAYLOAD);
+            was_safety_patched = true;
+        }
+
+        if name.ends_with("external.lua") {
+            info!("[QM] Neutralizing uploadScoresHelper in {}", name);
+            if current_buf.contains("function uploadScoresHelper") {
+                current_buf = current_buf.replace(
+                    "function uploadScoresHelper(handle, scorez)",
+                    "function uploadScoresHelper(handle, scorez) return false end function _disabled_uploadScoresHelper(handle, scorez)",
+                );
+                was_safety_patched = true;
+            }
+        }
+        // ---------------------------------------
+
+        let needs_mod_patching = patch_table.needs_patching(name) || patch_table.needs_patching(&pretty_name);
+
+        // Stop here if no valid patch exists and no safety patch was applied
+        if !needs_mod_patching && !was_safety_patched && !self.dump_all.load(std::sync::atomic::Ordering::Relaxed) {
+            return (self.loadbuffer)(state, buf_ptr, size, name_ptr, mode_ptr);
+        }
+
+        write_dump(&self.mod_dir, "game-dump", &pretty_name, buf_str, None);
+
+        // Apply any user/mod patches on top of the buffer
+        let (patched, debug) = if needs_mod_patching {
+            let res = unsafe { patch_table.apply_patches(name, &current_buf, state) };
+            if res.is_err() {
+                unsafe { state.push(res.unwrap_err()) };
+                return 3; // LUA_ERRSYNTAX
+            }
+            let (p, d) = res.unwrap();
+            (p, Some(d))
+        } else {
+            (current_buf, None)
+        };
+
+        write_dump(&self.mod_dir, "dump", &pretty_name, &patched, debug.as_ref());
 
         (self.loadbuffer)(state, patched.as_ptr(), patched.len(), name_ptr, mode_ptr)
     }
@@ -365,9 +479,16 @@ unsafe extern "C" fn apply_patches(lua_state: *mut LuaState) -> c_int {
 
 impl Target {
     pub fn can_apply(&self, target: &str) -> bool {
+        let clean_target = target.trim_start_matches('@');
         match self {
-            Self::Single(str) => str == target,
-            Self::Multi(strs) => strs.iter().any(|x| x == target),
+            Self::Single(str) => {
+                let clean_str = str.trim_start_matches('@');
+                str == target || clean_str == clean_target || target.ends_with(str.as_str()) || clean_target.ends_with(clean_str)
+            }
+            Self::Multi(strs) => strs.iter().any(|x| {
+                let clean_str = x.trim_start_matches('@');
+                x == target || clean_str == clean_target || target.ends_with(x.as_str()) || clean_target.ends_with(clean_str)
+            }),
         }
     }
 

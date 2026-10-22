@@ -5,7 +5,6 @@ use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
-use crate::patch::pattern::PatternPatch;
 use crate::patch::{Patch, PatchFile, Priority};
 use itertools::Itertools;
 use log::*;
@@ -22,11 +21,118 @@ struct IntermediatePatch {
 }
 
 pub fn patch_buffer(target: &str, rope: &mut crop::Rope) {
+    // 1. Diagnostics: ALWAYS log every single buffer passing through
+    info!("[QM-DEBUG] patch_buffer called for target: '{}'", target);
+
+    // 2. Prepend safety lockdown to the very start of main.lua (offset 0)
     if target.ends_with("main.lua") {
-        let safety_patch = PatternPatch::get_steam_safety_patch();
-        safety_patch.apply(target, rope, Path::new("builtin://steam_safety"));
+        info!("[QM-DEBUG] Prepending Steam lockdown directly into byte 0 of {}", target);
+        rope.insert(0, STEAM_SAFETY_PAYLOAD);
+    }
+
+    // 3. Directly defuse uploadScoresHelper in external.lua
+    if target.ends_with("external.lua") {
+        info!("[QM-DEBUG] Defusing uploadScoresHelper in {}", target);
+        let content = rope.to_string();
+        if content.contains("function uploadScoresHelper") {
+            let patched = content.replace(
+                "function uploadScoresHelper(handle, scorez)",
+                "function uploadScoresHelper(handle, scorez) return false end function _disabled_uploadScoresHelper(handle, scorez)",
+            );
+
+            let mut builder = crop::RopeBuilder::new();
+            builder.append(&patched);
+            *rope = builder.build();
+            info!("[QM-DEBUG] Successfully defused uploadScoresHelper in {}", target);
+        }
     }
 }
+
+const STEAM_SAFETY_PAYLOAD: &str = r#"
+-- Quartermaster: Steam Safety Lockdown
+print("[QM] *** STEAM SAFETY HOOK INITIALIZED ***")
+
+local function qm_neuter_steam()
+  if Steam and Steam.userStats then
+    Steam.userStats.uploadLeaderboardScore = function(h, m, s, d, cb)
+      print("[QM] BLOCKED: Steam.userStats.uploadLeaderboardScore")
+      if cb then cb({ success = false, globalRankNew = 0 }, "Quartermaster: Disabled") end
+      return false
+    end
+    Steam.userStats.findLeaderboard = function(n, cb)
+      print("[QM] BLOCKED: Steam.userStats.findLeaderboard (" .. tostring(n) .. ")")
+      if cb then cb({ leaderboardFound = false, steamLeaderboard = 0 }, "Quartermaster: Disabled") end
+      return false
+    end
+    Steam.userStats.setAchievement = function() return true end
+    Steam.userStats.clearAchievement = function() return true end
+    Steam.userStats.getAchievement = function() return false, false end
+    Steam.userStats.setStatInt = function() return true end
+    Steam.userStats.setStatFloat = function() return true end
+    Steam.userStats.storeStats = function() return true end
+    Steam.userStats.requestCurrentStats = function() return false end
+    Steam.userStats.getStatInt = function() return false, 0 end
+    Steam.userStats.getStatFloat = function() return false, 0.0 end
+  end
+  if Steam and Steam.apps then
+    Steam.apps.isDlcInstalled = function() return false end
+  end
+end
+
+qm_neuter_steam()
+
+local blocked_globals = {
+  uploadScoresHelper = true,
+  steam_campaignTime = true,
+  steam_classicWaves = true,
+  steam_branderburging = true,
+  steam_increaseClassicWins = true,
+  steam_increaseCampaignWins = true,
+  steam_campaignGG = true,
+  steam_keener = true,
+  steam_counterSnipe = true,
+  steam_sink = true,
+  steam_marquis = true,
+  steam_mudBleed = true,
+  steam_chunk = true,
+  steam_comChallenge = true,
+  steam_officerClub = true,
+  steam_tigerHunter = true,
+  steam_increaseBranderburg = true,
+  steam_victoryDay = true,
+}
+
+for name, _ in pairs(blocked_globals) do
+  _G[name] = function(...)
+    print("[QM] BLOCKED CALL: " .. tostring(name))
+    return false
+  end
+end
+
+local prev_mt = getmetatable(_G) or {}
+local prev_newindex = prev_mt.__newindex
+
+setmetatable(_G, {
+  __index = prev_mt.__index,
+  __newindex = function(t, k, v)
+    if blocked_globals[k] then
+      rawset(t, k, function(...)
+        print("[QM] BLOCKED CALL: " .. tostring(k))
+        return false
+      end)
+    elseif k == "Steam" then
+      rawset(t, k, v)
+      qm_neuter_steam()
+    else
+      if type(prev_newindex) == "function" then
+        prev_newindex(t, k, v)
+      else
+        rawset(t, k, v)
+      end
+    end
+  end
+})
+"#;
 
 /// Compare two file paths by their lowercase filenames
 fn filename_cmp(first: &Path, second: &Path) -> Ordering {
