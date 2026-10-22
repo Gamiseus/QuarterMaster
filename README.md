@@ -19,6 +19,8 @@ Named after the military logistics officer responsible for provisioning supplies
 4. **Hardened Safety & Export Forwarding**:
    - Safe UTF-16 panic hooks prevent secondary crashes during unhandled errors.
    - Windows Multimedia API exports (`timeGetTime`, etc.) forward directly to `C:\Windows\System32\winmm.dll`.
+5. **Disabled Steam Achievements**:
+   - Disables tracking for achievements and leaderboards
 
 See **[`VERIFICATION.md`](VERIFICATION.md)** for info on how to build and verify the dll contents on your own.
 
