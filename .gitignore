@@ -1,0 +1,31 @@
+# Rust
+/target
+**/*.rs.bk
+
+# Windows & Native Build Artifacts
+*.dll
+*.exe
+*.pdb
+*.lib
+*.exp
+*.ilk
+
+# Nix
+result*
+.direnv/
+
+# Logs & Dumps (qm-core/dump.rs & log.rs)
+*.log
+*.dmp
+
+# IDEs & Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS Files
+.DS_Store
+Thumbs.db
+desktop.ini

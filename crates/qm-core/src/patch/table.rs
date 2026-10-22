@@ -1,0 +1,211 @@
+use anyhow::{Result, Context};
+use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
+
+use crate::dump::{ByteDebugEntry, PatchDebug};
+use crate::patch::{loader, vars};
+use crate::patch::{Patch, Priority};
+use crate::sys::{preload_module, LuaFunc, LuaState, LuaTable};
+use crop::Rope;
+use itertools::Itertools;
+use log::*;
+
+/// Structure to manage patch tables for QuarterMaster runtime
+pub struct PatchTable {
+    pub mod_dir: PathBuf,
+    pub targets: HashSet<String>,
+    // Unsorted
+    pub patches: Vec<(Patch, Priority, PathBuf)>,
+    pub vars: HashMap<String, String>,
+}
+
+impl Default for PatchTable {
+    fn default() -> Self {
+        Self {
+            mod_dir: PathBuf::new(),
+            targets: HashSet::new(),
+            patches: Vec::new(),
+            vars: HashMap::new(),
+        }
+    }
+}
+
+impl PatchTable {
+    /// Load patches from the provided mod directory.
+    pub fn load(mod_dir: &Path) -> Result<PatchTable> {
+        let new_dir = dunce::canonicalize(mod_dir).with_context(|| format!("Could not resolve mod dir {:?}", mod_dir))?;
+        let raw_patches = loader::load_patches_new(&new_dir)?;
+        let (patches, targets, vars) = loader::process_patches(raw_patches);
+
+        Ok(PatchTable {
+            mod_dir: new_dir,
+            targets,
+            patches,
+            vars,
+        })
+    }
+
+    /// Determine if the provided target file / name requires patching.
+    pub fn needs_patching(&self, target: &str) -> bool {
+        let target = target.strip_prefix('@').unwrap_or(target);
+        self.targets.contains(target)
+    }
+
+    /// Inject QuarterMaster metadata into the game's Lua runtime.
+    /// # Safety
+    /// Unsafe due to raw Lua state operations.
+    pub unsafe fn inject_metadata(&self, state: *mut LuaState) {
+        let mod_dir = self.mod_dir.to_str().unwrap().replace('\\', "/");
+        let repo = "https://github.com/mnb-modding/QuarterMaster";
+
+        // Import the functions needed for injection
+        use crate::{apply_patches, dump_vanilla, get_log_path, getvar, is_dump_all, reload_patches, removevar, set_dump_all, setvar};
+
+        let log_path_str = get_log_path().unwrap_or_default();
+
+        let create_meta_table = || {
+            LuaTable::new()
+                .add_var("name", "QuarterMaster")
+                .add_var("short_name", "QM")
+                .add_var("repo", repo)
+                .add_var("version", env!("CARGO_PKG_VERSION"))
+                .add_var("mod_dir", mod_dir.clone())
+                .add_var("reload_patches", reload_patches as LuaFunc)
+                .add_var("apply_patches", apply_patches as LuaFunc)
+                .add_var("set_var", setvar as LuaFunc)
+                .add_var("get_var", getvar as LuaFunc)
+                .add_var("remove_var", removevar as LuaFunc)
+                .add_var("log_path", log_path_str.clone())
+                .add_var("dump_vanilla", dump_vanilla as LuaFunc)
+                .add_var("dump_game_files", dump_vanilla as LuaFunc)
+                .add_var("set_dump_all", set_dump_all as LuaFunc)
+                .add_var("is_dump_all", is_dump_all as LuaFunc)
+        };
+
+        // 1. Preload primary "qm" module if not already registered
+        if !crate::sys::is_module_preloaded(state, "qm") {
+            preload_module(state, "qm", create_meta_table());
+        }
+
+        // 2. Preload "quartermaster" alias if not already registered
+        if !crate::sys::is_module_preloaded(state, "quartermaster") {
+            preload_module(state, "quartermaster", create_meta_table());
+        }
+
+
+    }
+
+    /// Apply one or more patches onto the target's buffer.
+    /// Returns the patched content and debug info.
+    /// # Safety
+    /// Unsafe due to internal unchecked usages of raw lua state.
+    pub unsafe fn apply_patches(
+        &self,
+        target: &str,
+        buffer: &str,
+        lua_state: *mut LuaState,
+    ) -> Result<(String, PatchDebug), String> {
+        let target = target.strip_prefix('@').unwrap_or(target);
+
+        let module_patches = self
+            .patches
+            .iter()
+            .filter_map(|(x, prio, path)| match x {
+                Patch::Module(patch) => Some((patch, prio, path)),
+                _ => None,
+            })
+            .filter(|(x, _, _)| x.load_now)
+            .sorted_by_key(|(_, &prio, _)| prio)
+            .map(|(x, _, path)| (x, path));
+
+        let copy_patches = self
+            .patches
+            .iter()
+            .filter_map(|(x, prio, path)| match x {
+                Patch::Copy(patch) => Some((patch, prio, path)),
+                _ => None,
+            })
+            .sorted_by_key(|(_, &prio, _)| prio)
+            .map(|(x, _, path)| (x, path));
+
+        let pattern_and_regex = self
+            .patches
+            .iter()
+            .filter(|(patch, _, _)| matches!(patch, Patch::Pattern(..)))
+            .chain(
+                self.patches
+                    .iter()
+                    .filter(|(patch, _, _)| matches!(patch, Patch::Regex(..))),
+            )
+            .sorted_by_key(|(_, prio, _)| prio)
+            .map(|(patch, _, path)| (patch, path))
+            .collect_vec();
+
+        // For display + debug use. Incremented every time a patch is applied.
+        let mut patch_count = 0;
+        let mut rope = Rope::from(buffer);
+
+        // Collect byte-based debug entries, adjust after each patch.
+        let mut byte_entries: Vec<ByteDebugEntry> = Vec::new();
+
+        // Apply module injection patches
+        for (patch, path) in module_patches {
+            let result = patch.apply(target, lua_state, path);
+            if result? {
+                patch_count += 1;
+            }
+        }
+
+        // Apply copy patches
+        for (patch, path) in copy_patches {
+            let result = patch.apply(target, &mut rope, path);
+            if let Some(entry) = result {
+                for region in &entry.regions {
+                    for prev_entry in &mut byte_entries {
+                        prev_entry.adjust(region.start, region.delta);
+                    }
+                }
+                patch_count += 1;
+                byte_entries.push(entry);
+            }
+        }
+
+        // Apply pattern and regex patches
+        for (patch, path) in pattern_and_regex {
+            let result = match patch {
+                Patch::Pattern(x) => x.apply(target, &mut rope, path),
+                Patch::Regex(x) => x.apply(target, &mut rope, path),
+                _ => unreachable!(),
+            };
+
+            if let Some(entry) = result {
+                for region in &entry.regions {
+                    for prev_entry in &mut byte_entries {
+                        prev_entry.adjust(region.start, region.delta);
+                    }
+                }
+                patch_count += 1;
+                byte_entries.push(entry);
+            }
+        }
+
+        // Convert byte entries to line-based debug info using final rope state.
+        let debug = PatchDebug::from_byte_entries(target, byte_entries, &rope);
+
+        // Optimized string extraction without line-splitting overhead
+        let mut patched = rope.to_string();
+
+        // Fast-path: Only run interpolation regex if variables are registered
+        if !self.vars.is_empty() {
+            vars::apply_var_interp(&mut patched, &self.vars);
+        }
+
+        if patch_count == 1 {
+            info!("Applied 1 patch to '{target}'");
+        } else {
+            info!("Applied {patch_count} patches to '{target}'");
+        }
+
+        Ok((patched, debug))
+    }
+}

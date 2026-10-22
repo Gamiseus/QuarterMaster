@@ -1,0 +1,42 @@
+[package]
+name = "qm-win"
+version = "1.0.0"
+edition = "2021"
+description = "Windows proxy DLL injector for QuarterMaster (QM) in Mud and Blood"
+authors = ["QuarterMaster Team"]
+license = "MIT"
+
+[lib]
+name = "winmm"
+crate-type = ["cdylib"]
+
+[dependencies]
+qm-core = { version = "1.0.0", path = "../qm-core" }
+
+itertools = "0.13.0"
+libc = "0.2.141"
+widestring = "1.0.2"
+libloading = "0.8.6"
+anyhow = "1.0.100"
+
+[dependencies.retour]
+git = "https://github.com/Hpmason/retour-rs.git"
+features = ["static-detour"]
+
+[dependencies.windows]
+version = "0.54.0"
+features = [
+    "Win32_System_Console",
+    "Win32_System",
+    "Win32_Foundation",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Threading",
+    "Win32_System_ProcessStatus",
+    "Win32_Storage_FileSystem",
+    "Win32_UI",
+    "Win32_Security",
+    "Win32_UI_WindowsAndMessaging",
+]
+
+[build-dependencies.forward-dll]
+version = "0.1.13"

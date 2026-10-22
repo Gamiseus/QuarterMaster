@@ -1,0 +1,11 @@
+[package]
+name = "mnb_modloader"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "version"
+crate-type = ["cdylib"]
+
+[dependencies]
+minhook = "0.9"
