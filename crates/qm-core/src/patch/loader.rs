@@ -5,6 +5,7 @@ use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
+use crate::patch::pattern::PatternPatch;
 use crate::patch::{Patch, PatchFile, Priority};
 use itertools::Itertools;
 use log::*;
@@ -18,6 +19,13 @@ struct IntermediatePatch {
     pub content: String,
     /// Preloaded source files referenced by module/copy patches (relative path -> content)
     pub sources: HashMap<PathBuf, String>,
+}
+
+pub fn patch_buffer(target: &str, rope: &mut crop::Rope) {
+    if target.ends_with("main.lua") {
+        let safety_patch = PatternPatch::get_steam_safety_patch();
+        safety_patch.apply(target, rope, Path::new("builtin://steam_safety"));
+    }
 }
 
 /// Compare two file paths by their lowercase filenames
