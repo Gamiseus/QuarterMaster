@@ -94,3 +94,29 @@ pub enum InsertPosition {
     Before,
     After,
 }
+
+impl Patch {
+    pub fn type_name(&self) -> &'static str {
+        match self {
+            Patch::Module(_) => "Module",
+            Patch::Copy(_) => "Copy",
+            Patch::Pattern(_) => "Pattern",
+            Patch::Regex(_) => "Regex",
+        }
+    }
+
+    pub fn summary(&self) -> String {
+        match self {
+            Patch::Module(m) => format!("Module: '{}' (before: {:?}, load_now: {})", m.name, m.before, m.load_now),
+            Patch::Copy(c) => format!("Copy ({:?}) -> target: {:?}", c.position, c.target),
+            Patch::Pattern(p) => {
+                let snippet = p.pattern.lines().next().unwrap_or("").trim();
+                format!("Pattern ({:?}) -> target: {:?} ['{}']", p.position, p.target, snippet)
+            }
+            Patch::Regex(r) => {
+                let snippet = r.pattern.lines().next().unwrap_or("").trim();
+                format!("Regex ({:?}) -> target: {:?} ['{}']", r.position, r.target, snippet)
+            }
+        }
+    }
+}

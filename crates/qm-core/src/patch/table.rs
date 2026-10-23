@@ -1,4 +1,4 @@
-use anyhow::{Result, Context};
+use anyhow::{Context, Result};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
@@ -33,16 +33,46 @@ impl Default for PatchTable {
 impl PatchTable {
     /// Load patches from the provided mod directory.
     pub fn load(mod_dir: &Path) -> Result<PatchTable> {
-        let new_dir = dunce::canonicalize(mod_dir).with_context(|| format!("Could not resolve mod dir {:?}", mod_dir))?;
+        let new_dir = dunce::canonicalize(mod_dir)
+            .with_context(|| format!("Could not resolve mod dir {:?}", mod_dir))?;
         let raw_patches = loader::load_patches_new(&new_dir)?;
         let (patches, targets, vars) = loader::process_patches(raw_patches);
 
-        Ok(PatchTable {
+        let table = PatchTable {
             mod_dir: new_dir,
             targets,
             patches,
             vars,
-        })
+        };
+
+        // Output the full patch execution plan ordered by priority
+        table.dump_load_order();
+
+        Ok(table)
+    }
+
+    /// Prints all loaded patches in the exact order they will be applied (by priority)
+    pub fn dump_load_order(&self) {
+        info!("================================================================================");
+        info!("QuarterMaster: Patch Execution Plan (Sorted by Priority)");
+        info!("================================================================================");
+
+        // If you want higher priority to execute first, use `std::cmp::Reverse(*prio)`
+        let sorted = self
+            .patches
+            .iter()
+            .sorted_by_key(|(_, prio, _)| *prio);
+
+        for (order_idx, (patch, prio, path)) in sorted.enumerate() {
+            info!(
+                "[PLAN] #{:<3} [Priority {:>3}] Mod: {:<20} | {}",
+                order_idx + 1,
+                prio,
+                path.display(),
+                patch.summary()
+            );
+        }
+        info!("================================================================================");
     }
 
     /// Determine if the provided target file / name requires patching.
@@ -59,7 +89,10 @@ impl PatchTable {
         let repo = "https://github.com/mnb-modding/QuarterMaster";
 
         // Import the functions needed for injection
-        use crate::{apply_patches, dump_vanilla, get_log_path, getvar, is_dump_all, reload_patches, removevar, set_dump_all, setvar};
+        use crate::{
+            apply_patches, dump_vanilla, get_log_path, getvar, is_dump_all, reload_patches,
+            removevar, set_dump_all, setvar,
+        };
 
         let log_path_str = get_log_path().unwrap_or_default();
 
@@ -91,8 +124,6 @@ impl PatchTable {
         if !crate::sys::is_module_preloaded(state, "quartermaster") {
             preload_module(state, "quartermaster", create_meta_table());
         }
-
-
     }
 
     /// Apply one or more patches onto the target's buffer.
@@ -111,55 +142,47 @@ impl PatchTable {
             .patches
             .iter()
             .filter_map(|(x, prio, path)| match x {
-                Patch::Module(patch) => Some((patch, prio, path)),
+                Patch::Module(patch) => Some((patch, *prio, path)),
                 _ => None,
             })
             .filter(|(x, _, _)| x.load_now)
-            .sorted_by_key(|(_, &prio, _)| prio)
-            .map(|(x, _, path)| (x, path));
+            .sorted_by_key(|(_, prio, _)| *prio);
 
         let copy_patches = self
             .patches
             .iter()
             .filter_map(|(x, prio, path)| match x {
-                Patch::Copy(patch) => Some((patch, prio, path)),
+                Patch::Copy(patch) => Some((patch, *prio, path)),
                 _ => None,
             })
-            .sorted_by_key(|(_, &prio, _)| prio)
-            .map(|(x, _, path)| (x, path));
+            .sorted_by_key(|(_, prio, _)| *prio);
 
         let pattern_and_regex = self
             .patches
             .iter()
-            .filter(|(patch, _, _)| matches!(patch, Patch::Pattern(..)))
-            .chain(
-                self.patches
-                    .iter()
-                    .filter(|(patch, _, _)| matches!(patch, Patch::Regex(..))),
-            )
-            .sorted_by_key(|(_, prio, _)| prio)
-            .map(|(patch, _, path)| (patch, path))
+            .filter(|(patch, _, _)| matches!(patch, Patch::Pattern(..) | Patch::Regex(..)))
+            .map(|(patch, prio, path)| (patch, *prio, path))
+            .sorted_by_key(|(_, prio, _)| *prio)
             .collect_vec();
 
-        // For display + debug use. Incremented every time a patch is applied.
         let mut patch_count = 0;
         let mut rope = Rope::from(buffer);
-
-        // Collect byte-based debug entries, adjust after each patch.
         let mut byte_entries: Vec<ByteDebugEntry> = Vec::new();
 
         // Apply module injection patches
-        for (patch, path) in module_patches {
+        for (patch, prio, path) in module_patches {
             let result = patch.apply(target, lua_state, path);
             if result? {
+                info!("Applied [Module: load_now] '{}' from {} (Priority: {}) to '{}'", patch.name, path.display(), prio, target);
                 patch_count += 1;
             }
         }
 
         // Apply copy patches
-        for (patch, path) in copy_patches {
+        for (patch, prio, path) in copy_patches {
             let result = patch.apply(target, &mut rope, path);
             if let Some(entry) = result {
+                info!("Applied [Copy] from {} (Priority: {}) to '{}'", path.display(), prio, target);
                 for region in &entry.regions {
                     for prev_entry in &mut byte_entries {
                         prev_entry.adjust(region.start, region.delta);
@@ -171,14 +194,16 @@ impl PatchTable {
         }
 
         // Apply pattern and regex patches
-        for (patch, path) in pattern_and_regex {
+        for (patch, prio, path) in pattern_and_regex {
             let result = match patch {
                 Patch::Pattern(x) => x.apply(target, &mut rope, path),
                 Patch::Regex(x) => x.apply(target, &mut rope, path),
                 _ => unreachable!(),
             };
 
+            // ONLY LOG HERE: When the patch actually matched and was applied
             if let Some(entry) = result {
+                info!("Applied [{}] from {} (Priority: {}) to '{}'", patch.type_name(), path.display(), prio, target);
                 for region in &entry.regions {
                     for prev_entry in &mut byte_entries {
                         prev_entry.adjust(region.start, region.delta);
@@ -189,13 +214,9 @@ impl PatchTable {
             }
         }
 
-        // Convert byte entries to line-based debug info using final rope state.
         let debug = PatchDebug::from_byte_entries(target, byte_entries, &rope);
-
-        // Optimized string extraction without line-splitting overhead
         let mut patched = rope.to_string();
 
-        // Fast-path: Only run interpolation regex if variables are registered
         if !self.vars.is_empty() {
             vars::apply_var_interp(&mut patched, &self.vars);
         }

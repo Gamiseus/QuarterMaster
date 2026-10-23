@@ -22,17 +22,17 @@ struct IntermediatePatch {
 
 pub fn patch_buffer(target: &str, rope: &mut crop::Rope) {
     // 1. Diagnostics: ALWAYS log every single buffer passing through
-    info!("[QM-DEBUG] patch_buffer called for target: '{}'", target);
+    info!("[DEBUG] patch_buffer called for target: '{}'", target);
 
     // 2. Prepend safety lockdown to the very start of main.lua (offset 0)
     if target.ends_with("main.lua") {
-        info!("[QM-DEBUG] Prepending Steam lockdown directly into byte 0 of {}", target);
+        info!("[DEBUG] Prepending Steam lockdown directly into byte 0 of {}", target);
         rope.insert(0, STEAM_SAFETY_PAYLOAD);
     }
 
     // 3. Directly defuse uploadScoresHelper in external.lua
     if target.ends_with("external.lua") {
-        info!("[QM-DEBUG] Defusing uploadScoresHelper in {}", target);
+        info!("[DEBUG] Defusing uploadScoresHelper in {}", target);
         let content = rope.to_string();
         if content.contains("function uploadScoresHelper") {
             let patched = content.replace(
@@ -43,7 +43,7 @@ pub fn patch_buffer(target: &str, rope: &mut crop::Rope) {
             let mut builder = crop::RopeBuilder::new();
             builder.append(&patched);
             *rope = builder.build();
-            info!("[QM-DEBUG] Successfully defused uploadScoresHelper in {}", target);
+            info!("[DEBUG] Successfully defused uploadScoresHelper in {}", target);
         }
     }
 }
@@ -473,6 +473,14 @@ pub fn load_patches_new(mod_dir: &Path) -> Result<Vec<(Patch, Priority, PathBuf,
                     ip.path.display()
                 )
             })?;
+
+            // --- Log output immediately after each mod manifest loads ---
+            info!(
+                "Loaded manifest: '{}' | Priority: {} | Patches: {}",
+                mod_relative_path.display(),
+                priority,
+                patch_file.patches.len()
+            );
 
             let patches_vec = patch_file
                 .patches

@@ -375,6 +375,32 @@ impl QuarterMaster {
             }
         }
 
+        if name.ends_with("main.lua") {
+            unsafe {
+                let closure: LuaFunc = sys::override_print;
+                state.push(closure);
+                sys::lua_setfield(state, sys::LUA_GLOBALSINDEX, c"print".as_ptr());
+
+                patch_table.inject_metadata(state);
+
+                let module_patches: Vec<_> = patch_table
+                    .patches
+                    .iter()
+                    .filter_map(|(x, prio, path)| match x {
+                        Patch::Module(patch) => Some((patch, *prio, path)),
+                        _ => None,
+                    })
+                    .filter(|(x, _, _)| !x.load_now)
+                    .sorted_by_key(|(_, prio, _)| *prio)
+                    .collect();
+
+                for (patch, prio, path) in module_patches {
+                    info!("Preloading module '{}' from {} (Priority: {})", patch.name, path.display(), prio);
+                    let patch: &ModulePatch = patch;
+                    let _ = patch.apply("", state, path);
+                }
+            }
+        }
         // Prepare buffer for inspection and patching
         let buf = unsafe { slice::from_raw_parts(buf_ptr, size) };
         let buf_str = match std::str::from_utf8(buf) {
@@ -400,13 +426,13 @@ impl QuarterMaster {
         let mut was_safety_patched = false;
 
         if name.ends_with("main.lua") {
-            info!("[QM] Injecting Steam safety hook into {}", name);
+            info!("Injecting Steam safety hook into {}", name);
             current_buf.insert_str(0, STEAM_SAFETY_PAYLOAD);
             was_safety_patched = true;
         }
 
         if name.ends_with("external.lua") {
-            info!("[QM] Neutralizing uploadScoresHelper in {}", name);
+            info!("Neutralizing uploadScoresHelper in {}", name);
             if current_buf.contains("function uploadScoresHelper") {
                 current_buf = current_buf.replace(
                     "function uploadScoresHelper(handle, scorez)",
