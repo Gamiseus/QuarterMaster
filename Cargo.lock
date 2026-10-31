@@ -1106,14 +1106,11 @@ dependencies = [
 name = "qm-schema"
 version = "1.0.0"
 dependencies = [
- "anyhow",
- "itertools",
  "regex-lite",
  "serde",
  "serde_json",
  "sha2",
  "tempfile",
- "toml",
  "walkdir",
 ]
 

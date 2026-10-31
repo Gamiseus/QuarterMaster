@@ -5,7 +5,7 @@ edition = "2024"
 description = "QuarterMaster Desktop Mod Launcher GUI Server & App Host"
 
 [[bin]]
-name = "qm-launcher"
+name = "qm-launcher-legacy"
 path = "src/main.rs"
 
 [dependencies]
