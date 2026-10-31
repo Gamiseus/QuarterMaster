@@ -1,0 +1,20 @@
+[package]
+name = "qm-schema"
+version = "1.0.0"
+edition = "2021"
+description = "Metadata schemas, version comparator, save parser, config parser, and security linter for QuarterMaster"
+authors = ["QuarterMaster Team"]
+license = "MIT"
+
+[dependencies]
+serde = { version = "1.0.197", features = ["derive"] }
+serde_json = "1.0"
+toml = "0.8.10"
+regex-lite = "0.1.5"
+sha2 = "0.10.8"
+anyhow = "1.0.100"
+itertools = "0.13.0"
+walkdir = "2.5.0"
+
+[dev-dependencies]
+tempfile = "3"

@@ -2,12 +2,12 @@
 
 use core::slice;
 use std::collections::{HashMap, HashSet};
+use std::env;
 use std::ffi::{c_int, CStr};
 use std::panic;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock, RwLock};
 use std::time::Instant;
-use std::env;
 
 use log::*;
 
@@ -18,11 +18,16 @@ use regex_lite::Regex;
 
 use sys::{check_lua_string, LuaFunc, LuaLib, LuaState, LuaStateTrait, LUA};
 
+use crate::dump::{write_dump, PatchDebug};
+use crate::handshake::{
+    CrashReport, CrashSnippetLine, LaunchConfig, PatchOutcomeStatus, PatchReport,
+};
+use crate::patch::table::PatchTable;
 use crate::patch::Target;
-use crate::dump::write_dump;
 
 pub mod chunk_vec_cursor;
 pub mod dump;
+pub mod handshake;
 pub mod log;
 pub mod patch;
 pub mod sys;
@@ -117,6 +122,29 @@ setmetatable(_G, {
 })
 "#;
 
+const QM_RUNTIME_FOOTER_PAYLOAD: &str = r#"
+-- Quartermaster: Crash Attribution, Save Fingerprinting & Hot-Reload Hooks
+do
+  local ok_qm, qm_mod = pcall(require, "qm")
+  if ok_qm and qm_mod and love then
+    local orig_errhand = love.errorhandler or love.errhand
+    local function qm_crash_wrapper(msg)
+      local trace = debug and debug.traceback and debug.traceback(tostring(msg), 2) or tostring(msg)
+      local ok_attr, attribution = pcall(qm_mod.record_lua_crash, tostring(msg), tostring(trace))
+      local enriched_msg = tostring(msg)
+      if ok_attr and type(attribution) == "string" and #attribution > 0 then
+        enriched_msg = enriched_msg .. "\n\n[QuarterMaster Crash Attribution]\n" .. attribution
+      end
+      if type(orig_errhand) == "function" then
+        return orig_errhand(enriched_msg)
+      end
+    end
+    love.errorhandler = qm_crash_wrapper
+    love.errhand = qm_crash_wrapper
+  end
+end
+"#;
+
 type LoadBuffer =
     dyn Fn(*mut LuaState, *const u8, usize, *const u8, *const u8) -> u32 + Send + Sync + 'static;
 
@@ -209,7 +237,8 @@ pub unsafe extern "C" fn set_dump_all(state: *mut LuaState) -> c_int {
         true
     };
     if let Some(qm) = RUNTIME.get() {
-        qm.dump_all.store(enabled, std::sync::atomic::Ordering::Relaxed);
+        qm.dump_all
+            .store(enabled, std::sync::atomic::Ordering::Relaxed);
     }
     state.push(true);
     1
@@ -225,18 +254,74 @@ pub unsafe extern "C" fn is_dump_all(state: *mut LuaState) -> c_int {
     }
 }
 
+pub unsafe extern "C" fn record_lua_crash(state: *mut LuaState) -> c_int {
+    let msg = sys::opt_lua_string(state, 1).unwrap_or_else(|| "Unknown Lua error".to_string());
+    let trace = sys::opt_lua_string(state, 2).unwrap_or_else(|| msg.clone());
+
+    if let Some(qm) = RUNTIME.get() {
+        let report = qm.build_and_save_crash_report("lua_runtime", &msg, &trace);
+        let summary = match (&report.suspected_mod_id, &report.suspected_patch_name) {
+            (Some(mod_id), Some(patch_name)) => {
+                format!(
+                    "Suspected Mod: {} | Patch: {} ({}:{})",
+                    mod_id,
+                    patch_name,
+                    report.crashing_file.as_deref().unwrap_or("unknown"),
+                    report.crashing_line.unwrap_or(0)
+                )
+            }
+            (Some(mod_id), None) => format!("Suspected Mod: {}", mod_id),
+            _ => format!(
+                "Location: {}:{} (no mod patch directly on this line)",
+                report.crashing_file.as_deref().unwrap_or("unknown"),
+                report.crashing_line.unwrap_or(0)
+            ),
+        };
+        state.push(summary);
+        return 1;
+    }
+
+    state.push("");
+    1
+}
+
 pub struct QuarterMaster {
     pub mod_dir: PathBuf,
     pub is_vanilla: bool,
+    pub launch_config: LaunchConfig,
     loadbuffer: &'static LoadBuffer,
     patch_table: Arc<RwLock<PatchTable>>,
     pub dump_all: std::sync::atomic::AtomicBool,
     lua_vars: Arc<RwLock<HashMap<String, String>>>,
+    patch_report: Arc<RwLock<PatchReport>>,
+    debug_by_file: Arc<RwLock<HashMap<String, (String, PatchDebug)>>>,
 }
 
 pub type QM = QuarterMaster;
 
 impl QuarterMaster {
+    /// Locate the active `Mods` directory prior to full initialization.
+    pub fn resolve_default_mod_dir() -> PathBuf {
+        if let Some(env_path) = env::var_os("QM_MOD_DIR") {
+            return PathBuf::from(env_path);
+        }
+        let cur_exe =
+            env::current_exe().expect("Failed to get the path of the current executable.");
+        let exe_dir = cur_exe.parent().unwrap_or(Path::new("."));
+        let local_mods = exe_dir.join("Mods");
+
+        if local_mods.is_dir() {
+            local_mods
+        } else {
+            let game_name = cur_exe
+                .file_stem()
+                .expect("Failed to get file_stem component of current executable path.")
+                .to_string_lossy()
+                .replace('.', "_");
+            dirs::data_dir().unwrap().join(game_name).join("Mods")
+        }
+    }
+
     /// Initialize the QuarterMaster patch runtime.
     pub fn init(loadbuffer: &'static LoadBuffer, lualib: LuaLib, dump_all: bool) -> &'static Self {
         assert!(RUNTIME.get().is_none());
@@ -249,27 +334,7 @@ impl QuarterMaster {
         let args = std::env::args().skip(1).collect_vec();
         let mut opts = Options::new(args.iter().map(String::as_str));
 
-        let mut mod_dir = if let Some(env_path) = env::var_os("QM_MOD_DIR") {
-            PathBuf::from(env_path)
-        } else {
-            let cur_exe =
-                env::current_exe().expect("Failed to get the path of the current executable.");
-            let exe_dir = cur_exe.parent().unwrap_or(Path::new("."));
-            let local_mods = exe_dir.join("Mods");
-            
-            // Prioritize local Mods directory alongside mnb.exe if it exists
-            if local_mods.is_dir() {
-                local_mods
-            } else {
-                let game_name = cur_exe
-                    .file_stem()
-                    .expect("Failed to get file_stem component of current executable path.")
-                    .to_string_lossy()
-                    .replace(".", "_");
-                dirs::data_dir().unwrap().join(game_name).join("Mods")
-            }
-        };
-
+        let mut mod_dir = Self::resolve_default_mod_dir();
         let mut is_vanilla = false;
 
         while let Some(opt) = opts.next_arg().expect("Failed to parse argument.") {
@@ -282,17 +347,29 @@ impl QuarterMaster {
             }
         }
 
+        let launch_config = LaunchConfig::load_from_mod_dir(&mod_dir).unwrap_or_default();
+        if launch_config.vanilla_mode {
+            is_vanilla = true;
+        }
+        let effective_dump_all = dump_all || launch_config.dump_all;
+
         let log_dir = mod_dir.join("qm").join("log");
 
         log::init(&log_dir).unwrap_or_else(|e| panic!("Failed to initialize logger: {e:?}"));
 
         info!("========================================================");
-        info!("QuarterMaster (QM) v{} — Mod Loader for Mud and Blood", QM_VERSION);
+        info!(
+            "QuarterMaster (QM) v{} — Mod Loader for Mud and Blood",
+            QM_VERSION
+        );
         info!("Active Mod Directory: {}", mod_dir.display());
+        if let Some(ref prof) = launch_config.profile_name {
+            info!("Active Profile: {}", prof);
+        }
         info!("========================================================");
 
         if is_vanilla {
-            info!("Vanilla mode enabled via command line flag, ignoring patches.");
+            info!("Vanilla mode enabled, ignoring patches.");
         }
 
         let (patch_table, lua_vars) = if !is_vanilla {
@@ -304,20 +381,134 @@ impl QuarterMaster {
             (PatchTable::default(), HashMap::new())
         };
 
+        let initial_report = PatchReport {
+            qm_version: QM_VERSION.to_string(),
+            timestamp: jiff::Zoned::now().to_string(),
+            profile_id: launch_config.profile_id.clone(),
+            ..Default::default()
+        };
+        let _ = initial_report.save_to_mod_dir(&mod_dir);
+
         let qm = QuarterMaster {
             mod_dir,
             is_vanilla,
+            launch_config,
             loadbuffer,
             patch_table: Arc::new(RwLock::new(patch_table)),
-            dump_all: std::sync::atomic::AtomicBool::new(dump_all),
+            dump_all: std::sync::atomic::AtomicBool::new(effective_dump_all),
             lua_vars: Arc::new(RwLock::new(lua_vars)),
+            patch_report: Arc::new(RwLock::new(initial_report)),
+            debug_by_file: Arc::new(RwLock::new(HashMap::new())),
         };
 
         let qm = RUNTIME.get_or_init(|| qm);
 
-        info!("QuarterMaster initialized in {:.2}ms", start.elapsed().as_secs_f64() * 1000.0);
+        info!(
+            "QuarterMaster initialized in {:.2}ms",
+            start.elapsed().as_secs_f64() * 1000.0
+        );
 
         qm
+    }
+
+    /// Build an attributed `CrashReport` from an error message and traceback, and write it to `Mods/qm/log/crashes/`.
+    pub fn build_and_save_crash_report(
+        &self,
+        crash_kind: &str,
+        error_message: &str,
+        traceback: &str,
+    ) -> CrashReport {
+        let now = jiff::Zoned::now();
+        let ts_slug = now.strftime("%Y-%m-%d_%H-%M-%S").to_string();
+        let crash_id = format!("crash-{ts_slug}");
+
+        // Parse the first `file.lua:line:` occurrence from error_message or traceback
+        let loc_re = Regex::new(r#"([A-Za-z0-9_./\\-]+\.lua):(\d+)"#).unwrap();
+        let (crashing_file, crashing_line) = loc_re
+            .captures(error_message)
+            .or_else(|| loc_re.captures(traceback))
+            .map(|c| {
+                (
+                    Some(c[1].trim_start_matches('@').to_string()),
+                    c[2].parse::<usize>().ok(),
+                )
+            })
+            .unwrap_or((None, None));
+
+        let mut suspected_mod_id = None;
+        let mut suspected_patch_id = None;
+        let mut suspected_patch_name = None;
+        let mut code_snippet = Vec::new();
+
+        if let (Some(ref file_key), Some(line_no)) = (&crashing_file, crashing_line) {
+            let dbg_map = self.debug_by_file.read().unwrap();
+            let found = dbg_map.iter().find(|(k, _)| {
+                *k == file_key
+                    || k.ends_with(file_key.as_str())
+                    || file_key.ends_with(k.as_str())
+            });
+
+            if let Some((_, (patched_src, patch_dbg))) = found {
+                if let Some(entry) = patch_dbg.find_entry_at_line(line_no) {
+                    suspected_mod_id = entry.patch_source.mod_id.clone();
+                    suspected_patch_id = entry.patch_source.patch_id.clone();
+                    suspected_patch_name = entry.patch_source.patch_name.clone();
+                }
+
+                let lines: Vec<&str> = patched_src.lines().collect();
+                let start_l = line_no.saturating_sub(4).max(1);
+                let end_l = (line_no + 4).min(lines.len());
+                for l in start_l..=end_l {
+                    let line_entry = patch_dbg.find_entry_at_line(l);
+                    code_snippet.push(CrashSnippetLine {
+                        line_number: l,
+                        text: lines.get(l - 1).copied().unwrap_or("").to_string(),
+                        is_crash_line: l == line_no,
+                        attributed_mod_id: line_entry
+                            .and_then(|e| e.patch_source.mod_id.clone()),
+                        attributed_patch_id: line_entry
+                            .and_then(|e| e.patch_source.patch_id.clone()),
+                    });
+                }
+            }
+        }
+
+        // Also check if `[qm mod_name "source.lua"]:line` appeared in traceback
+        if suspected_mod_id.is_none() {
+            let mod_chunk_re = Regex::new(r#"\[qm\s+([^\s"]+)\s+"([^"]+)"\]:(\d+)"#).unwrap();
+            if let Some(cap) = mod_chunk_re
+                .captures(error_message)
+                .or_else(|| mod_chunk_re.captures(traceback))
+            {
+                suspected_mod_id = Some(cap[1].to_string());
+                suspected_patch_name = Some(format!("Module {} ({})", &cap[1], &cap[2]));
+            }
+        }
+
+        let report = CrashReport {
+            id: crash_id.clone(),
+            timestamp: now.to_string(),
+            crash_kind: crash_kind.to_string(),
+            error_message: error_message.to_string(),
+            traceback: traceback.to_string(),
+            crashing_file,
+            crashing_line,
+            suspected_mod_id,
+            suspected_patch_id,
+            suspected_patch_name,
+            code_snippet,
+            active_profile_id: self.launch_config.profile_id.clone(),
+            active_mods: self.launch_config.active_mods.clone(),
+        };
+
+        let crash_dir = self.mod_dir.join("qm").join("log").join("crashes");
+        let _ = std::fs::create_dir_all(&crash_dir);
+        if let Ok(json) = serde_json::to_string_pretty(&report) {
+            let _ = std::fs::write(crash_dir.join(format!("{crash_id}.json")), json);
+        }
+        let _ = log::record_crash(&format!("{error_message}\n\n{traceback}"));
+
+        report
     }
 
     /// Apply buffer patches. Intercepts Lua chunks loaded by luaL_loadbuffer / luaL_loadbufferx.
@@ -347,36 +538,6 @@ impl QuarterMaster {
         // Check if main.lua is loading, inject QuarterMaster APIs and module patches
         if name.ends_with("main.lua") {
             unsafe {
-                // Hook print so Lua prints output to the QM logger
-                let closure: LuaFunc = sys::override_print;
-                state.push(closure);
-                sys::lua_setfield(state, sys::LUA_GLOBALSINDEX, c"print".as_ptr());
-
-                // Inject QuarterMaster metadata into Lua runtime
-                patch_table.inject_metadata(state);
-
-                // Inject registered mod modules into runtime
-                let module_patches: Vec<_> = patch_table
-                    .patches
-                    .iter()
-                    .filter_map(|(x, prio, path)| match x {
-                        Patch::Module(patch) => Some((patch, prio, path)),
-                        _ => None,
-                    })
-                    .filter(|(x, _, _)| !x.load_now)
-                    .sorted_by_key(|(_, &prio, _)| prio)
-                    .map(|(x, _, path)| (x, path))
-                    .collect();
-
-                for (patch, path) in module_patches {
-                    let patch: &ModulePatch = patch;
-                    let _ = patch.apply("", state, path);
-                }
-            }
-        }
-
-        if name.ends_with("main.lua") {
-            unsafe {
                 let closure: LuaFunc = sys::override_print;
                 state.push(closure);
                 sys::lua_setfield(state, sys::LUA_GLOBALSINDEX, c"print".as_ptr());
@@ -390,17 +551,23 @@ impl QuarterMaster {
                         Patch::Module(patch) => Some((patch, *prio, path)),
                         _ => None,
                     })
-                    .filter(|(x, _, _)| !x.load_now)
+                    .filter(|(x, _, _)| !x.load_now && !x.disabled)
                     .sorted_by_key(|(_, prio, _)| *prio)
                     .collect();
 
                 for (patch, prio, path) in module_patches {
-                    info!("Preloading module '{}' from {} (Priority: {})", patch.name, path.display(), prio);
+                    info!(
+                        "Preloading module '{}' from {} (Priority: {})",
+                        patch.name,
+                        path.display(),
+                        prio
+                    );
                     let patch: &ModulePatch = patch;
                     let _ = patch.apply("", state, path);
                 }
             }
         }
+
         // Prepare buffer for inspection and patching
         let buf = unsafe { slice::from_raw_parts(buf_ptr, size) };
         let buf_str = match std::str::from_utf8(buf) {
@@ -414,20 +581,38 @@ impl QuarterMaster {
         let regex = Regex::new(r#"=\[(\w+)(?: (\S+))? "([^"]+)"\]"#).unwrap();
         let pretty_name = if let Some(capture) = regex.captures(name) {
             let f1 = capture.get(1).map_or("", |x| x.as_str());
-            let f2 = capture.get(2).map_or("", |x| x.as_str()).replace(".", "/");
+            let f2 = capture.get(2).map_or("", |x| x.as_str()).replace('.', "/");
             let f3 = capture.get(3).map_or("", |x| x.as_str());
             format!("{f1}/{f2}/{f3}")
         } else {
-            name.replace("@", "")
+            name.replace('@', "")
         };
 
-        // --- BUILT-IN STEAM SAFETY INJECTION ---
+        // --- BUILT-IN STEAM SAFETY & LAUNCH CONFIG INJECTION ---
         let mut current_buf = buf_str.to_string();
         let mut was_safety_patched = false;
+
+        if name.ends_with("conf.lua") {
+            if let Some(ref custom_identity) = self.launch_config.save_identity_override {
+                if !custom_identity.trim().is_empty() {
+                    info!(
+                        "Overriding LÖVE save identity in conf.lua to '{}'",
+                        custom_identity
+                    );
+                    current_buf = current_buf.replace(
+                        "t.identity = nil",
+                        &format!("t.identity = {:?}", custom_identity),
+                    );
+                    was_safety_patched = true;
+                }
+            }
+        }
 
         if name.ends_with("main.lua") {
             info!("Injecting Steam safety hook into {}", name);
             current_buf.insert_str(0, STEAM_SAFETY_PAYLOAD);
+            current_buf.push('\n');
+            current_buf.push_str(QM_RUNTIME_FOOTER_PAYLOAD);
             was_safety_patched = true;
         }
 
@@ -443,10 +628,13 @@ impl QuarterMaster {
         }
         // ---------------------------------------
 
-        let needs_mod_patching = patch_table.needs_patching(name) || patch_table.needs_patching(&pretty_name);
+        let needs_mod_patching =
+            patch_table.needs_patching(name) || patch_table.needs_patching(&pretty_name);
 
-        // Stop here if no valid patch exists and no safety patch was applied
-        if !needs_mod_patching && !was_safety_patched && !self.dump_all.load(std::sync::atomic::Ordering::Relaxed) {
+        if !needs_mod_patching
+            && !was_safety_patched
+            && !self.dump_all.load(std::sync::atomic::Ordering::Relaxed)
+        {
             return (self.loadbuffer)(state, buf_ptr, size, name_ptr, mode_ptr);
         }
 
@@ -455,24 +643,60 @@ impl QuarterMaster {
         // Apply any user/mod patches on top of the buffer
         let (patched, debug) = if needs_mod_patching {
             let res = unsafe { patch_table.apply_patches(name, &current_buf, state) };
-            if res.is_err() {
-                unsafe { state.push(res.unwrap_err()) };
+            if let Err(err_msg) = res {
+                let _ = self.build_and_save_crash_report("lua_syntax", &err_msg, &err_msg);
+                unsafe { state.push(err_msg) };
                 return 3; // LUA_ERRSYNTAX
             }
-            let (p, d) = res.unwrap();
+            let (p, d, records) = res.unwrap();
+
+            // Record debug regions for runtime crash attribution
+            {
+                let mut dbg_map = self.debug_by_file.write().unwrap();
+                dbg_map.insert(pretty_name.clone(), (p.clone(), d.clone()));
+            }
+
+            // Update and persist Mods/qm/patch-report.json
+            {
+                let mut report = self.patch_report.write().unwrap();
+                for rec in records {
+                    match rec.status {
+                        PatchOutcomeStatus::Applied => report.total_patches_applied += 1,
+                        PatchOutcomeStatus::ZeroMatches | PatchOutcomeStatus::CountMismatch => {
+                            report.total_warnings += 1;
+                        }
+                        PatchOutcomeStatus::SkippedByPolicy | PatchOutcomeStatus::Aborted => {
+                            report.total_failures += 1;
+                        }
+                        PatchOutcomeStatus::SkippedDisabled => {}
+                    }
+                    report.records.push(rec);
+                }
+                let _ = report.save_to_mod_dir(&self.mod_dir);
+            }
+
             (p, Some(d))
         } else {
             (current_buf, None)
         };
 
-        write_dump(&self.mod_dir, "dump", &pretty_name, &patched, debug.as_ref());
+        write_dump(
+            &self.mod_dir,
+            "dump",
+            &pretty_name,
+            &patched,
+            debug.as_ref(),
+        );
 
-        (self.loadbuffer)(state, patched.as_ptr(), patched.len(), name_ptr, mode_ptr)
+        (self.loadbuffer)(
+            state,
+            patched.as_ptr(),
+            patched.len(),
+            name_ptr,
+            mode_ptr,
+        )
     }
 }
-
-// Import PatchTable
-use crate::patch::table::PatchTable;
 
 unsafe extern "C" fn apply_patches(lua_state: *mut LuaState) -> c_int {
     let buf_name = check_lua_string(lua_state, 1);
@@ -488,7 +712,7 @@ unsafe extern "C" fn apply_patches(lua_state: *mut LuaState) -> c_int {
                 num = 2;
                 return;
             }
-            let (patched, _debug) = res.unwrap();
+            let (patched, _debug, _records) = res.unwrap();
             lua_state.push(patched);
         } else {
             lua_state.push(buf)
@@ -509,11 +733,17 @@ impl Target {
         match self {
             Self::Single(str) => {
                 let clean_str = str.trim_start_matches('@');
-                str == target || clean_str == clean_target || target.ends_with(str.as_str()) || clean_target.ends_with(clean_str)
+                str == target
+                    || clean_str == clean_target
+                    || target.ends_with(str.as_str())
+                    || clean_target.ends_with(clean_str)
             }
             Self::Multi(strs) => strs.iter().any(|x| {
                 let clean_str = x.trim_start_matches('@');
-                x == target || clean_str == clean_target || target.ends_with(x.as_str()) || clean_target.ends_with(clean_str)
+                x == target
+                    || clean_str == clean_target
+                    || target.ends_with(x.as_str())
+                    || clean_target.ends_with(clean_str)
             }),
         }
     }

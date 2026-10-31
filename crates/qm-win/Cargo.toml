@@ -19,9 +19,7 @@ widestring = "1.0.2"
 libloading = "0.8.6"
 anyhow = "1.0.100"
 
-[dependencies.retour]
-git = "https://github.com/Hpmason/retour-rs.git"
-features = ["static-detour"]
+retour = { version = "0.3.1", features = ["static-detour"] }
 
 [dependencies.windows]
 version = "0.54.0"

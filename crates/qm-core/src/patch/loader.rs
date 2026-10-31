@@ -5,9 +5,11 @@ use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
+use crate::handshake::LoadOrderPlan;
 use crate::patch::{Patch, PatchFile, Priority};
 use itertools::Itertools;
 use log::*;
+use qm_schema::ModManifest;
 use walkdir::WalkDir;
 use zip::ZipArchive;
 
@@ -421,14 +423,74 @@ pub fn load_patches_new(mod_dir: &Path) -> Result<Vec<(Patch, Priority, PathBuf,
 
     // Handle all patch files using preloaded sources
     let all_results = dir_results.into_iter().chain(zip_results.into_iter());
+    let load_order_plan = LoadOrderPlan::load_from_mod_dir(mod_dir);
+    let replaced_patch_ids: HashSet<String> = load_order_plan
+        .as_ref()
+        .map(|plan| {
+            plan.glue_patches
+                .iter()
+                .filter_map(|g| g.replaces_patch_id.clone())
+                .collect()
+        })
+        .unwrap_or_default();
 
     for (base_path, ips) in all_results {
+        let folder_name = base_path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("unknown")
+            .to_string();
+
+        // Read mod.json if present for authoritative mod_id and load_priority
+        let manifest_meta = ModManifest::from_path(&base_path.join("mod.json")).ok();
+        let mod_id = manifest_meta
+            .as_ref()
+            .map(|m| m.id.clone())
+            .unwrap_or_else(|| folder_name.to_lowercase());
+
+        if let Some(ref plan) = load_order_plan {
+            if !plan.enabled_mods.iter().any(|m| {
+                m.eq_ignore_ascii_case(&mod_id) || m.eq_ignore_ascii_case(&folder_name)
+            }) {
+                info!(
+                    "Skipping mod '{}' ({}) as it is not in load-order.json enabled_mods.",
+                    mod_id, folder_name
+                );
+                continue;
+            }
+        }
+
         for ip in ips {
             let file_identifier = format!("{:?}", ip.path);
-            let mut patch_file: PatchFile = parse_patch_file(&ip.content, &file_identifier, &base_path)?;
+            let comment_names = extract_patch_comments(&ip.content);
+            let mut patch_file: PatchFile =
+                parse_patch_file(&ip.content, &file_identifier, &base_path)?;
+
+            // Base priority: load-order.json override > mod.json load_priority > qm.toml [manifest].priority
+            let mut base_priority = manifest_meta
+                .as_ref()
+                .map(|m| m.load_priority)
+                .unwrap_or(patch_file.manifest.priority);
+            if let Some(ref plan) = load_order_plan {
+                if let Some(&override_prio) = plan
+                    .mod_priorities
+                    .get(&mod_id)
+                    .or_else(|| plan.mod_priorities.get(&folder_name))
+                {
+                    base_priority = override_prio;
+                }
+            }
 
             // For module and copy patches, use preloaded sources
-            for patch in &mut patch_file.patches {
+            for (patch_idx, patch) in patch_file.patches.iter_mut().enumerate() {
+                let target_clean = patch
+                    .primary_target()
+                    .replace(['/', '\\', '.'], "_")
+                    .to_lowercase();
+                let fallback_id = format!("{}:{}:{}", mod_id, target_clean, patch_idx + 1);
+                let comment_name = comment_names.get(patch_idx).cloned().flatten();
+                patch.set_metadata(mod_id.clone(), fallback_id, comment_name);
+
                 if let Patch::Module(ref mut x) = patch {
                     if x.load_now && x.before.is_none() {
                         bail!(
@@ -439,30 +501,38 @@ pub fn load_patches_new(mod_dir: &Path) -> Result<Vec<(Patch, Priority, PathBuf,
                     }
 
                     x.display_source = x.source.to_string_lossy().to_string();
-                    x.content = ip.sources.get(&x.source)
-                        .with_context(|| format!(
-                            "Module source {:?} not found in preloaded sources for patch from {}",
-                            x.source,
-                            ip.path.display()
-                        ))?
+                    x.content = ip
+                        .sources
+                        .get(&x.source)
+                        .with_context(|| {
+                            format!(
+                                "Module source {:?} not found in preloaded sources for patch from {}",
+                                x.source,
+                                ip.path.display()
+                            )
+                        })?
                         .clone();
                 }
 
-                let Patch::Copy(ref mut x) = patch else { continue };
-                let Some(ref sources) = x.sources else { continue };
+                let Patch::Copy(ref mut x) = patch else {
+                    continue;
+                };
+                let Some(ref sources) = x.sources else {
+                    continue;
+                };
 
                 for source in sources {
-                    let source_content = ip.sources.get(source)
-                        .with_context(|| format!(
+                    let source_content = ip.sources.get(source).with_context(|| {
+                        format!(
                             "Copy source {:?} not found in preloaded sources for patch from {}",
                             source,
                             ip.path.display()
-                        ))?;
+                        )
+                    })?;
                     x.contents.push(source_content.clone());
                 }
             }
 
-            let priority = patch_file.manifest.priority;
             let vars = patch_file.vars;
 
             // mod_relative_path: path relative to top-level mod_dir
@@ -476,18 +546,66 @@ pub fn load_patches_new(mod_dir: &Path) -> Result<Vec<(Patch, Priority, PathBuf,
 
             // --- Log output immediately after each mod manifest loads ---
             info!(
-                "Loaded manifest: '{}' | Priority: {} | Patches: {}",
+                "Loaded manifest: '{}' (mod_id: '{}') | Priority: {} | Patches: {}",
                 mod_relative_path.display(),
-                priority,
+                mod_id,
+                base_priority,
                 patch_file.patches.len()
             );
 
-            let patches_vec = patch_file
-                .patches
-                .into_iter()
-                .map(|patch| (patch, priority, mod_relative_path.to_path_buf(), vars.clone()));
+            for mut patch in patch_file.patches {
+                let patch_id = patch.id().unwrap_or_default().to_string();
+                let named_id = format!("{}:{}", mod_id, patch.name().unwrap_or(""));
+                if replaced_patch_ids.contains(&patch_id) || replaced_patch_ids.contains(&named_id) {
+                    info!(
+                        "Replacing patch '{}' with profile glue patch from load-order.json",
+                        patch_id
+                    );
+                    continue;
+                }
+                if let Some(ref plan) = load_order_plan {
+                    if plan.disabled_patches.contains(&patch_id)
+                        || plan.disabled_patches.contains(&named_id)
+                    {
+                        info!("Marking disabled patch '{}' per load-order.json", patch_id);
+                        patch.set_disabled(true);
+                    }
+                }
+                let mut effective_prio = patch.priority_override().unwrap_or(base_priority);
+                if let Some(ref plan) = load_order_plan {
+                    if let Some(&p_override) = plan
+                        .patch_priorities
+                        .get(&patch_id)
+                        .or_else(|| plan.patch_priorities.get(&named_id))
+                    {
+                        effective_prio = p_override;
+                    }
+                }
+                patches.push((
+                    patch,
+                    effective_prio,
+                    mod_relative_path.to_path_buf(),
+                    vars.clone(),
+                ));
+            }
+        }
+    }
 
-            patches.extend(patches_vec);
+    // Append any profile-local glue patches from load-order.json
+    if let Some(plan) = load_order_plan {
+        for glue in plan.glue_patches {
+            let mut p = glue.patch;
+            p.set_metadata(
+                "qm_glue".to_string(),
+                glue.id.clone(),
+                Some(glue.name.clone()),
+            );
+            patches.push((
+                p,
+                glue.priority,
+                PathBuf::from("qm/load-order.json"),
+                HashMap::new(),
+            ));
         }
     }
 
@@ -548,6 +666,40 @@ fn parse_patch_file(content: &str, file_identifier: &str, mod_dir: &Path) -> Res
 }
 
 
+
+/// Extract preceding `# comment` headers above each `[[patches]]` block in a TOML string.
+pub fn extract_patch_comments(content: &str) -> Vec<Option<String>> {
+    let mut results = Vec::new();
+    let mut pending_comments: Vec<String> = Vec::new();
+    let mut in_multiline_str = false;
+
+    for raw_line in content.lines() {
+        let trimmed = raw_line.trim();
+        let triple_count = raw_line.matches("'''").count() + raw_line.matches("\"\"\"").count();
+        if triple_count % 2 == 1 {
+            in_multiline_str = !in_multiline_str;
+            continue;
+        }
+        if in_multiline_str {
+            continue;
+        }
+
+        if let Some(comment) = trimmed.strip_prefix('#') {
+            let clean = comment.trim().trim_matches('=').trim_matches('-').trim();
+            if !clean.is_empty() {
+                pending_comments.push(clean.to_string());
+            }
+        } else if trimmed == "[[patches]]" {
+            let chosen = pending_comments.first().cloned();
+            results.push(chosen);
+            pending_comments.clear();
+        } else if !trimmed.is_empty() {
+            pending_comments.clear();
+        }
+    }
+
+    results
+}
 
 /// Helper to extract parent directory path with trailing slash
 fn get_parent(path: &str) -> String {

@@ -1,0 +1,27 @@
+[package]
+name = "qm-manager"
+version = "1.0.0"
+edition = "2021"
+description = "Core Mod Launcher engine for QuarterMaster: library, profiles, save switcher, load-order solver, offline conflict resolver, modpacks, and dev tools"
+authors = ["QuarterMaster Team"]
+license = "MIT"
+
+[dependencies]
+qm-schema = { path = "../qm-schema" }
+qm-core = { path = "../qm-core" }
+serde = { version = "1.0.197", features = ["derive"] }
+serde_json = "1.0"
+toml = "0.8.10"
+anyhow = "1.0.100"
+sha2 = "0.10.8"
+zip = "6.0.0"
+walkdir = "2.5.0"
+itertools = "0.13.0"
+jiff = "0.2.35"
+dirs = "5.0.1"
+dunce = "1.0.5"
+regex-lite = "0.1.5"
+crop = "0.4.2"
+tempfile = "3"
+ureq = { version = "2.10", features = ["json"] }
+

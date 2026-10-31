@@ -1,0 +1,18 @@
+[package]
+name = "qm-app"
+version = "1.0.0"
+edition = "2024"
+description = "QuarterMaster Desktop Mod Launcher GUI Server & App Host"
+
+[[bin]]
+name = "qm-launcher"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+toml = "0.8"
+qm-schema = { path = "../qm-schema" }
+qm-core = { path = "../qm-core" }
+qm-manager = { path = "../qm-manager" }

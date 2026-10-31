@@ -1,7 +1,11 @@
 [workspace]
 resolver = "2"
 members = [
+    "crates/qm-schema",
     "crates/qm-core",
+    "crates/qm-manager",
+    "crates/qm-cli",
+    "crates/qm-app",
     "crates/qm-win",
     "crates/minimal-minhook-reference"
 ]

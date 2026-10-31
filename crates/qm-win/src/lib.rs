@@ -53,7 +53,11 @@ unsafe extern "system" fn DllMain(_: HINSTANCE, reason: u32, _: *const c_void) -
         let message = format!("QuarterMaster (QM) has encountered an unexpected crash:\n{x}");
         error!("{message}");
 
-        qm_core::log::record_crash(&format!("{x}"));
+        if let Some(rt) = RUNTIME.get() {
+            let _ = rt.build_and_save_crash_report("rust_panic", &message, &message);
+        } else {
+            qm_core::log::record_crash(&format!("{x}"));
+        }
 
         let u16_msg = U16CString::from_str_truncate(&message);
         MessageBoxW(
@@ -67,9 +71,13 @@ unsafe extern "system" fn DllMain(_: HINSTANCE, reason: u32, _: *const c_void) -
     }));
 
     let args = env::args().collect_vec();
+    let default_mod_dir = QuarterMaster::resolve_default_mod_dir();
+    let launch_cfg = qm_core::handshake::LaunchConfig::load_from_mod_dir(&default_mod_dir)
+        .unwrap_or_default();
 
-    // Check for vanilla bypass flags
-    if args.contains(&"--vanilla".to_string())
+    // Check for vanilla bypass flags (CLI args, env var, or Mods/qm/launch-config.json)
+    if launch_cfg.vanilla_mode
+        || args.contains(&"--vanilla".to_string())
         || args.contains(&"-v".to_string())
         || args.contains(&"--disable-mods".to_string())
         || args.contains(&"-d".to_string())
@@ -79,7 +87,8 @@ unsafe extern "system" fn DllMain(_: HINSTANCE, reason: u32, _: *const c_void) -
     }
 
     // Console attachment logic: attach console unless explicitly disabled
-    let console_disabled = args.contains(&"--disable-console".to_string())
+    let console_disabled = launch_cfg.disable_console
+        || args.contains(&"--disable-console".to_string())
         || env::var("QM_DISABLE_CONSOLE").map(|v| v == "1").unwrap_or(false);
 
     if !console_disabled {
@@ -87,7 +96,8 @@ unsafe extern "system" fn DllMain(_: HINSTANCE, reason: u32, _: *const c_void) -
         let _ = SetConsoleTitleW(PCWSTR(WIN_TITLE.as_ptr()));
     }
 
-    let dump_all = args.contains(&"--dump-all".to_string())
+    let dump_all = launch_cfg.dump_all
+        || args.contains(&"--dump-all".to_string())
         || env::var("QM_DUMP_ALL").map(|v| v == "1").unwrap_or(false);
 
     // Initialize the QuarterMaster runtime

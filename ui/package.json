@@ -1,0 +1,9 @@
+{
+  "name": "quartermaster-ui",
+  "version": "1.0.0",
+  "private": true,
+  "description": "QuarterMaster Field Command — Tactical Mod Launcher Frontend for Mud and Blood",
+  "scripts": {
+    "start": "cargo run --manifest-path ../Cargo.toml --release -p qm-app"
+  }
+}

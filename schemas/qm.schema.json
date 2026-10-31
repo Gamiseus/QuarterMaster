@@ -1,0 +1,282 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "description": "In-memory Lua patch definitions for QuarterMaster.",
+  "properties": {
+    "manifest": {
+      "properties": {
+        "dump_lua": {
+          "default": false,
+          "type": "boolean"
+        },
+        "priority": {
+          "default": 50,
+          "description": "Ascending priority (lower numbers run first).",
+          "type": "integer"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "version"
+      ],
+      "type": "object"
+    },
+    "patches": {
+      "items": {
+        "properties": {
+          "after": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "before": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "copy": {
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "payload": {
+                "type": "string"
+              },
+              "position": {
+                "enum": [
+                  "prepend",
+                  "append"
+                ],
+                "type": "string"
+              },
+              "sources": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "target": {
+                "oneOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "target",
+              "position"
+            ],
+            "type": "object"
+          },
+          "id": {
+            "type": "string"
+          },
+          "module": {
+            "properties": {
+              "before": {
+                "type": "string"
+              },
+              "id": {
+                "type": "string"
+              },
+              "load_now": {
+                "default": false,
+                "type": "boolean"
+              },
+              "name": {
+                "type": "string"
+              },
+              "source": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "source",
+              "name"
+            ],
+            "type": "object"
+          },
+          "name": {
+            "type": "string"
+          },
+          "on_failure": {
+            "default": "warn",
+            "enum": [
+              "warn",
+              "skip_patch",
+              "skip_mod",
+              "abort"
+            ],
+            "type": "string"
+          },
+          "pattern": {
+            "properties": {
+              "expect": {
+                "minimum": 1,
+                "type": "integer"
+              },
+              "id": {
+                "type": "string"
+              },
+              "match_indent": {
+                "default": false,
+                "type": "boolean"
+              },
+              "name": {
+                "type": "string"
+              },
+              "on_failure": {
+                "enum": [
+                  "warn",
+                  "skip_patch",
+                  "skip_mod",
+                  "abort"
+                ],
+                "type": "string"
+              },
+              "pattern": {
+                "type": "string"
+              },
+              "payload": {
+                "type": "string"
+              },
+              "position": {
+                "enum": [
+                  "at",
+                  "before",
+                  "after"
+                ],
+                "type": "string"
+              },
+              "target": {
+                "oneOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  }
+                ]
+              },
+              "times": {
+                "minimum": 1,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "target",
+              "pattern",
+              "position",
+              "payload"
+            ],
+            "type": "object"
+          },
+          "priority": {
+            "type": "integer"
+          },
+          "regex": {
+            "properties": {
+              "expect": {
+                "minimum": 1,
+                "type": "integer"
+              },
+              "id": {
+                "type": "string"
+              },
+              "line_prepend": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "on_failure": {
+                "enum": [
+                  "warn",
+                  "skip_patch",
+                  "skip_mod",
+                  "abort"
+                ],
+                "type": "string"
+              },
+              "pattern": {
+                "type": "string"
+              },
+              "payload": {
+                "type": "string"
+              },
+              "position": {
+                "enum": [
+                  "at",
+                  "before",
+                  "after"
+                ],
+                "type": "string"
+              },
+              "root_capture": {
+                "type": "string"
+              },
+              "target": {
+                "oneOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  }
+                ]
+              },
+              "times": {
+                "minimum": 1,
+                "type": "integer"
+              },
+              "verbose": {
+                "default": false,
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "target",
+              "pattern",
+              "position",
+              "payload"
+            ],
+            "type": "object"
+          }
+        },
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "vars": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "type": "object"
+    }
+  },
+  "required": [
+    "manifest",
+    "patches"
+  ],
+  "title": "QuarterMaster Patch Manifest (qm.toml)",
+  "type": "object"
+}

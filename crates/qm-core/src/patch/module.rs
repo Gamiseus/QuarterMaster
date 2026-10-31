@@ -4,7 +4,8 @@ use std::{
     ptr,
 };
 
-use crate::sys::{self, lua_identity_closure, lua_err_identity_closure, LuaState, LuaStateTrait};
+use super::{OnFailurePolicy, Priority};
+use crate::sys::{self, lua_err_identity_closure, lua_identity_closure, LuaState, LuaStateTrait};
 use crate::RUNTIME;
 use serde::{Deserialize, Serialize};
 
@@ -20,6 +21,17 @@ pub struct ModulePatch {
     // If enabled, evaluate the module immediately upon loading it
     #[serde(default)]
     pub load_now: bool,
+
+    pub id: Option<String>,
+    pub priority: Option<Priority>,
+    #[serde(default)]
+    pub on_failure: OnFailurePolicy,
+
+    #[serde(skip)]
+    pub mod_id: Option<String>,
+
+    #[serde(skip)]
+    pub disabled: bool,
 
     // Used for display name of the source. Is the relative path.
     #[serde(skip)]
@@ -86,7 +98,9 @@ impl ModulePatch {
             sys::lua_setfield(state, field_index, module_cstr.into_raw() as _);
             sys::lua_settop(state, stack_top);
             if self.load_now {
-                return Err("An error occured loading a load_now module:\n\nError: ".to_owned() + &err);
+                return Err(
+                    "An error occured loading a load_now module:\n\nError: ".to_owned() + &err
+                );
             } else {
                 return Ok(false);
             }
@@ -107,8 +121,9 @@ impl ModulePatch {
                 let module_cstr = CString::new(self.name.clone()).unwrap();
                 sys::lua_setfield(state, field_index, module_cstr.into_raw() as _);
                 sys::lua_settop(state, stack_top);
-                sys::lua_settop(state, stack_top);
-                return Err("An error occured evaluating a load_now module:\n\nError: ".to_owned() + &err);
+                return Err(
+                    "An error occured evaluating a load_now module:\n\nError: ".to_owned() + &err
+                );
             }
             // Wrap this in the identity closure function
             state.push_closure(lua_identity_closure, 1);

@@ -1,0 +1,139 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "description": "Metadata, dependency relationships, load priority, and update keys for a QuarterMaster mod.",
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "authors": {
+      "description": "List of mod authors.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "category": {
+      "description": "Primary organizational category.",
+      "enum": [
+        "Core",
+        "UI",
+        "Gameplay",
+        "Content",
+        "Audio",
+        "Visuals",
+        "Tools",
+        "Dev",
+        "Modpack",
+        "Other"
+      ],
+      "type": "string"
+    },
+    "description": {
+      "description": "Summary description of the mod's features.",
+      "type": "string"
+    },
+    "entry_patch": {
+      "default": "qm.toml",
+      "description": "Root patch manifest file (defaults to 'qm.toml').",
+      "type": "string"
+    },
+    "game_version": {
+      "description": "Supported Mud and Blood version range (e.g. '>=0.5.3').",
+      "type": "string"
+    },
+    "homepage": {
+      "type": "string"
+    },
+    "id": {
+      "description": "Unique lowercase identifier for the mod (e.g. 'gcore', 'tactical_overhaul').",
+      "pattern": "^[a-z0-9_-]+$",
+      "type": "string"
+    },
+    "load_priority": {
+      "default": 50,
+      "description": "Ascending load priority: lower numbers execute FIRST (e.g. 5 = Core Framework, 50 = Gameplay, 90 = Dev/Tools).",
+      "type": "integer"
+    },
+    "name": {
+      "description": "Human-readable display name of the mod.",
+      "type": "string"
+    },
+    "relationships": {
+      "properties": {
+        "conflicts": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "load_after": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "load_before": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "provides": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "recommends": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "requires": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Hard dependencies mapped to version ranges (e.g. {'gcore': '>=1.0.0'}).",
+          "type": "object"
+        },
+        "suggests": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "schema_version": {
+      "default": 1,
+      "description": "Schema version (currently 1).",
+      "type": "integer"
+    },
+    "tags": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "update_keys": {
+      "description": "SMAPI-style update keys, e.g. 'GitHub:owner/repo#Asset.zip' or 'Nexus:1234'.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "version": {
+      "description": "Semantic version of the mod (e.g. '1.0.0').",
+      "type": "string"
+    }
+  },
+  "required": [
+    "id",
+    "name",
+    "version"
+  ],
+  "title": "QuarterMaster Mod Manifest (mod.json v1)",
+  "type": "object"
+}

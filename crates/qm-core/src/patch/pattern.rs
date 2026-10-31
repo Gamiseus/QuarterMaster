@@ -5,11 +5,11 @@ use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 use wildmatch::WildMatch;
 
-use crate::dump::{ByteDebugEntry, ByteRegion, PatchSource, DebugPatchType};
+use crate::dump::{ByteDebugEntry, ByteRegion, DebugPatchType, PatchSource};
 
-use super::{InsertPosition, Target};
+use super::{InsertPosition, OnFailurePolicy, Priority, Target};
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct PatternPatch {
     // The pattern that the line will be matched against. Very simple,
     // supports only `?` (one occurrence of any character) and `*` (any number of any character).
@@ -20,18 +20,36 @@ pub struct PatternPatch {
     // The position to insert the target at. `PatternAt::At` replaces the matched line entirely.
     pub position: InsertPosition,
     pub target: Target,
-    // pub payload_files: Option<Vec<String>>,
     pub payload: String,
+    #[serde(default)]
     pub match_indent: bool,
-    // Apply patch at most `times` times, warn if the number of matches differs from `times`.
+    // Apply patch at most `times` (or `expect`) times, warn if the number of matches differs.
+    #[serde(default, alias = "expect")]
     pub times: Option<usize>,
 
     /// We keep this field around for legacy compat. It doesn't do anything (and never has).
     #[serde(default)]
     pub overwrite: bool,
 
-    // Currently unused.
+    pub id: Option<String>,
     pub name: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub requires: Vec<String>,
+    pub priority: Option<Priority>,
+    #[serde(default)]
+    pub before: Vec<String>,
+    #[serde(default)]
+    pub after: Vec<String>,
+    #[serde(default)]
+    pub on_failure: OnFailurePolicy,
+
+    #[serde(skip)]
+    pub mod_id: Option<String>,
+
+    #[serde(skip)]
+    pub disabled: bool,
 }
 
 impl PatternPatch {
@@ -40,16 +58,21 @@ impl PatternPatch {
         ByteDebugEntry {
             patch_source: PatchSource {
                 file: path.display().to_string(),
+                mod_id: self.mod_id.clone(),
+                patch_id: self.id.clone(),
+                patch_name: self.name.clone(),
                 pattern: Some(self.pattern.clone()),
                 patch_type: DebugPatchType::Pattern,
             },
             regions: Vec::new(),
-            warnings: Some(vec![warning.to_string()]),
+            matched_count: 0,
+            expected_count: self.times,
+            warnings: Some(vec![warning]),
         }
     }
 
     /// Apply the pattern patch onto the rope.
-    /// Returns `Some(ByteDebugEntry)` if the rope was modified, `None` otherwise.
+    /// Returns `Some(ByteDebugEntry)` if the target matched this patch's target filter.
     pub fn apply(&self, target: &str, rope: &mut Rope, path: &Path) -> Option<ByteDebugEntry> {
         if !self.target.can_apply(target) {
             return None;
@@ -62,10 +85,13 @@ impl PatternPatch {
             .map(WildMatch::new)
             .collect_vec();
         if wm_lines.is_empty() {
-            return Some(self.debug_from_warning_string(path, format!(
-                "Pattern on target '{target}' for pattern patch from {} has no lines",
-                path.display()
-            )));
+            return Some(self.debug_from_warning_string(
+                path,
+                format!(
+                    "Pattern on target '{target}' for pattern patch from {} has no lines",
+                    path.display()
+                ),
+            ));
         }
         let wm_lines_len = wm_lines.len();
 
@@ -98,12 +124,16 @@ impl PatternPatch {
         }
 
         if matches.is_empty() {
-            return Some(self.debug_from_warning_string(path, format!(
-                "Pattern '{}' on target '{target}' for pattern patch from {} resulted in no matches",
-                self.pattern.escape_debug(),
-                path.display(),
-            )));
+            return Some(self.debug_from_warning_string(
+                path,
+                format!(
+                    "Pattern '{}' on target '{target}' for pattern patch from {} resulted in no matches",
+                    self.pattern.escape_debug(),
+                    path.display(),
+                ),
+            ));
         }
+        let raw_match_count = matches.len();
         let mut warnings = Vec::new();
         if let Some(times) = self.times {
             fn warn_pattern_mismatch(
@@ -112,7 +142,7 @@ impl PatternPatch {
                 found_matches: usize,
                 wanted_matches: usize,
                 path: &Path,
-            ) -> String{
+            ) -> String {
                 let warn_msg: String = if pattern.lines().count() > 1 {
                     format!("Pattern '''\n{pattern}''' on target '{target}' for pattern patch from {} resulted in {found_matches} matches, wanted {wanted_matches}", path.display())
                 } else {
@@ -124,10 +154,22 @@ impl PatternPatch {
                 warn_msg
             }
             if matches.len() < times {
-                warnings.push(warn_pattern_mismatch(&self.pattern, target, matches.len(), times, path));
+                warnings.push(warn_pattern_mismatch(
+                    &self.pattern,
+                    target,
+                    matches.len(),
+                    times,
+                    path,
+                ));
             }
             if matches.len() > times {
-                warnings.push(warn_pattern_mismatch(&self.pattern, target, matches.len(), times, path));
+                warnings.push(warn_pattern_mismatch(
+                    &self.pattern,
+                    target,
+                    matches.len(),
+                    times,
+                    path,
+                ));
                 log::warn!("Ignoring excess matches");
                 warnings.push("Ignoring excess matches".to_string());
                 matches.truncate(times);
@@ -159,19 +201,31 @@ impl PatternPatch {
             match self.position {
                 InsertPosition::Before => {
                     rope.insert(start, &payload);
-                    byte_regions.push(ByteRegion { start, end: start + payload_bytes, delta: payload_bytes as isize });
+                    byte_regions.push(ByteRegion {
+                        start,
+                        end: start + payload_bytes,
+                        delta: payload_bytes as isize,
+                    });
                     line_delta += payload_lines;
                 }
                 InsertPosition::After => {
                     rope.insert(end, &payload);
-                    byte_regions.push(ByteRegion { start: end, end: end + payload_bytes, delta: payload_bytes as isize });
+                    byte_regions.push(ByteRegion {
+                        start: end,
+                        end: end + payload_bytes,
+                        delta: payload_bytes as isize,
+                    });
                     line_delta += payload_lines;
                 }
                 InsertPosition::At => {
                     let removed_bytes = end - start;
                     rope.delete(start..end);
                     rope.insert(start, &payload);
-                    byte_regions.push(ByteRegion { start, end: start + payload_bytes, delta: payload_bytes as isize - removed_bytes as isize });
+                    byte_regions.push(ByteRegion {
+                        start,
+                        end: start + payload_bytes,
+                        delta: payload_bytes as isize - removed_bytes as isize,
+                    });
                     line_delta += payload_lines - wm_lines_len as isize;
                 }
             };
@@ -180,11 +234,20 @@ impl PatternPatch {
         Some(ByteDebugEntry {
             patch_source: PatchSource {
                 file: path.display().to_string(),
+                mod_id: self.mod_id.clone(),
+                patch_id: self.id.clone(),
+                patch_name: self.name.clone(),
                 pattern: Some(self.pattern.clone()),
                 patch_type: DebugPatchType::Pattern,
             },
             regions: byte_regions,
-            warnings: if warnings.is_empty() {None} else {Some(warnings)},
+            matched_count: raw_match_count,
+            expected_count: self.times,
+            warnings: if warnings.is_empty() {
+                None
+            } else {
+                Some(warnings)
+            },
         })
     }
 }
