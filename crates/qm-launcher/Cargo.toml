@@ -1,0 +1,39 @@
+[package]
+name = "qm-launcher"
+version = "1.0.0"
+edition = "2021"
+description = "QuarterMaster Tauri 2 launcher shell"
+authors = ["QuarterMaster Team"]
+license = "MIT"
+
+# The lib name differs from the bin name to avoid Windows output collisions.
+[lib]
+name = "qm_launcher_lib"
+path = "src/lib.rs"
+
+[[bin]]
+name = "qm-launcher"
+path = "src/main.rs"
+
+[dev-dependencies]
+tempfile = "3"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+tauri-plugin-window-state = "2"
+tauri-specta = { version = "=2.0.0-rc.21", features = ["derive", "typescript"] }
+specta = { workspace = true }
+specta-typescript = "0.0.9"
+serde = { version = "1.0.197", features = ["derive"] }
+tracing = "0.1"
+tracing-appender = "0.2"
+tracing-subscriber = "0.3"
+jiff = "0.2.35"
+qm-service = { path = "../qm-service" }
+qm-manager = { path = "../qm-manager", features = ["specta"] }
+qm-schema = { path = "../qm-schema", features = ["specta"] }
+qm-core = { path = "../qm-core", features = ["specta"] }

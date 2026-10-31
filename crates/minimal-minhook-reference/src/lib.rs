@@ -1,3 +1,4 @@
+//! Reference build: the artifact is version_proxy_reference.dll and must be renamed to version.dll when deployed.
 use std::ffi::{CStr, CString};
 use std::fs::{self, OpenOptions};
 use std::io::Write;

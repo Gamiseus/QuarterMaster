@@ -42,8 +42,8 @@ impl EventSink for NullSink {
     fn emit(&self, _event: QmEvent) {}
 }
 
-use crate::cache::{CatalogResult, HealthReport, UpdatesReport, VanillaFiles};
-use crate::dto::{ModDetail, ModSummary};
+use crate::cache::VanillaFiles;
+use crate::dto::{CatalogResult, HealthReport, ModDetail, ModSummary, UpdatesReport};
 use crate::error::{ErrorKind, QmError, QmResult};
 use crate::process::ProcessProbe;
 use crate::service::Service;
@@ -187,9 +187,21 @@ pub fn seed_all_but_simulation(svc: &Service) {
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .insert("s".into(), Default::default());
-    c.health.set(HealthReport);
-    c.updates.set(UpdatesReport);
-    c.catalog.set(CatalogResult);
+    c.health.set(HealthReport::default());
+    c.updates.set(UpdatesReport::default());
+    c.catalog.set(CatalogResult::default());
+}
+
+pub fn seed_health(svc: &Service, report: HealthReport) {
+    svc.inner.caches.health.set(report);
+}
+
+pub fn seed_updates(svc: &Service, report: UpdatesReport) {
+    svc.inner.caches.updates.set(report);
+}
+
+pub fn seed_catalog(svc: &Service, catalog: CatalogResult) {
+    svc.inner.caches.catalog.set(catalog);
 }
 
 pub fn empty_simulation_report() -> SimulationReport {
@@ -231,4 +243,9 @@ fn placeholder_mod_detail() -> ModDetail {
             untracked: vec![],
         },
     }
+}
+
+/// Classify a changed path the way the file watcher does.
+pub fn classify(svc: &Service, path: &std::path::Path) -> crate::watch::Classified {
+    svc.classify(path)
 }

@@ -1,0 +1,40 @@
+/* QuarterMaster design tokens. Colors: Field Command palette (ui/styles.css). */
+:root {
+  color-scheme: light dark;
+
+  --qm-bg: light-dark(#e9ece6, #111612);
+  --qm-surface: light-dark(#f4f6f2, #181f19);
+  --qm-surface-raised: light-dark(#e2e6de, #212a22);
+  --qm-border: light-dark(#c5cdc0, #2d3a2f);
+  --qm-text: light-dark(#171d17, #e7ece6);
+  --qm-text-muted: light-dark(#647566, #6e8070);
+  --qm-accent: light-dark(#9a6f0b, #d4a742);
+  --qm-accent-contrast: light-dark(#ffffff, #111612);
+  --qm-ok: light-dark(#15803d, #22c55e);
+  --qm-warn: light-dark(#b45309, #f59e0b);
+  --qm-danger: light-dark(#b91c1c, #ef4444);
+
+  --qm-space-1: 4px;
+  --qm-space-2: 8px;
+  --qm-space-3: 12px;
+  --qm-space-4: 16px;
+  --qm-space-5: 24px;
+  --qm-space-6: 32px;
+
+  --qm-radius-sm: 4px;
+  --qm-radius-md: 8px;
+
+  --qm-font-sans: "Segoe UI Variable", "Segoe UI", sans-serif;
+  --qm-font-mono: "Cascadia Code", Consolas, monospace;
+
+  --qm-dur-fast: 120ms;
+  --qm-ease: cubic-bezier(.2,0,0,1);
+}
+
+html[data-theme="light"] {
+  color-scheme: light;
+}
+
+html[data-theme="dark"] {
+  color-scheme: dark;
+}

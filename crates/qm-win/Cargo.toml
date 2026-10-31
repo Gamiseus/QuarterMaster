@@ -7,7 +7,7 @@ authors = ["QuarterMaster Team"]
 license = "MIT"
 
 [lib]
-name = "winmm"
+name = "qm_winmm"
 crate-type = ["cdylib"]
 
 [dependencies]

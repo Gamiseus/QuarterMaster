@@ -5,6 +5,7 @@ pub mod library;
 pub mod profiles;
 pub mod solver;
 pub mod storage;
+pub mod winproc;
 
 pub use conflict::{
     simulate_and_analyze_patches, AttributedCodeLine, ConflictResolutionSuggestion,

@@ -20,11 +20,13 @@ const KIND_PROFILE_SWAP: &str = "profile_swap";
 /// `to_id` for transactions that have no profile or save target.
 const TARGET_VANILLA: &str = "vanilla";
 const TARGET_DLL: &str = "winmm.dll";
+/// Shipped name of the proxy next to qm-launcher.exe (never winmm.dll, or Windows loads it into the launcher).
+const SOURCE_DLL: &str = "qm_winmm.dll";
 
 const HASHES_FILE: &str = "qm-dll-hashes.json";
 const MSG_UNKNOWN_DLL: &str =
     "The winmm.dll in the game folder is not a QuarterMaster build. It was left in place.";
-const MSG_DLL_MISSING: &str = "winmm.dll was not found next to qm-launcher.exe.";
+const MSG_DLL_MISSING: &str = "qm_winmm.dll was not found next to qm-launcher.exe.";
 const MSG_DLL_MISMATCH: &str =
     "The winmm.dll in the game folder does not match the QuarterMaster build that was copied.";
 const SUMMARY_UNKNOWN_DLL: &str = " An unknown winmm.dll was left in place.";
@@ -60,7 +62,8 @@ impl Service {
             .unwrap_or_else(|e| e.into_inner())
     }
 
-    /// The QuarterMaster `winmm.dll` to deploy: `QM_WINMM_DLL` if set, else next to the exe.
+    /// The QuarterMaster proxy to deploy: `qm_winmm.dll` next to the exe (debug builds honor a
+    /// `QM_WINMM_DLL` override).
     pub fn source_dll(&self) -> QmResult<PathBuf> {
         let _g = self.lock_game_folder();
         source_dll_path()
@@ -381,13 +384,26 @@ impl Service {
 }
 
 fn source_dll_path() -> QmResult<PathBuf> {
-    let candidate = match std::env::var_os("QM_WINMM_DLL").filter(|v| !v.is_empty()) {
-        Some(v) => Some(PathBuf::from(v)),
-        None => std::env::current_exe()
+    let candidate = dev_override_dll().or_else(|| {
+        std::env::current_exe()
             .ok()
-            .and_then(|exe| exe.parent().map(|d| d.join("winmm.dll"))),
-    };
+            .and_then(|exe| exe.parent().map(|d| d.join(SOURCE_DLL)))
+    });
     candidate
         .filter(|p| p.is_file())
         .ok_or_else(|| QmError::new(ErrorKind::NotFound, MSG_DLL_MISSING))
+}
+
+/// `QM_WINMM_DLL` overrides the proxy source in debug builds (tests, dev runs) only.
+#[cfg(debug_assertions)]
+fn dev_override_dll() -> Option<PathBuf> {
+    std::env::var_os("QM_WINMM_DLL")
+        .filter(|v| !v.is_empty())
+        .map(PathBuf::from)
+}
+
+/// Release builds deploy only `<exe dir>/qm_winmm.dll`.
+#[cfg(not(debug_assertions))]
+fn dev_override_dll() -> Option<PathBuf> {
+    None
 }

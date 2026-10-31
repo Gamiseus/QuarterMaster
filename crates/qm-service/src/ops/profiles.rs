@@ -72,7 +72,9 @@ impl Service {
             .or_kind(ErrorKind::InvalidInput)?;
         if active {
             // The staged launch config carries the profile name.
-            self.paths().activate_profile(&p.id).or_kind(ErrorKind::Io)?;
+            self.paths()
+                .activate_profile(&p.id)
+                .or_kind(ErrorKind::Io)?;
             self.after_active_profile_change();
         } else {
             self.notify(Scope::Profiles);
@@ -108,7 +110,9 @@ impl Service {
     pub fn profile_activate(&self, id: &str) -> QmResult<ModProfile> {
         self.ensure_not_running()?;
         let p = self.profile_get(id)?;
-        self.paths().activate_profile(&p.id).or_kind(ErrorKind::Io)?;
+        self.paths()
+            .activate_profile(&p.id)
+            .or_kind(ErrorKind::Io)?;
         self.invalidate(Scope::Saves);
         self.after_active_profile_change();
         Ok(p)

@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [lib]
-name = "version"
+name = "version_proxy_reference"
 crate-type = ["cdylib"]
 
 [dependencies]

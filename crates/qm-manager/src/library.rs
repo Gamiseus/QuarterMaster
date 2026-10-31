@@ -567,6 +567,38 @@ impl QuarterMasterPaths {
         }
         results
     }
+
+    /// Deletes `library/<mod_id>/` (every version) and removes the id from every profile's
+    /// enabled list, priorities, locks, favorites, notes and pinned versions.
+    pub fn uninstall_mod(&self, mod_id: &str) -> Result<(), String> {
+        if mod_id.is_empty()
+            || mod_id == "."
+            || mod_id == ".."
+            || mod_id.contains(['/', '\\', ':'])
+        {
+            return Err(format!("Invalid mod id '{mod_id}'"));
+        }
+        let dir = self.library_dir.join(mod_id);
+        if !dir.is_dir() {
+            return Err(format!("Mod '{mod_id}' is not installed"));
+        }
+        fs::remove_dir_all(&dir)
+            .map_err(|e| format!("Failed to delete {}: {e}", dir.display()))?;
+
+        for mut profile in self.list_profiles() {
+            let before = serde_json::to_string(&profile).unwrap_or_default();
+            profile.enabled_mods.retain(|m| m != mod_id);
+            profile.mod_priorities.remove(mod_id);
+            profile.locked_mods.retain(|m| m != mod_id);
+            profile.favorites.retain(|m| m != mod_id);
+            profile.mod_notes.remove(mod_id);
+            profile.pinned_versions.remove(mod_id);
+            if serde_json::to_string(&profile).unwrap_or_default() != before {
+                self.save_profile(&profile)?;
+            }
+        }
+        Ok(())
+    }
 }
 
 /// Safely extracts a `.zip` archive with zip-slip, symlink, file-count, and zip-bomb protections.

@@ -1,7 +1,7 @@
 //! Cache primitives and the cached service state.
+use crate::dto::{CatalogResult, HealthReport, ModDetail, UpdatesReport};
 use qm_manager::{InstalledMod, SimulationReport, VanillaGameInfo};
 use qm_schema::SaveSummary;
-use crate::dto::ModDetail;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -46,14 +46,6 @@ pub struct VanillaFiles {
     pub info: Option<VanillaGameInfo>,
     pub files: HashMap<String, String>,
 }
-
-// Placeholders until Task 9 defines the real types.
-#[derive(Debug, Clone, Default)]
-pub struct HealthReport;
-#[derive(Debug, Clone, Default)]
-pub struct UpdatesReport;
-#[derive(Debug, Clone, Default)]
-pub struct CatalogResult;
 
 // Fields are crate-private so only `Service::invalidate` mutates them; see `testing` helpers.
 #[derive(Default)]

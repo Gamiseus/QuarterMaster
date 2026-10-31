@@ -257,7 +257,7 @@ pub fn detect_steam_exe() -> Option<PathBuf> {
             (r"HKLM\SOFTWARE\WOW6432Node\Valve\Steam", "SteamExe"),
             (r"HKLM\SOFTWARE\Valve\Steam", "SteamExe"),
         ] {
-            if let Ok(output) = std::process::Command::new("reg")
+            if let Ok(output) = crate::winproc::system_command("reg")
                 .args(["query", hive, "/v", value_name])
                 .output()
             {
@@ -297,17 +297,7 @@ pub fn detect_steam_exe() -> Option<PathBuf> {
 
 /// Checks if Steam is currently running.
 pub fn is_steam_running() -> bool {
-    #[cfg(windows)]
-    {
-        if let Ok(output) = std::process::Command::new("tasklist")
-            .args(["/FI", "IMAGENAME eq steam.exe", "/NH"])
-            .output()
-        {
-            let text = String::from_utf8_lossy(&output.stdout);
-            return text.to_lowercase().contains("steam.exe");
-        }
-    }
-    false
+    crate::winproc::find_process("steam.exe").is_some()
 }
 
 /// Auto-detects the Steam game installation of Mud and Blood (`mnb.exe`, Steam AppID 1391530).
@@ -322,7 +312,7 @@ pub fn detect_steam_game_installation() -> Option<PathBuf> {
             (r"HKLM\SOFTWARE\WOW6432Node\Valve\Steam", "InstallPath"),
             (r"HKLM\SOFTWARE\Valve\Steam", "InstallPath"),
         ] {
-            if let Ok(output) = std::process::Command::new("reg")
+            if let Ok(output) = crate::winproc::system_command("reg")
                 .args(["query", hive, "/v", value_name])
                 .output()
             {

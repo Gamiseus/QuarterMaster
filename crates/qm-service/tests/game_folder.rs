@@ -230,7 +230,7 @@ fn source_dll_missing_is_not_found() {
     assert_eq!(err.kind, ErrorKind::NotFound);
     assert_eq!(
         err.message,
-        "winmm.dll was not found next to qm-launcher.exe."
+        "qm_winmm.dll was not found next to qm-launcher.exe."
     );
 }
 

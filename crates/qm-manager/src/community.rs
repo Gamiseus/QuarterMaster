@@ -9,8 +9,7 @@ use std::time::{Duration, SystemTime};
 
 const GITHUB_SEARCH_API: &str = "https://api.github.com/search/repositories";
 const USER_AGENT: &str = "QuarterMaster-Launcher/1.0 (Mud and Blood Mod Manager)";
-const CACHE_TTL_SECONDS: u64 = 900; // 15 minutes
-const MAX_DOWNLOAD_BYTES: usize = 100 * 1024 * 1024; // 100MB safety ceiling
+pub const CACHE_TTL_SECONDS: u64 = 900; // 15 minutes
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CommunityModItem {
@@ -339,7 +338,7 @@ fn fetch_latest_release_asset(
 }
 
 /// Downloads a remote mod archive with safety verifications:
-/// 1. Maximum size enforcement (<100MB)
+/// 1. Maximum size enforcement (`max_bytes`)
 /// 2. Zip-slip protection (no directory traversal or drive letters)
 /// 3. Schema verification (checks for qm.toml or mod.json)
 /// 4. Lua static security audit (flags ffi, os.execute, etc.)
@@ -348,6 +347,8 @@ pub fn download_and_install_community_mod(
     paths: &QuarterMasterPaths,
     download_url: &str,
     expected_mod_id: Option<&str>,
+    max_bytes: u64,
+    allow: UrlCheck<'_>,
 ) -> Result<Value, String> {
     let trimmed_url = download_url.trim();
     if trimmed_url.is_empty() {
@@ -380,32 +381,7 @@ pub fn download_and_install_community_mod(
         filename
     ));
 
-    // Stream download with size ceiling
-    let resp = ureq::get(trimmed_url)
-        .set("User-Agent", USER_AGENT)
-        .timeout(Duration::from_secs(30))
-        .call()
-        .map_err(|e| format!("Download request failed: {e}"))?;
-
-    let mut reader = resp.into_reader();
-    let mut buffer = Vec::new();
-    let mut chunk = [0u8; 8192];
-    let mut total_read = 0;
-
-    loop {
-        let n = reader.read(&mut chunk).map_err(|e| format!("Read error: {e}"))?;
-        if n == 0 {
-            break;
-        }
-        total_read += n;
-        if total_read > MAX_DOWNLOAD_BYTES {
-            return Err(format!(
-                "Download exceeds maximum safety ceiling of {} MB",
-                MAX_DOWNLOAD_BYTES / (1024 * 1024)
-            ));
-        }
-        buffer.extend_from_slice(&chunk[..n]);
-    }
+    let buffer = fetch_capped(trimmed_url, USER_AGENT, allow, max_bytes)?;
 
     fs::write(&dest_file, &buffer)
         .map_err(|e| format!("Failed to write downloaded archive: {e}"))?;
@@ -430,6 +406,100 @@ pub fn download_and_install_community_mod(
         "import_summary": import_res,
         "security_audit": security_report,
     }))
+}
+
+fn size_limit_error(max_bytes: u64) -> String {
+    format!(
+        "Download exceeds the size limit of {} MiB",
+        max_bytes / (1024 * 1024)
+    )
+}
+
+/// Checks one URL (the start URL and every redirect target) before it is requested.
+pub type UrlCheck<'a> = &'a dyn Fn(&str) -> Result<(), String>;
+
+/// Redirect hops followed after the first request.
+pub const MAX_REDIRECTS: u32 = 5;
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
+const READ_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Reads a body, refusing a declared length above `max_bytes` and stopping with an error once
+/// more than `max_bytes` bytes arrive.
+pub fn cap_reader(
+    declared: Option<u64>,
+    reader: impl Read,
+    max_bytes: u64,
+) -> Result<Vec<u8>, String> {
+    if declared.is_some_and(|len| len > max_bytes) {
+        return Err(size_limit_error(max_bytes));
+    }
+    let mut buffer = Vec::new();
+    reader
+        .take(max_bytes.saturating_add(1))
+        .read_to_end(&mut buffer)
+        .map_err(|e| format!("Read error: {e}"))?;
+    if buffer.len() as u64 > max_bytes {
+        return Err(size_limit_error(max_bytes));
+    }
+    Ok(buffer)
+}
+
+/// What to do with one response: `Some(next_url)` to follow a redirect (already checked with
+/// `allow`), `None` to read this response's body.
+pub fn next_hop(
+    current: &str,
+    status: u16,
+    location: Option<&str>,
+    allow: UrlCheck<'_>,
+) -> Result<Option<String>, String> {
+    if !(300..400).contains(&status) {
+        return Ok(None);
+    }
+    let location = location
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .ok_or_else(|| format!("Redirect {status} without a Location header"))?;
+    let base = url::Url::parse(current).map_err(|e| format!("Invalid URL '{current}': {e}"))?;
+    let next = base
+        .join(location)
+        .map_err(|e| format!("Invalid redirect location '{location}': {e}"))?
+        .to_string();
+    allow(&next)?;
+    Ok(Some(next))
+}
+
+/// GET `start` and return its body, following up to `MAX_REDIRECTS` redirects by hand so `allow`
+/// sees every hop before it is requested. Connect and per-read timeouts only (no total deadline).
+pub fn fetch_capped(
+    start: &str,
+    user_agent: &str,
+    allow: UrlCheck<'_>,
+    max_bytes: u64,
+) -> Result<Vec<u8>, String> {
+    allow(start)?;
+    let agent = ureq::AgentBuilder::new()
+        .redirects(0)
+        .timeout_connect(CONNECT_TIMEOUT)
+        .timeout_read(READ_TIMEOUT)
+        .build();
+    let mut url = start.to_string();
+    for _ in 0..=MAX_REDIRECTS {
+        let resp = agent
+            .get(&url)
+            .set("User-Agent", user_agent)
+            .call()
+            .map_err(|e| format!("Download request failed: {e}"))?;
+        match next_hop(&url, resp.status(), resp.header("Location"), allow)? {
+            Some(next) => url = next,
+            None => {
+                let declared = resp
+                    .header("Content-Length")
+                    .and_then(|v| v.trim().parse::<u64>().ok());
+                return cap_reader(declared, resp.into_reader(), max_bytes);
+            }
+        }
+    }
+    Err(format!("Download request failed: more than {MAX_REDIRECTS} redirects"))
 }
 
 /// Audits a downloaded zip archive for path safety, schemas, and dangerous Lua functions
@@ -526,6 +596,79 @@ mod tests {
         assert_eq!(val["stargazers_count"], 42);
         assert_eq!(val["topics"][0], "mud-and-blood");
         assert_eq!(val["source_type"], "GitHub");
+    }
+
+    fn https_github_only(u: &str) -> Result<(), String> {
+        let ok = url::Url::parse(u)
+            .is_ok_and(|p| p.scheme() == "https" && p.host_str() == Some("github.com"));
+        if ok {
+            Ok(())
+        } else {
+            Err(format!("not allowed: {u}"))
+        }
+    }
+
+    #[test]
+    fn cap_reader_rejects_declared_length_over_limit() {
+        let err = cap_reader(Some(11), &b"tiny"[..], 10).unwrap_err();
+        assert!(err.contains("size limit"), "{err}");
+    }
+
+    #[test]
+    fn cap_reader_rejects_body_of_max_plus_one() {
+        assert_eq!(cap_reader(None, &[7u8; 10][..], 10).unwrap().len(), 10);
+        let err = cap_reader(None, &[7u8; 11][..], 10).unwrap_err();
+        assert!(err.contains("size limit"), "{err}");
+        // A lying Content-Length does not lift the cap.
+        assert!(cap_reader(Some(1), &[7u8; 11][..], 10).is_err());
+    }
+
+    #[test]
+    fn next_hop_checks_every_redirect_target() {
+        let a = &https_github_only;
+        assert_eq!(next_hop("https://github.com/a", 200, None, a).unwrap(), None);
+        assert_eq!(
+            next_hop("https://github.com/o/r/x", 302, Some("/o/r/y"), a).unwrap(),
+            Some("https://github.com/o/r/y".to_string())
+        );
+        assert!(next_hop("https://github.com/a", 302, Some("http://github.com/a"), a).is_err());
+        assert!(next_hop("https://github.com/a", 301, Some("https://evil.example/a"), a).is_err());
+        assert!(next_hop("https://github.com/a", 302, None, a).is_err());
+    }
+
+    #[test]
+    fn fetch_capped_refuses_redirect_to_disallowed_host_before_requesting_it() {
+        use std::io::{BufRead, BufReader, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = std::thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            let mut reader = BufReader::new(stream.try_clone().unwrap());
+            let mut line = String::new();
+            while reader.read_line(&mut line).unwrap() > 0 && line != "\r\n" {
+                line.clear();
+            }
+            let mut s = stream;
+            s.write_all(
+                b"HTTP/1.1 302 Found\r\nLocation: https://evil.example/payload.zip\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+            )
+            .unwrap();
+        });
+        let start = format!("http://127.0.0.1:{port}/mod.zip");
+        let local = start.clone();
+        let seen = std::sync::Mutex::new(Vec::new());
+        let allow = |u: &str| {
+            seen.lock().unwrap().push(u.to_string());
+            if u == local {
+                Ok(())
+            } else {
+                Err(format!("not allowed: {u}"))
+            }
+        };
+        let err = fetch_capped(&start, USER_AGENT, &allow, 1024).unwrap_err();
+        server.join().unwrap();
+        assert_eq!(err, "not allowed: https://evil.example/payload.zip");
+        assert_eq!(seen.lock().unwrap().len(), 2);
     }
 
     #[test]

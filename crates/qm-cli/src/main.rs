@@ -1,6 +1,7 @@
 use std::env;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+use std::sync::Arc;
 
 use qm_core::patch::table::PatchTable;
 use qm_manager::{
@@ -9,6 +10,8 @@ use qm_manager::{
     ConflictResolutionSuggestion, LaunchMethod, QuarterMasterPaths,
 };
 use qm_schema::{compare_saves, generate_mod_json_schema, generate_qm_toml_schema};
+use qm_service::testing::NullSink;
+use qm_service::{GameStage, LaunchRequest, QmError, Service, Win32Probe};
 
 fn print_help() {
     println!(
@@ -114,7 +117,9 @@ fn main() -> ExitCode {
         "watch" => cmd_watch(&paths, rest),
         "register-protocols" => cmd_register_protocols(),
         "schema" => cmd_schema(rest),
-        other => Err(format!("Unknown command '{other}'. Run `qm --help` for usage.")),
+        other => Err(format!(
+            "Unknown command '{other}'. Run `qm --help` for usage."
+        )),
     };
 
     match result {
@@ -193,7 +198,11 @@ fn cmd_status(paths: &QuarterMasterPaths) -> Result<(), String> {
     println!("========================================================");
     println!("QuarterMaster Field Command — System Status");
     println!("========================================================");
-    println!("Data Root      : {} (Portable: {})", paths.root_dir.display(), paths.is_portable);
+    println!(
+        "Data Root      : {} (Portable: {})",
+        paths.root_dir.display(),
+        paths.is_portable
+    );
     println!(
         "Game Executable: {}",
         settings
@@ -285,55 +294,74 @@ fn cmd_launch(paths: &QuarterMasterPaths, args: &[String]) -> Result<(), String>
         i += 1;
     }
 
-    let pid = launch_profile(paths, &profile_id, method_override)?;
-    println!(
-        "Launched Mud and Blood with profile '{}' (PID: {})",
-        profile_id, pid
-    );
-    Ok(())
+    let svc = new_service(paths);
+    start_launch(&svc, &profile_id, method_override)?;
+    wait_for_game(&svc)
 }
 
-/// Activates, prepares the game folder and spawns the game (interim until Task 13).
-fn launch_profile(
-    paths: &QuarterMasterPaths,
+fn new_service(paths: &QuarterMasterPaths) -> Service {
+    Service::new(paths.clone(), Arc::new(NullSink), Arc::new(Win32Probe))
+}
+
+/// Recovers any interrupted game-folder transaction, then launches through the service.
+fn start_launch(
+    svc: &Service,
     profile_id: &str,
-    method_override: Option<LaunchMethod>,
-) -> Result<u32, String> {
-    paths.activate_profile(profile_id)?;
-    let settings = paths.load_settings();
-    let profile = paths.get_profile(profile_id)?;
-    let method = method_override
-        .or(profile.launch_method)
-        .unwrap_or(settings.default_launch_method);
-    let is_vanilla = method == LaunchMethod::Vanilla
-        || profile.launch_method == Some(LaunchMethod::Vanilla)
-        || profile.enabled_mods.is_empty();
+    method: Option<LaunchMethod>,
+) -> Result<(), String> {
+    // Never recover under a live game; game_status also attaches to a running game.
+    if svc.game_status().is_busy() {
+        return Err(fmt_err(&QmError::game_running()));
+    }
+    match svc.recover() {
+        Ok(Some(msg)) => println!("{msg}"),
+        Ok(None) => {}
+        Err(e) => return Err(fmt_err(&e)),
+    }
+    svc.game_launch(LaunchRequest {
+        profile_id: profile_id.to_string(),
+        method,
+    })
+    .map(|_| ())
+    .map_err(|e| fmt_err(&e))
+}
 
-    if is_vanilla {
-        // Empty hash set: any winmm.dll is left in place.
-        if let Err(e) = paths.restore_clean_game_dir(&std::collections::HashSet::new()) {
-            if e.starts_with(qm_manager::UNKNOWN_DLL_ERROR_PREFIX) {
-                eprintln!("Warning: {e}");
-            } else {
-                return Err(e);
+fn fmt_err(e: &QmError) -> String {
+    match &e.details {
+        Some(d) if !d.is_empty() => format!("{} ({d})", e.message),
+        _ => e.message.clone(),
+    }
+}
+
+fn describe_stage(stage: &GameStage) -> String {
+    match stage {
+        GameStage::Idle => "Game closed; game folder is clean.".to_string(),
+        GameStage::Deploying => "Preparing the game folder...".to_string(),
+        GameStage::WaitingForSteam => "Waiting for Steam to start the game...".to_string(),
+        GameStage::Running { pid } => format!("Mud and Blood is running (PID: {pid})."),
+        GameStage::CleaningUp => "Game exited; cleaning up the game folder...".to_string(),
+        GameStage::Failed { .. } => String::new(),
+    }
+}
+
+/// Polls the game status every 500 ms, printing each stage change once, until Idle or Failed.
+fn wait_for_game(svc: &Service) -> Result<(), String> {
+    let mut last: Option<GameStage> = None;
+    loop {
+        let st = svc.game_status();
+        if last.as_ref() != Some(&st.stage) {
+            // Failed is reported once by the caller as the error.
+            if !matches!(st.stage, GameStage::Failed { .. }) {
+                println!("{}", describe_stage(&st.stage));
             }
+            last = Some(st.stage.clone());
         }
-    } else {
-        let dll = std::env::current_exe()
-            .ok()
-            .and_then(|p| p.parent().map(|d| d.join("winmm.dll")))
-            .filter(|p| p.is_file())
-            .ok_or_else(|| "winmm.dll was not found next to the qm executable.".to_string())?;
-        paths.deploy_profile_to_game(profile_id, &dll)?;
+        match st.stage {
+            GameStage::Idle => return Ok(()),
+            GameStage::Failed { reason } => return Err(reason),
+            _ => std::thread::sleep(std::time::Duration::from_millis(500)),
+        }
     }
-
-    if settings.auto_backup_saves {
-        let _ = paths.create_save_backup(
-            &profile.linked_save_profile_id,
-            "Auto-backup before game launch",
-        );
-    }
-    paths.spawn_game_process(&profile, method)
 }
 
 fn cmd_validate(paths: &QuarterMasterPaths, args: &[String]) -> Result<(), String> {
@@ -379,8 +407,12 @@ fn cmd_validate(paths: &QuarterMasterPaths, args: &[String]) -> Result<(), Strin
         Some(&game_ver),
     );
 
-    let table = PatchTable::load(&target_mod_dir)
-        .map_err(|e| format!("Failed to load patches from {}: {e:#}", target_mod_dir.display()))?;
+    let table = PatchTable::load(&target_mod_dir).map_err(|e| {
+        format!(
+            "Failed to load patches from {}: {e:#}",
+            target_mod_dir.display()
+        )
+    })?;
     let sim = simulate_and_analyze_patches(&table, &vanilla_files);
 
     if json_output {
@@ -438,9 +470,17 @@ fn cmd_validate(paths: &QuarterMasterPaths, args: &[String]) -> Result<(), Strin
     }
 
     if !sim.conflicts.is_empty() {
-        println!("\nDetected Conflicts & 3-Tier Resolutions ({}):", sim.conflicts.len());
+        println!(
+            "\nDetected Conflicts & 3-Tier Resolutions ({}):",
+            sim.conflicts.len()
+        );
         for c in &sim.conflicts {
-            println!("  [{}] {} — {}", c.severity.to_uppercase(), c.target_file, c.description);
+            println!(
+                "  [{}] {} — {}",
+                c.severity.to_uppercase(),
+                c.target_file,
+                c.description
+            );
             for sug in &c.suggestions {
                 match sug {
                     ConflictResolutionSuggestion::SwapModOrder { explanation, .. } => {
@@ -487,7 +527,12 @@ fn cmd_test_patches(paths: &QuarterMasterPaths, args: &[String]) -> Result<(), S
         paths.load_vanilla_lua_files(settings.game_exe_path.as_deref())?;
     let target_mod_dir = mod_dir_override
         .or(settings.workspace_mods_dir)
-        .unwrap_or_else(|| paths.profiles_dir.join(&settings.active_profile_id).join("Mods"));
+        .unwrap_or_else(|| {
+            paths
+                .profiles_dir
+                .join(&settings.active_profile_id)
+                .join("Mods")
+        });
 
     let table = PatchTable::load(&target_mod_dir).map_err(|e| format!("{e:#}"))?;
     let sim = simulate_and_analyze_patches(&table, &vanilla_files);
@@ -498,11 +543,20 @@ fn cmd_test_patches(paths: &QuarterMasterPaths, args: &[String]) -> Result<(), S
                 continue;
             }
         }
-        println!("=== {} (Mods: {}) ===", f.target_file, f.mods_touching.join(", "));
+        println!(
+            "=== {} (Mods: {}) ===",
+            f.target_file,
+            f.mods_touching.join(", ")
+        );
         for rec in &f.records {
             println!(
                 "  [{:?}] Prio {:>3} | {:<18} | {:<32} (matched: {}, regions: {:?})",
-                rec.status, rec.priority, rec.mod_id, rec.patch_name, rec.matched_count, rec.regions
+                rec.status,
+                rec.priority,
+                rec.mod_id,
+                rec.patch_name,
+                rec.matched_count,
+                rec.regions
             );
         }
     }
@@ -540,16 +594,26 @@ fn cmd_sync_workspace(paths: &QuarterMasterPaths, args: &[String]) -> Result<(),
         .or(settings.workspace_mods_dir)
         .ok_or_else(|| "Workspace mods directory not specified or detected.".to_string())?;
     let synced = paths.sync_workspace_mods(&dir)?;
-    println!("Synced {} mod(s) from {} into library:", synced.len(), dir.display());
+    println!(
+        "Synced {} mod(s) from {} into library:",
+        synced.len(),
+        dir.display()
+    );
     for m in synced {
-        println!("  - {} ({}) v{}", m.manifest.name, m.manifest.id, m.manifest.version);
+        println!(
+            "  - {} ({}) v{}",
+            m.manifest.name, m.manifest.id, m.manifest.version
+        );
     }
     Ok(())
 }
 
 fn cmd_verify_library(paths: &QuarterMasterPaths) -> Result<(), String> {
     let results = paths.verify_library();
-    println!("Verifying SHA-256 integrity of {} library mod(s):", results.len());
+    println!(
+        "Verifying SHA-256 integrity of {} library mod(s):",
+        results.len()
+    );
     for (id, ver, res) in results {
         if res.is_pristine {
             println!("  ✓ {:<20} v{:<8} — PRISTINE", id, ver);
@@ -609,17 +673,26 @@ fn cmd_profile(paths: &QuarterMasterPaths, args: &[String]) -> Result<(), String
             Ok(())
         }
         "export-code" => {
-            let id = args.get(1).ok_or("Usage: qm profile export-code <profile_id>")?;
+            let id = args
+                .get(1)
+                .ok_or("Usage: qm profile export-code <profile_id>")?;
             let code = paths.export_profile_code(id)?;
             println!("{code}");
             Ok(())
         }
         "import-code" => {
-            let code = args.get(1).ok_or("Usage: qm profile import-code <QM1-...> <new_id>")?;
+            let code = args
+                .get(1)
+                .ok_or("Usage: qm profile import-code <QM1-...> <new_id>")?;
             let new_id = args.get(2).map(|s| s.as_str()).unwrap_or("imported");
             let manifest = decode_profile_code(code)?;
             let p = paths.apply_modpack_as_profile(&manifest, new_id)?;
-            println!("Imported profile '{}' (id: {}) with {} mods.", p.name, p.id, p.enabled_mods.len());
+            println!(
+                "Imported profile '{}' (id: {}) with {} mods.",
+                p.name,
+                p.id,
+                p.enabled_mods.len()
+            );
             Ok(())
         }
         other => Err(format!("Unknown profile subcommand '{other}'")),
@@ -658,7 +731,10 @@ fn cmd_save(paths: &QuarterMasterPaths, args: &[String]) -> Result<(), String> {
             println!("========================================================");
             println!("Save Slot Inspection: '{}' ({})", id, summary.file_name);
             println!("========================================================");
-            println!("Area of Operations : {} (Day {})", summary.area_of_operations, summary.day);
+            println!(
+                "Area of Operations : {} (Day {})",
+                summary.area_of_operations, summary.day
+            );
             println!("German Commander   : {}", summary.german_commander);
             println!(
                 "Campaign Progress  : Rank {} | XP {} | TP {} (Total Spent: {}) | Command {}",
@@ -682,7 +758,10 @@ fn cmd_save(paths: &QuarterMasterPaths, args: &[String]) -> Result<(), String> {
                 summary.classic_total_kills,
                 summary.classic_total_casualties
             );
-            println!("Deployed Squad ({} soldiers):", summary.deployed_squad.len());
+            println!(
+                "Deployed Squad ({} soldiers):",
+                summary.deployed_squad.len()
+            );
             for s in &summary.deployed_squad {
                 println!(
                     "  - {:<16} (Age {}, Rank {}, Lvl {}) | Weapon: {:<12} | Kills: {:>3} | HP: {:.0}/{:.0} | Skill: {}",
@@ -695,8 +774,13 @@ fn cmd_save(paths: &QuarterMasterPaths, args: &[String]) -> Result<(), String> {
             Ok(())
         }
         "backup" => {
-            let id = args.get(1).ok_or("Usage: qm save backup <save_id> [label]")?;
-            let label = args.get(2).map(|s| s.as_str()).unwrap_or("Manual CLI Backup");
+            let id = args
+                .get(1)
+                .ok_or("Usage: qm save backup <save_id> [label]")?;
+            let label = args
+                .get(2)
+                .map(|s| s.as_str())
+                .unwrap_or("Manual CLI Backup");
             let entry = paths.create_save_backup(id, label)?;
             println!(
                 "Created backup '{}' for save slot '{}' ({} bytes)",
@@ -705,15 +789,23 @@ fn cmd_save(paths: &QuarterMasterPaths, args: &[String]) -> Result<(), String> {
             Ok(())
         }
         "restore" => {
-            let id = args.get(1).ok_or("Usage: qm save restore <save_id> <backup_id>")?;
-            let bak_id = args.get(2).ok_or("Usage: qm save restore <save_id> <backup_id>")?;
+            let id = args
+                .get(1)
+                .ok_or("Usage: qm save restore <save_id> <backup_id>")?;
+            let bak_id = args
+                .get(2)
+                .ok_or("Usage: qm save restore <save_id> <backup_id>")?;
             paths.restore_save_backup(id, bak_id)?;
             println!("Restored backup '{}' into save slot '{}'.", bak_id, id);
             Ok(())
         }
         "compare" => {
-            let a = args.get(1).ok_or("Usage: qm save compare <save_id_a> <save_id_b>")?;
-            let b = args.get(2).ok_or("Usage: qm save compare <save_id_a> <save_id_b>")?;
+            let a = args
+                .get(1)
+                .ok_or("Usage: qm save compare <save_id_a> <save_id_b>")?;
+            let b = args
+                .get(2)
+                .ok_or("Usage: qm save compare <save_id_a> <save_id_b>")?;
             let sa = paths.inspect_save_profile(a)?;
             let sb = paths.inspect_save_profile(b)?;
             let cmp = compare_saves(&sa, &sb);
@@ -727,8 +819,7 @@ fn cmd_save(paths: &QuarterMasterPaths, args: &[String]) -> Result<(), String> {
 fn cmd_lint(paths: &QuarterMasterPaths, args: &[String]) -> Result<(), String> {
     let dir = args.first().ok_or("Usage: qm lint <mod_dir>")?;
     let settings = paths.load_settings();
-    let (_gv, vanilla_files) =
-        paths.load_vanilla_lua_files(settings.game_exe_path.as_deref())?;
+    let (_gv, vanilla_files) = paths.load_vanilla_lua_files(settings.game_exe_path.as_deref())?;
     let report = lint_mod_directory(Path::new(dir), &vanilla_files)?;
 
     println!("========================================================");
@@ -771,7 +862,9 @@ fn cmd_lint(paths: &QuarterMasterPaths, args: &[String]) -> Result<(), String> {
 }
 
 fn cmd_pack(args: &[String]) -> Result<(), String> {
-    let mod_dir = args.first().ok_or("Usage: qm pack <mod_dir> [--out <dir>]")?;
+    let mod_dir = args
+        .first()
+        .ok_or("Usage: qm pack <mod_dir> [--out <dir>]")?;
     let mut out_dir = PathBuf::from(".");
     if args.len() >= 3 && args[1] == "--out" {
         out_dir = PathBuf::from(&args[2]);
@@ -783,9 +876,9 @@ fn cmd_pack(args: &[String]) -> Result<(), String> {
 }
 
 fn cmd_new(args: &[String]) -> Result<(), String> {
-    let mod_id = args
-        .first()
-        .ok_or("Usage: qm new <mod_id> <mod_name> [--template <empty|gmenu_config|gameplay_patch>]")?;
+    let mod_id = args.first().ok_or(
+        "Usage: qm new <mod_id> <mod_name> [--template <empty|gmenu_config|gameplay_patch>]",
+    )?;
     let mod_name = args.get(1).map(|s| s.as_str()).unwrap_or(mod_id);
     let mut template = "gmenu_config";
     let mut author = "Community Modder";
@@ -841,7 +934,10 @@ fn cmd_schema(args: &[String]) -> Result<(), String> {
 
     std::fs::write(out_dir.join("mod.schema.json"), mod_schema).map_err(|e| e.to_string())?;
     std::fs::write(out_dir.join("qm.schema.json"), qm_schema).map_err(|e| e.to_string())?;
-    println!("Wrote mod.schema.json and qm.schema.json to {}", out_dir.display());
+    println!(
+        "Wrote mod.schema.json and qm.schema.json to {}",
+        out_dir.display()
+    );
     Ok(())
 }
 
@@ -869,6 +965,7 @@ fn cmd_watch(paths: &QuarterMasterPaths, args: &[String]) -> Result<(), String> 
         return Ok(());
     }
 
+    let relaunch_svc = relaunch.then(|| new_service(paths));
     loop {
         std::thread::sleep(std::time::Duration::from_secs(2));
         let res = paths.poll_dev_watch_changes(last_ms);
@@ -880,7 +977,11 @@ fn cmd_watch(paths: &QuarterMasterPaths, args: &[String]) -> Result<(), String> 
             let _ = cmd_validate(paths, &[]);
             if relaunch {
                 let settings = paths.load_settings();
-                let _ = launch_profile(paths, &settings.active_profile_id, None);
+                if let Some(svc) = relaunch_svc.as_ref() {
+                    if let Err(e) = start_launch(svc, &settings.active_profile_id, None) {
+                        eprintln!("[QM Watch] Relaunch failed: {e}");
+                    }
+                }
             }
         }
     }

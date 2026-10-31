@@ -5,6 +5,7 @@ members = [
     "crates/qm-core",
     "crates/qm-manager",
     "crates/qm-service",
+    "crates/qm-launcher",
     "crates/qm-cli",
     "crates/qm-app",
     "crates/qm-win",
@@ -13,3 +14,13 @@ members = [
 
 [workspace.dependencies]
 specta = { version = "=2.0.0-rc.22", features = ["derive"] }
+
+[profile.release]
+opt-level = "s"
+lto = true
+strip = true
+codegen-units = 1
+
+# The injected DLL runs in the game process; optimize it for speed.
+[profile.release.package.qm-win]
+opt-level = 3

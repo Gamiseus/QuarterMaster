@@ -35,7 +35,7 @@ Quartermaster/
 ├── VERIFICATION.md              # Security audit, guarantees, and verification steps
 ├── README.md                        # This documentation
 ├── crates/
-│   ├── qm-win/                      # Windows DLL proxy implementation (compiles winmm.dll)
+│   ├── qm-win/                      # Windows DLL proxy implementation (compiles qm_winmm.dll)
 │   │   ├── Cargo.toml
 │   │   ├── build.rs                 # Forward-dll build script referencing system32\winmm.dll
 │   │   └── src/
@@ -87,9 +87,9 @@ cargo build --release --package qm-win
 
 The compiled proxy DLL will be output to:
 ```
-target\release\winmm.dll
+target\release\qm_winmm.dll
 ```
-Copy `winmm.dll` to the `MudandBlood` game folder next to `mnb.exe` to deploy.
+Copy `qm_winmm.dll` into the `MudandBlood` game folder next to `mnb.exe`, renamed to `winmm.dll`, to deploy.
 
 ---
 

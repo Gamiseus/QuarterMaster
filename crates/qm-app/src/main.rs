@@ -17,6 +17,14 @@ use qm_manager::{
 use qm_schema::{compare_saves, ConfigValue, ModSettingsStore, SecurityScanReport};
 use serde_json::{json, Value};
 
+/// The legacy app keeps its previous 100 MB download ceiling.
+const LEGACY_MAX_DOWNLOAD_BYTES: u64 = 100 * 1024 * 1024;
+
+/// The legacy app never restricted redirect targets.
+fn legacy_allow_any(_url: &str) -> Result<(), String> {
+    Ok(())
+}
+
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub struct LaunchStatusInfo {
     pub stage: &'static str,
@@ -539,7 +547,7 @@ fn handle_http_connection(
             let dl_url = v["download_url"].as_str().unwrap_or("");
             let sha = v["sha256"].as_str();
             let res = paths
-                .download_and_stage_launcher_update(dl_url, sha)
+                .download_and_stage_launcher_update(dl_url, sha, LEGACY_MAX_DOWNLOAD_BYTES, &legacy_allow_any)
                 .map(|p| json!({ "ok": true, "staged_path": p.display().to_string() }));
             send_json_result(&mut stream, res)
         }
@@ -585,7 +593,12 @@ fn handle_http_connection(
             let v: Value = serde_json::from_str(body_str).unwrap_or_default();
             let download_url = v["download_url"].as_str().unwrap_or("");
             let mod_id = v["mod_id"].as_str();
-            let res = paths.download_and_install_community_mod(download_url, mod_id);
+            let res = paths.download_and_install_community_mod(
+                download_url,
+                mod_id,
+                LEGACY_MAX_DOWNLOAD_BYTES,
+                &legacy_allow_any,
+            );
             send_json_result(&mut stream, res)
         }
         ("POST", "/api/system/register-protocols") => {
@@ -1679,9 +1692,9 @@ fn get_query_param(query: &str, key: &str) -> Option<String> {
 fn legacy_dll_source() -> Result<PathBuf, String> {
     env::current_exe()
         .ok()
-        .and_then(|p| p.parent().map(|d| d.join("winmm.dll")))
+        .and_then(|p| p.parent().map(|d| d.join("qm_winmm.dll")))
         .filter(|p| p.is_file())
-        .ok_or_else(|| "winmm.dll was not found next to the launcher executable.".to_string())
+        .ok_or_else(|| "qm_winmm.dll was not found next to the launcher executable.".to_string())
 }
 
 fn legacy_restore_clean(paths: &QuarterMasterPaths) -> Result<(), String> {

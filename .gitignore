@@ -30,3 +30,9 @@ result*
 Thumbs.db
 desktop.ini
 /tests/__pycache__
+
+# launcher-ui (Node, Vite, Playwright)
+launcher-ui/node_modules/
+launcher-ui/dist/
+launcher-ui/test-results/
+launcher-ui/playwright-report/

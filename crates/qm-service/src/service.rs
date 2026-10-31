@@ -2,11 +2,11 @@
 use crate::cache::Caches;
 use crate::events::{EventSink, QmEvent, Scope};
 use crate::game::GameStatus;
-use crate::jobs::JobRunner;
+use crate::jobs::{JobId, JobKind, JobRunner};
 use crate::process::{ProcessProbe, WatchTimings};
+use crate::refresh::Refresher;
 use qm_manager::QuarterMasterPaths;
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 
 pub(crate) struct Inner {
@@ -19,8 +19,31 @@ pub(crate) struct Inner {
     pub game_folder: Mutex<()>,
     /// Current launch state; never held while emitting events.
     pub game: Mutex<GameStatus>,
-    /// Bumped whenever the simulation cache is cleared; a run only stores if it is unchanged.
-    pub sim_gen: AtomicU32,
+    /// Cache generations, bumped on every clear; fills store only if unchanged.
+    pub gens: Mutex<Generations>,
+    pub refresher: Refresher,
+    /// Background health refresh state (not a job; see `ops::diagnostics`).
+    pub health_refresh: Mutex<BackgroundSlot>,
+}
+
+/// Coalescing flags for a non-job background refresh.
+#[derive(Debug, Default)]
+pub(crate) struct BackgroundSlot {
+    pub dirty: bool,
+    pub running: bool,
+}
+
+/// Generation per refillable cache. Clearing a cache and bumping its counter happen under the
+/// same lock, so a job that read older inputs cannot store over a newer invalidation.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct Generations {
+    pub mods: u32,
+    pub vanilla: u32,
+    pub sim: u32,
+    pub saves: u32,
+    pub health: u32,
+    pub updates: u32,
+    pub catalog: u32,
 }
 
 #[derive(Clone)]
@@ -36,6 +59,7 @@ impl Service {
         probe: Arc<dyn ProcessProbe>,
     ) -> Self {
         let jobs = JobRunner::new(sink.clone());
+        let refresher = Refresher::new(jobs.clone());
         Self {
             inner: Arc::new(Inner {
                 paths,
@@ -45,7 +69,9 @@ impl Service {
                 caches: Caches::default(),
                 game_folder: Mutex::new(()),
                 game: Mutex::new(GameStatus::idle()),
-                sim_gen: AtomicU32::new(0),
+                gens: Mutex::new(Generations::default()),
+                refresher,
+                health_refresh: Mutex::new(BackgroundSlot::default()),
             }),
             timings: WatchTimings::default(),
         }
@@ -64,84 +90,137 @@ impl Service {
         &self.inner.jobs
     }
 
-    /// Clear the caches affected by `scope`, then emit its events (after all locks are released).
+    /// Clear the caches affected by `scope`, emit its events (after all locks are released),
+    /// then request the jobs that refill what was cleared.
     pub fn invalidate(&self, scope: Scope) {
-        let pending = self.clear_scope(scope);
-        self.finish_invalidate(pending);
-    }
-
-    /// First half of `invalidate`: clears caches only. Callers may refill a cache before
-    /// `finish_invalidate` emits, so listeners refetch data that is already there.
-    pub(crate) fn clear_scope(&self, scope: Scope) -> PendingInvalidation {
         let c = &self.inner.caches;
-        let mut resimulate = false;
-        let emits: &'static [Scope] = match scope {
+        let (emits, refill): (&[Scope], Option<JobKind>) = match scope {
             Scope::Mods => {
-                c.mods.clear();
-                lock_clear(&c.mod_detail);
-                c.simulation.clear();
-                resimulate = true;
-                &[Scope::Mods, Scope::LoadOrder]
+                self.with_gens(|g| {
+                    c.mods.clear();
+                    lock_clear(&c.mod_detail);
+                    g.mods = g.mods.wrapping_add(1);
+                });
+                (&[Scope::Mods, Scope::LoadOrder], Some(JobKind::WarmMods))
             }
-            Scope::Profiles => {
-                c.simulation.clear();
-                resimulate = true;
-                &[Scope::Profiles, Scope::LoadOrder]
-            }
-            Scope::LoadOrder => {
-                c.simulation.clear();
-                resimulate = true;
-                &[Scope::LoadOrder]
-            }
+            Scope::Profiles => (&[Scope::Profiles, Scope::LoadOrder], None),
+            Scope::LoadOrder => (&[Scope::LoadOrder], None),
             Scope::Saves => {
-                lock_clear(&c.save_detail);
-                &[Scope::Saves]
+                self.with_gens(|g| {
+                    lock_clear(&c.save_detail);
+                    g.saves = g.saves.wrapping_add(1);
+                });
+                (&[Scope::Saves], None)
             }
             Scope::Settings => {
-                c.vanilla.clear();
-                c.simulation.clear();
-                c.health.clear();
-                &[Scope::Settings, Scope::LoadOrder, Scope::Health]
+                self.with_gens(|g| {
+                    c.vanilla.clear();
+                    g.vanilla = g.vanilla.wrapping_add(1);
+                    c.health.clear();
+                    g.health = g.health.wrapping_add(1);
+                });
+                (
+                    &[Scope::Settings, Scope::LoadOrder, Scope::Health],
+                    Some(JobKind::WarmVanilla),
+                )
             }
             Scope::Health => {
-                c.health.clear();
-                &[Scope::Health]
+                self.with_gens(|g| {
+                    c.health.clear();
+                    g.health = g.health.wrapping_add(1);
+                });
+                (&[Scope::Health], None)
             }
-            Scope::Crashes => &[Scope::Crashes],
+            Scope::Crashes => (&[Scope::Crashes], None),
             Scope::Updates => {
-                c.updates.clear();
-                &[Scope::Updates]
+                self.with_gens(|g| {
+                    c.updates.clear();
+                    g.updates = g.updates.wrapping_add(1);
+                });
+                (&[Scope::Updates], None)
             }
             Scope::Catalog => {
-                c.catalog.clear();
-                &[Scope::Catalog]
+                self.with_gens(|g| {
+                    c.catalog.clear();
+                    g.catalog = g.catalog.wrapping_add(1);
+                });
+                (&[Scope::Catalog], None)
             }
         };
-        if emits.contains(&Scope::LoadOrder) {
-            self.inner.sim_gen.fetch_add(1, Ordering::SeqCst);
+        // Every scope that emits LoadOrder makes the simulation stale.
+        let resimulate = emits.contains(&Scope::LoadOrder);
+        if resimulate {
+            self.clear_simulation();
         }
-        PendingInvalidation { emits, resimulate }
-    }
-
-    /// Second half of `invalidate`: emits the events and reschedules the simulation.
-    pub(crate) fn finish_invalidate(&self, pending: PendingInvalidation) {
-        for s in pending.emits {
+        for s in emits {
             self.notify(*s);
         }
-        if pending.resimulate && self.inner.caches.vanilla.get().is_some() {
+        // Settings refills vanilla first; WarmVanilla then requests the simulation itself.
+        if resimulate && scope != Scope::Settings && c.vanilla.get().is_some() {
             self.schedule_simulation();
         }
+        if let Some(kind) = refill {
+            self.refresh(kind);
+        }
+    }
+
+    /// Request one more pass of a cache-filling job (`WarmMods`, `WarmVanilla`, `Simulation`,
+    /// `UpdatesRefresh`, `CatalogRefresh`).
+    pub(crate) fn refresh(&self, kind: JobKind) -> JobId {
+        let svc = self.clone();
+        self.inner
+            .refresher
+            .request(kind, Arc::new(move |ctx| svc.refresh_pass(kind, ctx)))
+    }
+
+    /// Fill a cache on a miss: starts a refresh unless one is already running.
+    pub(crate) fn refresh_if_idle(&self, kind: JobKind) -> JobId {
+        let svc = self.clone();
+        self.inner
+            .refresher
+            .request_if_idle(kind, Arc::new(move |ctx| svc.refresh_pass(kind, ctx)))
+    }
+
+    fn refresh_pass(
+        &self,
+        kind: JobKind,
+        ctx: &crate::jobs::JobCtx,
+    ) -> crate::QmResult<Option<String>> {
+        match kind {
+            JobKind::WarmMods => self.warm_mods_pass(ctx),
+            JobKind::WarmVanilla => self.warm_vanilla_pass(ctx),
+            JobKind::Simulation => self.simulation_pass(ctx),
+            JobKind::UpdatesRefresh => self.updates_pass(ctx),
+            JobKind::CatalogRefresh => self.catalog_pass(ctx),
+            other => Err(crate::QmError::new(
+                crate::ErrorKind::Internal,
+                format!("{other:?} is not a refresh job"),
+            )),
+        }
+    }
+
+    pub(crate) fn generations(&self) -> Generations {
+        *self.inner.gens.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Run `f` while holding the generations lock.
+    pub(crate) fn with_gens<R>(&self, f: impl FnOnce(&mut Generations) -> R) -> R {
+        let mut g = self.inner.gens.lock().unwrap_or_else(|e| e.into_inner());
+        f(&mut g)
+    }
+
+    /// Clear the simulation and bump its generation under one lock.
+    pub(crate) fn clear_simulation(&self) {
+        self.with_gens(|g| {
+            self.inner.caches.simulation.clear();
+            g.sim = g.sim.wrapping_add(1);
+        });
     }
 
     /// Emit `Invalidated { scope }` without clearing anything.
     pub(crate) fn notify(&self, scope: Scope) {
         self.inner.sink.emit(QmEvent::Invalidated { scope });
     }
-}
-
-pub(crate) struct PendingInvalidation {
-    emits: &'static [Scope],
-    resimulate: bool,
 }
 
 fn lock_clear<K, V>(m: &Mutex<HashMap<K, V>>) {

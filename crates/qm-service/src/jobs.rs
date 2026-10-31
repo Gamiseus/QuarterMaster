@@ -109,6 +109,8 @@ impl JobCtx {
     }
 }
 
+/// Cheap to clone: clones share one job table.
+#[derive(Clone)]
 pub struct JobRunner {
     inner: Arc<Inner>,
 }
@@ -264,6 +266,19 @@ impl JobRunner {
         entry.info.cancelling = true;
         entry.cancel.store(true, Ordering::SeqCst);
         Ok(())
+    }
+
+    /// Returns true once job `id` is no longer in the table, waiting up to `timeout`.
+    pub fn wait_for(&self, id: JobId, timeout: Duration) -> bool {
+        let st = lock(&self.inner.state);
+        match self
+            .inner
+            .idle
+            .wait_timeout_while(st, timeout, |s| s.jobs.iter().any(|e| e.info.id == id))
+        {
+            Ok((_, res)) => !res.timed_out(),
+            Err(e) => !e.into_inner().1.timed_out(),
+        }
     }
 
     /// Returns true if no jobs are running, waiting up to `timeout`.

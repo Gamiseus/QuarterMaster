@@ -669,10 +669,21 @@ impl QuarterMasterPaths {
 
         let now = jiff::Zoned::now();
         let ts_slug = now.strftime("%Y-%m-%d_%H-%M-%S").to_string();
-        let backup_id = format!("bak-{ts_slug}");
-        let snap_dir = backups_dir.join(&backup_id);
-        fs::create_dir_all(&snap_dir)
-            .map_err(|e| format!("Failed to create snapshot dir: {e}"))?;
+        // Two backups in the same second must not share (and overwrite) one snapshot dir;
+        // `create_dir` claims the name atomically.
+        let mut backup_id = format!("bak-{ts_slug}");
+        let mut n = 1;
+        let snap_dir = loop {
+            let dir = backups_dir.join(&backup_id);
+            match fs::create_dir(&dir) {
+                Ok(()) => break dir,
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists && n < 1000 => {
+                    n += 1;
+                    backup_id = format!("bak-{ts_slug}-{n}");
+                }
+                Err(e) => return Err(format!("Failed to create snapshot dir: {e}")),
+            }
+        };
 
         let mut total_size = 0u64;
         for fname in SAVE_FILES {
@@ -1242,7 +1253,7 @@ impl QuarterMasterPaths {
         match method {
             LaunchMethod::SteamUrl => {
                 if crate::storage::is_steam_running() {
-                    Command::new("cmd")
+                    crate::winproc::system_command("cmd")
                         .args(["/C", "start", "", "steam://rungameid/1391530"])
                         .spawn()
                         .map(|child| child.id())
@@ -1254,7 +1265,7 @@ impl QuarterMasterPaths {
                         .map(|child| child.id())
                         .map_err(|e| format!("Failed to launch Steam at {}: {e}", steam_exe.display()))
                 } else {
-                    Command::new("cmd")
+                    crate::winproc::system_command("cmd")
                         .args(["/C", "start", "", "steam://rungameid/1391530"])
                         .spawn()
                         .map(|child| child.id())
@@ -1291,7 +1302,7 @@ pub fn create_dir_junction_or_copy(target: &Path, link: &Path) -> Result<(), Str
 
     #[cfg(windows)]
     {
-        let status = Command::new("cmd")
+        let status = crate::winproc::system_command("cmd")
             .args([
                 "/C",
                 "mklink",
@@ -1370,10 +1381,10 @@ fn install_winmm_dll(src: &Path, game_dir: &Path) -> Result<String, String> {
     Ok(qm_schema::sha256_hex(&bytes))
 }
 
-/// `winmm.dll` next to the running executable (never the working directory).
+/// `qm_winmm.dll` (the shipped proxy) next to the running executable (never the working directory).
 fn exe_dir_winmm_dll() -> Option<PathBuf> {
     let exe = std::env::current_exe().ok()?;
-    let p = exe.parent()?.join("winmm.dll");
+    let p = exe.parent()?.join("qm_winmm.dll");
     p.is_file().then_some(p)
 }
 
@@ -1531,27 +1542,7 @@ fn list_backups_in_dir(backups_dir: &Path) -> Vec<SaveBackupEntry> {
 
 /// Checks whether `mnb.exe` is currently running on Windows and returns its PID if active (Section 5 & 6).
 pub fn is_game_running() -> Option<u32> {
-    #[cfg(windows)]
-    {
-        if let Ok(out) = Command::new("tasklist")
-            .args(["/FI", "IMAGENAME eq mnb.exe", "/FO", "CSV", "/NH"])
-            .output()
-        {
-            let text = String::from_utf8_lossy(&out.stdout);
-            for line in text.lines() {
-                if line.to_ascii_lowercase().contains("\"mnb.exe\"") {
-                    let parts: Vec<&str> = line.split(',').collect();
-                    if parts.len() >= 2 {
-                        let pid_str = parts[1].trim().trim_matches('"');
-                        if let Ok(pid) = pid_str.parse::<u32>() {
-                            return Some(pid);
-                        }
-                    }
-                }
-            }
-        }
-    }
-    None
+    crate::winproc::find_process("mnb.exe")
 }
 
 /// Captures any untracked runtime-generated files inside `profile_mods_dir` (outside mod junctions and `qm/`)

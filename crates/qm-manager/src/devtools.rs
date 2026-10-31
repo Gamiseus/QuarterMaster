@@ -1744,11 +1744,13 @@ impl QuarterMasterPaths {
     }
 
     /// Downloads and stages a newer launcher executable to `cache/updates/qm-launcher-new.exe`,
-    /// enforcing HTTPS, size limit (100MB), and verifying SHA-256 checksum if provided.
+    /// enforcing HTTPS, the `max_bytes` size limit, and verifying SHA-256 checksum if provided.
     pub fn download_and_stage_launcher_update(
         &self,
         download_url: &str,
         expected_sha256: Option<&str>,
+        max_bytes: u64,
+        allow: crate::community::UrlCheck<'_>,
     ) -> Result<PathBuf, String> {
         let trimmed_url = download_url.trim();
         if trimmed_url.is_empty() {
@@ -1761,23 +1763,12 @@ impl QuarterMasterPaths {
         fs::create_dir_all(&staging_dir).map_err(|e| format!("Failed to create updates dir: {e}"))?;
         let staged_file = staging_dir.join("qm-launcher-new.exe");
 
-        let agent = ureq::AgentBuilder::new()
-            .timeout(std::time::Duration::from_secs(60))
-            .build();
-        let resp = agent
-            .get(trimmed_url)
-            .set("User-Agent", "QuarterMaster-Launcher/1.0 (Self-Update)")
-            .call()
-            .map_err(|e| format!("Download request failed: {e}"))?;
-
-        let mut reader = resp.into_reader();
-        let mut buffer = Vec::new();
-        // 100MB limit for launcher binary
-        reader
-            .by_ref()
-            .take(100 * 1024 * 1024)
-            .read_to_end(&mut buffer)
-            .map_err(|e| format!("Failed reading download: {e}"))?;
+        let buffer = crate::community::fetch_capped(
+            trimmed_url,
+            "QuarterMaster-Launcher/1.0 (Self-Update)",
+            allow,
+            max_bytes,
+        )?;
 
         let downloaded_sha = qm_schema::sha256_hex(&buffer);
         if let Some(expected) = expected_sha256 {
@@ -1821,8 +1812,8 @@ set STAGED_EXE="{staged_exe}"
 set OLD_EXE="{old_exe}"
 
 :wait_loop
-tasklist /FI "PID eq %TARGET_PID%" 2>NUL | find /I "%TARGET_PID%" >NUL
-if not errorlevel 1 (
+rem Wait until the launcher exe is no longer locked by the running process.
+2>NUL (>>%LAUNCHER_EXE% (call )) || (
     timeout /T 1 /NOBREAK >NUL
     goto wait_loop
 )
@@ -1841,7 +1832,7 @@ start "" %LAUNCHER_EXE%
             fs::write(&script_path, bat_content)
                 .map_err(|e| format!("Failed to write swap script: {e}"))?;
 
-            std::process::Command::new("cmd")
+            crate::winproc::system_command("cmd")
                 .args(["/C", "start", "", &script_path.to_string_lossy()])
                 .spawn()
                 .map_err(|e| format!("Failed to execute swap script: {e}"))?;
@@ -1886,8 +1877,8 @@ set LAUNCHER_EXE="{launcher_exe}"
 set OLD_EXE="{old_exe}"
 
 :wait_loop
-tasklist /FI "PID eq %TARGET_PID%" 2>NUL | find /I "%TARGET_PID%" >NUL
-if not errorlevel 1 (
+rem Wait until the launcher exe is no longer locked by the running process.
+2>NUL (>>%LAUNCHER_EXE% (call )) || (
     timeout /T 1 /NOBREAK >NUL
     goto wait_loop
 )
@@ -1903,7 +1894,7 @@ start "" %LAUNCHER_EXE%
             fs::write(&script_path, bat_content)
                 .map_err(|e| format!("Failed to write rollback script: {e}"))?;
 
-            std::process::Command::new("cmd")
+            crate::winproc::system_command("cmd")
                 .args(["/C", "start", "", &script_path.to_string_lossy()])
                 .spawn()
                 .map_err(|e| format!("Failed to execute rollback script: {e}"))?;
@@ -1948,8 +1939,16 @@ start "" %LAUNCHER_EXE%
         &self,
         download_url: &str,
         expected_mod_id: Option<&str>,
+        max_bytes: u64,
+        allow: crate::community::UrlCheck<'_>,
     ) -> Result<serde_json::Value, String> {
-        crate::community::download_and_install_community_mod(self, download_url, expected_mod_id)
+        crate::community::download_and_install_community_mod(
+            self,
+            download_url,
+            expected_mod_id,
+            max_bytes,
+            allow,
+        )
     }
 
     /// Polls `workspace_mods_dir` (`MnB-Mods/`) for modified files since `since_epoch_ms` (Section 14: Watch / Hot-Reload Mode).
@@ -2020,7 +2019,6 @@ pub fn register_windows_protocols() -> Result<Vec<String>, String> {
 
     #[cfg(windows)]
     {
-        use std::process::Command;
         let commands = [
             // qm:// URL scheme
             (
@@ -2061,7 +2059,7 @@ pub fn register_windows_protocols() -> Result<Vec<String>, String> {
         ];
 
         for (key, value_name, data) in commands {
-            let mut cmd = Command::new("reg");
+            let mut cmd = crate::winproc::system_command("reg");
             cmd.arg("add").arg(key);
             if value_name.is_empty() {
                 cmd.arg("/ve");

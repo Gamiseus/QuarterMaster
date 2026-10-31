@@ -94,22 +94,22 @@ cargo test
 cargo build --release --package qm-win
 
 # 4. Locate the output binary
-# target/release/winmm.dll
+# target/release/qm_winmm.dll (deployed into the game folder renamed to winmm.dll)
 ```
 
 ### Verification
 You can compare the SHA-256 hash or export table of your freshly compiled binary against the distributed binary using PowerShell:
 ```powershell
 # 1. Get the hash of the dll file you just built
-Get-FileHash -Algorithm SHA256 .\target\release\winmm.dll
+Get-FileHash -Algorithm SHA256 .\target\release\qm_winmm.dll
 
 # 2. Do it again for the one you downloaded to verify it's identical. Ie "C:\Program Files (x86)\Steam\steamapps\common\MudandBlood\winmm.dll"
 Get-FileHash -Algorithm SHA256 PATH\TO\DOWNLOADED\winmm.dll
 
 # 3. If you feel like going further
-dumpbin /EXPORTS .\target\release\winmm.dll
+dumpbin /EXPORTS .\target\release\qm_winmm.dll
 # Alternate command if dumpbin isn't found
 $dumpbin = (Get-ChildItem "C:\Program Files*\Microsoft Visual Studio" -Recurse -Filter "dumpbin.exe" -ErrorAction SilentlyContinue | Select-Object -First 1).FullName
-& $dumpbin /EXPORTS .\target\release\winmm.dll
+& $dumpbin /EXPORTS .\target\release\qm_winmm.dll
 ```
 The exports will list the forwarded Windows Multimedia routines (`timeGetTime`, etc.) confirming export integrity.

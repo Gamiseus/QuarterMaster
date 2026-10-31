@@ -4,7 +4,7 @@ use qm_service::testing::{
     cached, empty_simulation_report, seed_all_but_simulation, seed_mods, seed_simulation,
     seed_vanilla, FakeProbe, RecordingSink,
 };
-use qm_service::{Loadable, QmEvent, Scope, Service, VanillaFiles};
+use qm_service::{JobKind, Loadable, QmEvent, Scope, Service, VanillaFiles};
 use std::sync::Arc;
 
 fn svc() -> (support::Fixture, Arc<RecordingSink>, Service) {
@@ -12,6 +12,41 @@ fn svc() -> (support::Fixture, Arc<RecordingSink>, Service) {
     let sink = Arc::new(RecordingSink::new());
     let s = Service::new(fx.paths.clone(), sink.clone(), Arc::new(FakeProbe::new()));
     (fx, sink, s)
+}
+
+/// Occupy the refill singletons (WarmMods, WarmVanilla, Simulation) so refreshes requested by
+/// `invalidate` join these jobs and cannot refill caches while a test asserts. Dropping the guard
+/// releases them and waits for the retried refills to finish.
+struct Hold<'a> {
+    svc: &'a Service,
+    release: Vec<std::sync::mpsc::Sender<()>>,
+}
+
+fn hold(svc: &Service) -> Hold<'_> {
+    let mut release = Vec::new();
+    for kind in [JobKind::WarmMods, JobKind::WarmVanilla, JobKind::Simulation] {
+        let (tx, rx) = std::sync::mpsc::channel::<()>();
+        svc.jobs().spawn(kind, move |_| {
+            let _ = rx.recv();
+            Ok(None)
+        });
+        release.push(tx);
+    }
+    Hold { svc, release }
+}
+
+impl Drop for Hold<'_> {
+    fn drop(&mut self) {
+        self.release.clear();
+        // Retries start right after the held jobs leave the table; let them settle.
+        for _ in 0..5 {
+            assert!(self
+                .svc
+                .jobs()
+                .wait_idle(std::time::Duration::from_secs(20)));
+            std::thread::sleep(std::time::Duration::from_millis(30));
+        }
+    }
 }
 
 fn scopes(sink: &RecordingSink) -> Vec<Scope> {
@@ -35,6 +70,7 @@ fn loadable_serializes_tagged() {
 #[test]
 fn invalidate_mods_clears_and_emits_mods_and_load_order() {
     let (_fx, sink, s) = svc();
+    let _h = hold(&s);
     seed_mods(&s, vec![]);
     s.invalidate(Scope::Mods);
     assert!(!cached(&s).mods);
@@ -44,6 +80,7 @@ fn invalidate_mods_clears_and_emits_mods_and_load_order() {
 #[test]
 fn invalidate_settings_clears_vanilla() {
     let (_fx, sink, s) = svc();
+    let _h = hold(&s);
     seed_vanilla(
         &s,
         VanillaFiles {
@@ -85,6 +122,7 @@ fn invalidation_table_rows() {
     ];
     for (scope, cleared, emitted) in rows {
         let (_fx, sink, s) = svc();
+        let h = hold(&s);
         seed_all_but_simulation(&s);
         seed_simulation(&s, empty_simulation_report());
         let before = cached(&s);
@@ -111,5 +149,6 @@ fn invalidation_table_rows() {
         assert_eq!(a.updates, !has("updates"), "{scope:?} updates");
         assert_eq!(a.catalog, !has("catalog"), "{scope:?} catalog");
         assert_eq!(scopes(&sink), emitted, "{scope:?} events");
+        drop(h);
     }
 }
