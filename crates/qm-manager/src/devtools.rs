@@ -1554,6 +1554,10 @@ print("[Mod] Initialized successfully!")
     },
 ];
 
+/// Seconds the self-update swap/rollback scripts wait for the old launcher exe to unlock
+/// before giving up and restarting the current launcher unchanged.
+const SWAP_WAIT_MAX_TRIES: u32 = 60;
+
 impl QuarterMasterPaths {
     /// Discovers built-in and installed mod templates (e.g., `GCore/templates/`, `GMenu/templates/`).
     pub fn discover_mod_templates(&self) -> Vec<serde_json::Value> {
@@ -1799,32 +1803,39 @@ impl QuarterMasterPaths {
             .ok_or_else(|| "Could not resolve executable directory".to_string())?;
         let old_exe = exe_dir.join("qm-launcher.old.exe");
 
-        let pid = std::process::id();
+
 
         #[cfg(windows)]
         {
             let script_path = self.cache_dir.join("swap-launcher.bat");
             let bat_content = format!(
                 r#"@echo off
-set TARGET_PID={pid}
 set LAUNCHER_EXE="{launcher_exe}"
 set STAGED_EXE="{staged_exe}"
 set OLD_EXE="{old_exe}"
+set TRIES=0
 
+rem Wait (at most {max_tries} s) until the launcher exe is no longer locked by the exiting process.
+if not exist %LAUNCHER_EXE% goto swap
 :wait_loop
-rem Wait until the launcher exe is no longer locked by the running process.
-2>NUL (>>%LAUNCHER_EXE% (call )) || (
-    timeout /T 1 /NOBREAK >NUL
-    goto wait_loop
-)
+2>NUL (>>%LAUNCHER_EXE% (call )) && goto swap
+set /A TRIES+=1
+if %TRIES% GEQ {max_tries} goto give_up
+"%SystemRoot%\System32\PING.EXE" -n 2 127.0.0.1 >NUL
+goto wait_loop
 
+:swap
+if not exist %STAGED_EXE% goto give_up
 if exist %OLD_EXE% del /F /Q %OLD_EXE%
 if exist %LAUNCHER_EXE% move /Y %LAUNCHER_EXE% %OLD_EXE%
 move /Y %STAGED_EXE% %LAUNCHER_EXE%
-start "" %LAUNCHER_EXE%
+
+:give_up
+rem On timeout the update is skipped and the current launcher is started again.
+if exist %LAUNCHER_EXE% start "" %LAUNCHER_EXE%
 (goto) 2>nul & del "%~f0"
 "#,
-                pid = pid,
+                max_tries = SWAP_WAIT_MAX_TRIES,
                 launcher_exe = current_exe.display(),
                 staged_exe = staged_file.display(),
                 old_exe = old_exe.display(),
@@ -1865,29 +1876,35 @@ start "" %LAUNCHER_EXE%
             return Err("No previous launcher binary (qm-launcher.old.exe) found for rollback".to_string());
         }
 
-        let pid = std::process::id();
+
 
         #[cfg(windows)]
         {
             let script_path = self.cache_dir.join("rollback-launcher.bat");
             let bat_content = format!(
                 r#"@echo off
-set TARGET_PID={pid}
 set LAUNCHER_EXE="{launcher_exe}"
 set OLD_EXE="{old_exe}"
+set TRIES=0
 
+rem Wait (at most {max_tries} s) until the launcher exe is no longer locked by the exiting process.
+if not exist %LAUNCHER_EXE% goto swap
 :wait_loop
-rem Wait until the launcher exe is no longer locked by the running process.
-2>NUL (>>%LAUNCHER_EXE% (call )) || (
-    timeout /T 1 /NOBREAK >NUL
-    goto wait_loop
-)
+2>NUL (>>%LAUNCHER_EXE% (call )) && goto swap
+set /A TRIES+=1
+if %TRIES% GEQ {max_tries} goto give_up
+"%SystemRoot%\System32\PING.EXE" -n 2 127.0.0.1 >NUL
+goto wait_loop
 
-move /Y %OLD_EXE% %LAUNCHER_EXE%
-start "" %LAUNCHER_EXE%
+:swap
+if exist %OLD_EXE% move /Y %OLD_EXE% %LAUNCHER_EXE%
+
+:give_up
+rem On timeout the rollback is skipped and the current launcher is started again.
+if exist %LAUNCHER_EXE% start "" %LAUNCHER_EXE%
 (goto) 2>nul & del "%~f0"
 "#,
-                pid = pid,
+                max_tries = SWAP_WAIT_MAX_TRIES,
                 launcher_exe = current_exe.display(),
                 old_exe = old_exe.display(),
             );
