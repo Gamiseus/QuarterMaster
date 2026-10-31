@@ -48,7 +48,7 @@ fn main() {
 
     // If the game process is not currently running, ensure the game folder is in a clean unmodded state
     if qm_manager::profiles::is_game_running().is_none() {
-        let _ = paths.restore_clean_game_dir();
+        let _ = legacy_restore_clean(&paths);
     }
 
     if args.iter().any(|a| a == "--smoke-test") {
@@ -421,8 +421,8 @@ fn handle_http_connection(
             send_json_result(&mut stream, res)
         }
         ("POST", "/api/health/repair-dll") => {
-            let res = paths
-                .repair_winmm_dll()
+            let res = legacy_dll_source()
+                .and_then(|dll| paths.repair_winmm_dll(&dll))
                 .map(|sha| json!({ "ok": true, "sha256": sha }));
             send_json_result(&mut stream, res)
         }
@@ -822,14 +822,14 @@ fn handle_http_connection(
             send_json_result(&mut stream, Ok(json!({ "ok": true })))
         }
         ("POST", "/api/game/restore-clean") => {
-            let res = paths.restore_clean_game_dir().map(|_| json!({ "ok": true, "status": "clean" }));
+            let res = legacy_restore_clean(&paths).map(|_| json!({ "ok": true, "status": "clean" }));
             send_json_result(&mut stream, res)
         }
         ("POST", "/api/game/deploy") => {
             let v: Value = serde_json::from_str(body_str).unwrap_or_default();
             let settings = paths.load_settings();
             let prof_id = v["profile_id"].as_str().unwrap_or(&settings.active_profile_id);
-            let res = paths.deploy_profile_to_game(prof_id).map(|_| json!({ "ok": true, "status": "deployed" }));
+            let res = legacy_dll_source().and_then(|dll| paths.deploy_profile_to_game(prof_id, &dll)).map(|_| json!({ "ok": true, "status": "deployed" }));
             send_json_result(&mut stream, res)
         }
         ("GET", "/api/game/status") => {
@@ -898,8 +898,7 @@ fn handle_http_connection(
                     detail: "Starting Mud and Blood...",
                 };
             }
-            let res = paths
-                .launch_game(prof_id, method)
+            let res = legacy_launch(&paths, prof_id, method)
                 .map(|pid| {
                     if !is_steam {
                         *LAUNCH_STATUS.write().unwrap() = LaunchStatusInfo {
@@ -967,7 +966,7 @@ fn handle_http_connection(
                                         pid: None,
                                         detail: "Game exited; restoring clean vanilla state...",
                                     };
-                                    let _ = paths_watcher.restore_clean_game_dir();
+                                    let _ = legacy_restore_clean(&paths_watcher);
                                     *LAUNCH_STATUS.write().unwrap() = LaunchStatusInfo {
                                         stage: "idle",
                                         pid: None,
@@ -1675,3 +1674,45 @@ fn get_query_param(query: &str, key: &str) -> Option<String> {
     None
 }
 
+
+// Interim shims after the Task 6 qm-manager signature changes (legacy reference crate).
+fn legacy_dll_source() -> Result<PathBuf, String> {
+    env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|d| d.join("winmm.dll")))
+        .filter(|p| p.is_file())
+        .ok_or_else(|| "winmm.dll was not found next to the launcher executable.".to_string())
+}
+
+fn legacy_restore_clean(paths: &QuarterMasterPaths) -> Result<(), String> {
+    let mut known = std::collections::HashSet::new();
+    if let Some(bytes) = legacy_dll_source().ok().and_then(|p| fs::read(p).ok()) {
+        known.insert(qm_schema::sha256_hex(&bytes));
+    }
+    paths.restore_clean_game_dir(&known)
+}
+
+fn legacy_launch(
+    paths: &QuarterMasterPaths,
+    profile_id: &str,
+    method_override: Option<LaunchMethod>,
+) -> Result<u32, String> {
+    paths.activate_profile(profile_id)?;
+    let settings = paths.load_settings();
+    let profile = paths.get_profile(profile_id)?;
+    let method = method_override
+        .or(profile.launch_method)
+        .unwrap_or(settings.default_launch_method);
+    let is_vanilla = method == LaunchMethod::Vanilla
+        || profile.launch_method == Some(LaunchMethod::Vanilla)
+        || profile.enabled_mods.is_empty();
+    if is_vanilla {
+        legacy_restore_clean(paths)?;
+    } else {
+        paths.deploy_profile_to_game(profile_id, &legacy_dll_source()?)?;
+    }
+    if settings.auto_backup_saves {
+        let _ = paths.create_save_backup(&profile.linked_save_profile_id, "Auto-backup before game launch");
+    }
+    paths.spawn_game_process(&profile, method)
+}

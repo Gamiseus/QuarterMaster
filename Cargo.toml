@@ -4,8 +4,12 @@ members = [
     "crates/qm-schema",
     "crates/qm-core",
     "crates/qm-manager",
+    "crates/qm-service",
     "crates/qm-cli",
     "crates/qm-app",
     "crates/qm-win",
     "crates/minimal-minhook-reference"
 ]
+
+[workspace.dependencies]
+specta = { version = "=2.0.0-rc.22", features = ["derive"] }

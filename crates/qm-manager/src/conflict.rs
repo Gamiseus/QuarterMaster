@@ -5,6 +5,7 @@ use qm_core::handshake::{GluePatchEntry, PatchExecutionRecord, PatchOutcomeStatu
 use qm_core::patch::table::PatchTable;
 use qm_core::patch::{InsertPosition, OnFailurePolicy, Patch, PatternPatch, Priority, Target};
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SimulationReport {
     pub files_touched: Vec<SimulatedFileResult>,
@@ -15,6 +16,7 @@ pub struct SimulationReport {
     pub broken_anchors: usize,
 }
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SimulatedFileResult {
     pub target_file: String,
@@ -25,6 +27,7 @@ pub struct SimulatedFileResult {
     pub patched_line_count: usize,
 }
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AttributedCodeLine {
     pub line_number: usize,
@@ -34,6 +37,7 @@ pub struct AttributedCodeLine {
     pub patch_name: Option<String>,
 }
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "tier", rename_all = "snake_case")]
 pub enum ConflictResolutionSuggestion {
@@ -63,6 +67,7 @@ pub enum ConflictResolutionSuggestion {
     },
 }
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DetectedConflict {
     pub id: String,

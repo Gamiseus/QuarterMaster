@@ -17,6 +17,7 @@ pub mod vars;
 
 pub type Priority = i32;
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum OnFailurePolicy {
@@ -54,6 +55,7 @@ pub struct PatchFile {
     pub vars: HashMap<String, String>,
 }
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "kebab-case")]
 pub enum Patch {
@@ -65,6 +67,7 @@ pub enum Patch {
     Module(ModulePatch),
 }
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 #[serde(untagged)]
 pub enum Target {
@@ -81,6 +84,7 @@ impl Target {
     }
 }
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub enum InsertPosition {

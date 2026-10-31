@@ -4,6 +4,7 @@ use crop::Rope;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub enum CopyPosition {
@@ -11,6 +12,7 @@ pub enum CopyPosition {
     Append,
 }
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct CopyPatch {
     pub position: CopyPosition,

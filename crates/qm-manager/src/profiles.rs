@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -11,6 +11,7 @@ use crate::library::{copy_directory_clean, InstalledMod};
 use crate::solver::resolve_load_order;
 use crate::storage::{LaunchMethod, QuarterMasterPaths, StateJournal};
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProfileSeparator {
     pub id: String,
@@ -21,6 +22,7 @@ pub struct ProfileSeparator {
     pub collapsed: bool,
 }
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModProfile {
     pub id: String,
@@ -71,6 +73,7 @@ fn default_save_id() -> String {
     "default".to_string()
 }
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SaveProfile {
     pub id: String,
@@ -85,6 +88,7 @@ pub struct SaveProfile {
     pub backups: Vec<SaveBackupEntry>,
 }
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SaveBackupEntry {
     pub id: String,
@@ -94,6 +98,7 @@ pub struct SaveBackupEntry {
     pub size_bytes: u64,
 }
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProfileDiff {
     pub profile_a_id: String,
@@ -104,6 +109,7 @@ pub struct ProfileDiff {
     pub setting_diffs: Vec<(String, String, String, String)>,
 }
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SaveCompatibilityReport {
     pub is_safe: bool,
@@ -1024,7 +1030,7 @@ impl QuarterMasterPaths {
 
         // Profile staging is isolated to `profiles/<profile_id>/Mods/`.
         // Linking into the live game directory (<game_dir>/Mods and winmm.dll) is performed
-        // strictly when launching the game via `launch_game` / `deploy_profile_to_game`,
+        // strictly by the qm-service game-folder transactions (`deploy_profile_to_game`),
         // keeping the Steam game install completely vanilla during regular profile management.
 
         // 4. Swap save profile if needed and sync per-profile `saveModSettings.lua`
@@ -1119,8 +1125,8 @@ impl QuarterMasterPaths {
 
     /// Deploys the active profile to the physical game directory.
     /// Creates the `<game_dir>/Mods` junction pointing to `profiles/<profile_id>/Mods/`
-    /// and ensures `winmm.dll` is present in the game directory.
-    pub fn deploy_profile_to_game(&self, profile_id: &str) -> Result<(), String> {
+    /// and copies `dll_source` to `<game_dir>/winmm.dll`. The caller owns the DLL ownership check.
+    pub fn deploy_profile_to_game(&self, profile_id: &str, dll_source: &Path) -> Result<(), String> {
         let settings = self.load_settings();
         let game_exe = settings
             .game_exe_path
@@ -1137,26 +1143,29 @@ impl QuarterMasterPaths {
         }
 
         let game_mods_dir = game_dir.join("Mods");
-        if game_mods_dir.exists() {
+        if fs::symlink_metadata(&game_mods_dir).is_ok() {
             if !is_reparse_point(&game_mods_dir) {
+                // A real directory: never delete it without a successful backup.
                 let bak_name = format!(
                     "pre-qm-mods-{}",
                     jiff::Zoned::now().strftime("%Y%m%d-%H%M%S")
                 );
                 let bak_dest = self.backups_dir.join(bak_name);
-                let _ = copy_directory_clean(&game_mods_dir, &bak_dest);
+                copy_directory_clean(&game_mods_dir, &bak_dest)?;
             }
             remove_junction_or_dir(&game_mods_dir)?;
         }
 
         create_dir_junction_or_copy(&profile_mods_dir, &game_mods_dir)?;
-        ensure_winmm_dll_installed(game_dir);
+        install_winmm_dll(dll_source, game_dir)?;
         Ok(())
     }
 
-    /// Restores the game directory to a completely clean, unmodded vanilla state.
-    /// Removes the `<game_dir>/Mods` junction and `winmm.dll`.
-    pub fn restore_clean_game_dir(&self) -> Result<(), String> {
+    /// Restores the game directory to a clean, unmodded vanilla state.
+    /// Removes the `<game_dir>/Mods` junction, then removes `winmm.dll` only when its SHA-256
+    /// is in `known_dll_hashes`. An unknown DLL is left in place and reported as an error
+    /// (after the junction step has run).
+    pub fn restore_clean_game_dir(&self, known_dll_hashes: &HashSet<String>) -> Result<(), String> {
         let settings = self.load_settings();
         let Some(ref game_exe) = settings.game_exe_path else {
             return Ok(());
@@ -1166,66 +1175,57 @@ impl QuarterMasterPaths {
         };
 
         let game_mods_dir = game_dir.join("Mods");
-        if game_mods_dir.exists() {
+        if fs::symlink_metadata(&game_mods_dir).is_ok() {
             if is_reparse_point(&game_mods_dir) {
-                let _ = remove_junction_or_dir(&game_mods_dir);
+                remove_junction_or_dir(&game_mods_dir)?;
             } else {
+                // A real directory: never delete it without a successful backup.
                 let bak_name = format!(
                     "unlinked-mods-{}",
                     jiff::Zoned::now().strftime("%Y%m%d-%H%M%S")
                 );
                 let bak_dest = self.backups_dir.join(bak_name);
-                let _ = copy_directory_clean(&game_mods_dir, &bak_dest);
-                let _ = fs::remove_dir_all(&game_mods_dir);
+                copy_directory_clean(&game_mods_dir, &bak_dest)?;
+                remove_junction_or_dir(&game_mods_dir)?;
             }
+        }
+
+        // Leftover from an interrupted atomic DLL copy; always ours.
+        let tmp = game_dir.join(WINMM_TMP_NAME);
+        if tmp.is_file() {
+            fs::remove_file(&tmp)
+                .map_err(|e| format!("Failed to remove {}: {e}", tmp.display()))?;
         }
 
         let winmm = game_dir.join("winmm.dll");
         if winmm.is_file() {
-            let _ = fs::remove_file(&winmm);
+            let bytes = fs::read(&winmm)
+                .map_err(|e| format!("Failed to read {}: {e}", winmm.display()))?;
+            let hash = qm_schema::sha256_hex(&bytes);
+            if !known_dll_hashes.contains(&hash) {
+                return Err(format!(
+                    "{UNKNOWN_DLL_ERROR_PREFIX} in {} (sha256 {hash}); left in place",
+                    game_dir.display()
+                ));
+            }
+            fs::remove_file(&winmm)
+                .map_err(|e| format!("Failed to remove {}: {e}", winmm.display()))?;
         }
 
         Ok(())
     }
 
-    /// Activates `profile_id` and launches Mud and Blood using the specified or profile-default `LaunchMethod`.
-    pub fn launch_game(
-        &self,
-        profile_id: &str,
-        method_override: Option<LaunchMethod>,
-    ) -> Result<u32, String> {
-        let _plan = self.activate_profile(profile_id)?;
+    /// Spawns Mud and Blood for `profile` with `method`. Does no activation, deploy or backup;
+    /// the caller prepares the game folder first.
+    pub fn spawn_game_process(&self, profile: &ModProfile, method: LaunchMethod) -> Result<u32, String> {
         let settings = self.load_settings();
-        let profile = self.get_profile(profile_id)?;
-
-        let method = method_override
-            .or(profile.launch_method)
-            .unwrap_or(settings.default_launch_method);
-
         let game_exe = settings
             .game_exe_path
+            .clone()
             .ok_or_else(|| "Mud and Blood executable (mnb.exe) path is not configured.".to_string())?;
         let game_dir = game_exe
             .parent()
             .ok_or_else(|| "Invalid game directory".to_string())?;
-
-        let is_vanilla = method == LaunchMethod::Vanilla
-            || profile.launch_method == Some(LaunchMethod::Vanilla)
-            || profile.enabled_mods.is_empty();
-
-        if is_vanilla {
-            self.restore_clean_game_dir()?;
-        } else {
-            self.deploy_profile_to_game(profile_id)?;
-        }
-
-        // Auto-backup saves before launch when enabled (Section 5)
-        if settings.auto_backup_saves {
-            let _ = self.create_save_backup(
-                &profile.linked_save_profile_id,
-                "Auto-backup before game launch",
-            );
-        }
 
         // Ensure `steam_appid.txt` (`1391530`) exists when launching `mnb.exe` directly so Steam API initializes cleanly
         if method != LaunchMethod::SteamUrl {
@@ -1347,29 +1347,34 @@ pub fn is_reparse_point(path: &Path) -> bool {
     false
 }
 
-fn find_source_winmm_dll() -> Option<PathBuf> {
-    let mut candidates = Vec::new();
-    if let Ok(cwd) = std::env::current_dir() {
-        candidates.push(cwd.join("Quartermaster/target/release/winmm.dll"));
-        candidates.push(cwd.join("target/release/winmm.dll"));
-        candidates.push(cwd.join("Quartermaster/target/release/qm_win.dll"));
-        candidates.push(cwd.join("target/release/qm_win.dll"));
-        candidates.push(cwd.join("Quartermaster/winmm.dll"));
+/// Prefix of the error `restore_clean_game_dir` returns for a winmm.dll it does not recognise.
+pub const UNKNOWN_DLL_ERROR_PREFIX: &str = "unknown winmm.dll";
+
+/// Temp name used while copying `winmm.dll` into the game folder.
+pub const WINMM_TMP_NAME: &str = "winmm.dll.qm-tmp";
+
+/// Copies `src` to `<game_dir>/winmm.dll` via a temp file and rename, so a crash never
+/// leaves a half-written DLL. Returns the SHA-256 of the installed file.
+fn install_winmm_dll(src: &Path, game_dir: &Path) -> Result<String, String> {
+    let dest = game_dir.join("winmm.dll");
+    let tmp = game_dir.join(WINMM_TMP_NAME);
+    if let Err(e) = fs::copy(src, &tmp) {
+        let _ = fs::remove_file(&tmp);
+        return Err(format!("Failed to copy {} to {}: {e}", src.display(), tmp.display()));
     }
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(p) = exe.parent() {
-            candidates.push(p.join("winmm.dll"));
-            candidates.push(p.join("qm_win.dll"));
-        }
+    if let Err(e) = fs::rename(&tmp, &dest) {
+        let _ = fs::remove_file(&tmp);
+        return Err(format!("Failed to install {}: {e}", dest.display()));
     }
-    candidates.into_iter().find(|p| p.is_file())
+    let bytes = fs::read(&dest).map_err(|e| format!("Failed to read {}: {e}", dest.display()))?;
+    Ok(qm_schema::sha256_hex(&bytes))
 }
 
-fn ensure_winmm_dll_installed(game_dir: &Path) {
-    let dest = game_dir.join("winmm.dll");
-    if let Some(src) = find_source_winmm_dll() {
-        let _ = fs::copy(src, dest);
-    }
+/// `winmm.dll` next to the running executable (never the working directory).
+fn exe_dir_winmm_dll() -> Option<PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    let p = exe.parent()?.join("winmm.dll");
+    p.is_file().then_some(p)
 }
 
 impl QuarterMasterPaths {
@@ -1383,7 +1388,7 @@ impl QuarterMasterPaths {
         let mut patch_report_val = serde_json::Value::Null;
         let mut recent_logs: Vec<serde_json::Value> = Vec::new();
 
-        let source_dll_sha = find_source_winmm_dll()
+        let source_dll_sha = exe_dir_winmm_dll()
             .and_then(|p| fs::read(p).ok())
             .map(|b| qm_schema::sha256_hex(&b));
 
@@ -1496,20 +1501,15 @@ impl QuarterMasterPaths {
         Ok(count)
     }
 
-    /// Re-installs / repairs `winmm.dll` in the game directory if missing or quarantined.
-    pub fn repair_winmm_dll(&self) -> Result<String, String> {
+    /// Re-installs `winmm.dll` in the game directory from `dll_source` and returns its SHA-256.
+    /// The caller owns the DLL ownership check.
+    pub fn repair_winmm_dll(&self, dll_source: &Path) -> Result<String, String> {
         let settings = self.load_settings();
         let exe = settings
             .game_exe_path
             .ok_or_else(|| "Game executable path is not configured".to_string())?;
         let game_dir = exe.parent().ok_or_else(|| "Invalid game dir".to_string())?;
-        let src = find_source_winmm_dll()
-            .ok_or_else(|| "Could not locate source winmm.dll build artifact".to_string())?;
-        let dest = game_dir.join("winmm.dll");
-        fs::copy(&src, &dest)
-            .map_err(|e| format!("Failed to copy winmm.dll to {}: {e}", dest.display()))?;
-        let bytes = fs::read(&dest).map_err(|e| e.to_string())?;
-        Ok(qm_schema::sha256_hex(&bytes))
+        install_winmm_dll(dll_source, game_dir)
     }
 }
 

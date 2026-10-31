@@ -42,6 +42,7 @@ pub struct PatchSource {
     pub patch_type: DebugPatchType,
 }
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct PatchRegion {
     pub start_line: usize,

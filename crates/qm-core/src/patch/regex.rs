@@ -14,6 +14,7 @@ use crate::dump::{ByteDebugEntry, ByteRegion, DebugPatchType, PatchSource};
 
 use super::{InsertPosition, OnFailurePolicy, Priority, Target};
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct RegexPatch {
     pub target: Target,

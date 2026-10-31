@@ -4,6 +4,7 @@ use std::path::Path;
 
 use crate::save_parser::{SerDocument, SerValue};
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 /// Scalar value for a mod configuration option.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
@@ -29,6 +30,7 @@ impl ConfigValue {
     }
 }
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 /// Declarative visibility rule (`showIf = { id = "event_select", value = "Halloween" }`)
 /// or inferred from a local helper function in `config.lua`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -37,6 +39,7 @@ pub struct ShowIfRule {
     pub equals: Vec<ConfigValue>,
 }
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 /// Normalized option control type for the Launcher UI and `GMenu`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -48,6 +51,7 @@ pub enum ConfigOptionType {
     Button,
 }
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ConfigOptionDef {
     pub id: String,
@@ -63,6 +67,7 @@ pub struct ConfigOptionDef {
     pub show_if: Option<ShowIfRule>,
 }
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct ModConfigSchema {
     pub mod_id: Option<String>,

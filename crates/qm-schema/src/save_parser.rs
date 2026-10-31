@@ -361,6 +361,7 @@ impl<'a> LineParser<'a> {
     }
 }
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct ReinforcementCardSummary {
     pub id: i64,
@@ -456,6 +457,7 @@ pub fn trench_rank_title(rank: i64) -> &'static str {
     }
 }
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 /// High-level defensive summary of a Mud and Blood save file (`saveMNB3.lua` or `saveMNB2.lua`).
 /// Every field is optional/defaulted so partial or modded saves never fail to render.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -508,6 +510,7 @@ pub struct SaveSummary {
     pub unknown_mod_keys: Vec<String>,
 }
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct SoldierSummary {
     pub id: i64,
@@ -550,6 +553,7 @@ pub struct SoldierSummary {
     pub combat_time: f64,
 }
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 /// Embedded `_qm_meta` mod fingerprint stamped into `saveMNB3.lua` / `saveMNB2.lua` on save.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SaveQmMeta {
@@ -943,6 +947,7 @@ impl SaveSummary {
     }
 }
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 /// Diff between two `SaveSummary` snapshots (e.g., comparing two save profiles or a save vs its backup).
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct SaveComparison {

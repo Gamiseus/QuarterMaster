@@ -7,6 +7,7 @@ use zip::ZipArchive;
 
 use qm_schema::sha256_hex;
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum LaunchMethod {
@@ -21,6 +22,7 @@ impl Default for LaunchMethod {
     }
 }
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LauncherSettings {
     pub game_exe_path: Option<PathBuf>,
@@ -161,7 +163,6 @@ impl QuarterMasterPaths {
         };
 
         paths.ensure_directories();
-        let _ = paths.recover_if_needed();
         paths
     }
 
@@ -237,6 +238,7 @@ impl QuarterMasterPaths {
     }
 }
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DetectedPaths {
     pub game_exe_path: Option<PathBuf>,
@@ -702,7 +704,7 @@ pub struct StateJournal {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PendingTransaction {
     pub id: String,
-    pub kind: String, // "profile_swap" | "save_swap"
+    pub kind: String, // "profile_swap" | "save_swap" | "deploy" | "restore_clean" | "dll_repair"
     pub started_at: String,
     pub from_id: Option<String>,
     pub to_id: String,
@@ -757,29 +759,6 @@ impl StateJournal {
 }
 
 impl QuarterMasterPaths {
-    /// Checks `state-journal.json` on startup for an interrupted profile or save swap transaction
-    /// and rolls back or completes it so the game directory and saves are never left in a half-swapped state.
-    pub fn recover_if_needed(&self) -> Option<String> {
-        let mut journal = StateJournal::load(&self.journal_file);
-        let tx = journal.pending_transaction.clone()?;
-        let msg = format!(
-            "Recovered from interrupted {} transaction '{}' (target '{}', started at {})",
-            tx.kind, tx.id, tx.to_id, tx.started_at
-        );
-        // Clear pending transaction first to avoid recursion, then re-apply the target profile/save cleanly
-        journal.pending_transaction = None;
-        let _ = journal.save(&self.journal_file);
-
-        if tx.kind == "profile_swap" {
-            let fallback_id = tx.from_id.as_deref().unwrap_or(&tx.to_id);
-            let _ = self.activate_profile(fallback_id);
-        } else if tx.kind == "save_swap" {
-            let fallback_id = tx.from_id.as_deref().unwrap_or(&tx.to_id);
-            let _ = self.activate_save_profile(fallback_id);
-        }
-        Some(msg)
-    }
-
     /// Detects whether `mnb.exe` has changed since the last known SHA-256 fingerprint (Section 16 & 17).
     /// Returns `Some((previous_sha256, current_sha256))` if a game update occurred.
     pub fn check_game_update_occurred(&self) -> Option<(String, String)> {

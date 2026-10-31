@@ -27,6 +27,7 @@ anyhow = "1.0.100"
 zip = "6.0.0"
 jiff = "0.2.35"
 dunce = "1.0.5"
+specta = { workspace = true, optional = true }
 
 [dev-dependencies]
 criterion = { version = "0.7", default-features = false }
@@ -35,3 +36,6 @@ tempfile = "3"
 [[bench]]
 name = "patches"
 harness = false
+
+[features]
+specta = ["dep:specta"]

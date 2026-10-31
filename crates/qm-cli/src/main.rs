@@ -285,12 +285,55 @@ fn cmd_launch(paths: &QuarterMasterPaths, args: &[String]) -> Result<(), String>
         i += 1;
     }
 
-    let pid = paths.launch_game(&profile_id, method_override)?;
+    let pid = launch_profile(paths, &profile_id, method_override)?;
     println!(
         "Launched Mud and Blood with profile '{}' (PID: {})",
         profile_id, pid
     );
     Ok(())
+}
+
+/// Activates, prepares the game folder and spawns the game (interim until Task 13).
+fn launch_profile(
+    paths: &QuarterMasterPaths,
+    profile_id: &str,
+    method_override: Option<LaunchMethod>,
+) -> Result<u32, String> {
+    paths.activate_profile(profile_id)?;
+    let settings = paths.load_settings();
+    let profile = paths.get_profile(profile_id)?;
+    let method = method_override
+        .or(profile.launch_method)
+        .unwrap_or(settings.default_launch_method);
+    let is_vanilla = method == LaunchMethod::Vanilla
+        || profile.launch_method == Some(LaunchMethod::Vanilla)
+        || profile.enabled_mods.is_empty();
+
+    if is_vanilla {
+        // Empty hash set: any winmm.dll is left in place.
+        if let Err(e) = paths.restore_clean_game_dir(&std::collections::HashSet::new()) {
+            if e.starts_with(qm_manager::UNKNOWN_DLL_ERROR_PREFIX) {
+                eprintln!("Warning: {e}");
+            } else {
+                return Err(e);
+            }
+        }
+    } else {
+        let dll = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|d| d.join("winmm.dll")))
+            .filter(|p| p.is_file())
+            .ok_or_else(|| "winmm.dll was not found next to the qm executable.".to_string())?;
+        paths.deploy_profile_to_game(profile_id, &dll)?;
+    }
+
+    if settings.auto_backup_saves {
+        let _ = paths.create_save_backup(
+            &profile.linked_save_profile_id,
+            "Auto-backup before game launch",
+        );
+    }
+    paths.spawn_game_process(&profile, method)
 }
 
 fn cmd_validate(paths: &QuarterMasterPaths, args: &[String]) -> Result<(), String> {
@@ -837,7 +880,7 @@ fn cmd_watch(paths: &QuarterMasterPaths, args: &[String]) -> Result<(), String> 
             let _ = cmd_validate(paths, &[]);
             if relaunch {
                 let settings = paths.load_settings();
-                let _ = paths.launch_game(&settings.active_profile_id, None);
+                let _ = launch_profile(paths, &settings.active_profile_id, None);
             }
         }
     }

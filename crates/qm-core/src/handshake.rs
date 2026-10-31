@@ -70,6 +70,7 @@ pub struct LoadOrderPlan {
     pub glue_patches: Vec<GluePatchEntry>,
 }
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GluePatchEntry {
     pub id: String,
@@ -98,6 +99,7 @@ impl LoadOrderPlan {
     }
 }
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PatchOutcomeStatus {
@@ -109,6 +111,7 @@ pub enum PatchOutcomeStatus {
     Aborted,
 }
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 /// Telemetry record for a single patch execution on a target file.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PatchExecutionRecord {
@@ -158,6 +161,7 @@ impl PatchReport {
     }
 }
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 /// Structured crash diagnostic report written to `Mods/qm/log/crashes/crash-{timestamp}.json`
 /// whenever a Rust panic or in-game Lua `love.errorhandler` blue-screen occurs.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -177,6 +181,7 @@ pub struct CrashReport {
     pub active_mods: HashMap<String, String>,
 }
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CrashSnippetLine {
     pub line_number: usize,

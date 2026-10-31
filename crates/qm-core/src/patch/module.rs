@@ -9,6 +9,7 @@ use crate::sys::{self, lua_err_identity_closure, lua_identity_closure, LuaState,
 use crate::RUNTIME;
 use serde::{Deserialize, Serialize};
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ModulePatch {
     pub source: PathBuf,

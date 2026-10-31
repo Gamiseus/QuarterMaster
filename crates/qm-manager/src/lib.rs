@@ -22,7 +22,7 @@ pub use library::{
 pub use profiles::{
     create_dir_junction_or_copy, is_game_running, is_reparse_point, remove_junction_or_dir,
     ModProfile, ProfileDiff, ProfileSeparator, SaveBackupEntry, SaveCompatibilityReport,
-    SaveProfile,
+    SaveProfile, UNKNOWN_DLL_ERROR_PREFIX,
 };
 pub use solver::{
     default_community_masterlist, resolve_load_order, CommunityRule, LoadOrderResolution,

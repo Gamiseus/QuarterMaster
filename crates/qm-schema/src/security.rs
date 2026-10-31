@@ -4,6 +4,7 @@ use std::collections::BTreeMap;
 use std::path::Path;
 use walkdir::WalkDir;
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SecurityCapability {
@@ -39,6 +40,7 @@ impl SecurityCapability {
     }
 }
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SecurityFinding {
     pub capability: SecurityCapability,
@@ -49,6 +51,7 @@ pub struct SecurityFinding {
     pub snippet: String,
 }
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SecurityScanReport {
     pub capabilities: Vec<SecurityCapability>,
@@ -184,6 +187,7 @@ impl SecurityScanReport {
     }
 }
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 /// Per-mod `.qm-integrity.json` manifest stored inside `library/<mod_id>/<version>/`
 /// for Wabbajack-style pristine library verification and trust tracking.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -288,6 +292,7 @@ impl IntegrityManifest {
     }
 }
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IntegrityVerifyResult {
     pub is_pristine: bool,

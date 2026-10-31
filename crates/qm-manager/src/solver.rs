@@ -4,6 +4,7 @@ use std::collections::{BinaryHeap, HashMap, HashSet};
 
 use qm_schema::{DiagnosticSeverity, ModManifest, ParsedVersion, VersionReq};
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ResolvedModOrderEntry {
     pub mod_id: String,
@@ -15,6 +16,7 @@ pub struct ResolvedModOrderEntry {
     pub reasons: Vec<String>,
 }
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SolverDiagnostic {
     pub severity: DiagnosticSeverity,
@@ -75,6 +77,7 @@ pub fn default_community_masterlist() -> Vec<CommunityRule> {
     ]
 }
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LoadOrderResolution {
     pub ordered_mods: Vec<ResolvedModOrderEntry>,

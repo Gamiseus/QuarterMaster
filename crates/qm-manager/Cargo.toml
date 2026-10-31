@@ -24,4 +24,7 @@ regex-lite = "0.1.5"
 crop = "0.4.2"
 tempfile = "3"
 ureq = { version = "2.10", features = ["json"] }
+specta = { workspace = true, optional = true }
 
+[features]
+specta = ["dep:specta", "qm-schema/specta", "qm-core/specta"]

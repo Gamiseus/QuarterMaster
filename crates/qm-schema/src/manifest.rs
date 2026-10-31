@@ -52,6 +52,7 @@ enum LegacyDependencies {
     Map(HashMap<String, String>),
 }
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 /// Rich dependency and ordering relationships (Fabric / Factorio style).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ModRelationships {
@@ -84,6 +85,7 @@ pub struct ModRelationships {
     pub provides: Vec<String>,
 }
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 /// Parsed SMAPI-style update key (`GitHub:owner/repo#Asset.zip`, `Nexus:1234`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "provider", rename_all = "lowercase")]
@@ -143,6 +145,7 @@ impl ParsedUpdateKey {
     }
 }
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 /// Standardized `mod.json` v1 manifest with full backwards-compatibility for existing mods.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ModManifest {
@@ -361,6 +364,7 @@ impl ModManifest {
     }
 }
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum DiagnosticSeverity {

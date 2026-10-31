@@ -18,6 +18,7 @@ pub const MAX_ARCHIVE_FILES: usize = 1000;
 pub const MAX_ARCHIVE_TOTAL_BYTES: u64 = 1024 * 1024 * 512; // 512 MB
 pub const MAX_COMPRESSION_RATIO: u64 = 250;
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InstalledMod {
     pub manifest: ModManifest,
@@ -34,6 +35,7 @@ pub struct InstalledMod {
     pub installed_versions: Vec<String>,
 }
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ArchiveModCandidate {
     pub manifest: ModManifest,
