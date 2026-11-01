@@ -8,4 +8,5 @@
 pub mod bindings;
 pub mod commands;
 pub mod logging;
+pub mod navigation;
 pub mod sink;

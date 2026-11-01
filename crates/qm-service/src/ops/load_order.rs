@@ -87,12 +87,36 @@ impl Service {
     pub fn patch_set_enabled(&self, patch_id: &str, enabled: bool) -> QmResult<()> {
         self.ensure_not_running()?;
         let mut p = self.active_profile()?;
+        // A patch can be listed by its record id or its `<mod>:<name>` id; treat both as one.
+        let aliases = self.patch_aliases(patch_id);
         if enabled {
-            p.disabled_patches.retain(|x| x != patch_id);
-        } else if !p.disabled_patches.iter().any(|x| x == patch_id) {
+            p.disabled_patches.retain(|x| !aliases.contains(x));
+        } else if !p.disabled_patches.iter().any(|x| aliases.contains(x)) {
             p.disabled_patches.push(patch_id.to_string());
         }
         self.commit_active_profile(p).map(|_| ())
+    }
+
+    /// `patch_id` plus the other id form of every simulated record it names.
+    fn patch_aliases(&self, patch_id: &str) -> Vec<String> {
+        let mut out = vec![patch_id.to_string()];
+        let Some(report) = self.inner.caches.simulation.get() else {
+            return out;
+        };
+        for r in report.files_touched.iter().flat_map(|f| &f.records) {
+            let named = format!("{}:{}", r.mod_id, r.patch_name);
+            let other = if r.patch_id == patch_id {
+                named
+            } else if named == patch_id {
+                r.patch_id.clone()
+            } else {
+                continue;
+            };
+            if !out.contains(&other) {
+                out.push(other);
+            }
+        }
+        out
     }
 
     /// Apply one resolver suggestion to the active profile. `SelectWinner` needs `winner_index`

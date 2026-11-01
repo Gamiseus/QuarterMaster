@@ -151,6 +151,7 @@ pub struct ModSummary {
     pub installed_versions: Vec<String>,
     pub is_workspace_linked: bool,
     pub has_config: bool,
+    pub load_priority: i32,
 }
 
 impl ModSummary {
@@ -166,8 +167,47 @@ impl ModSummary {
             installed_versions: m.installed_versions.clone(),
             is_workspace_linked: m.is_workspace_linked,
             has_config: m.config_schema.is_some(),
+            load_priority: m.manifest.load_priority,
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "snake_case")]
+pub enum PatchState {
+    Applied,
+    Broken,
+    Disabled,
+    Skipped,
+}
+
+/// One patch of a mod as seen by the cached simulation.
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+pub struct ModPatchStatus {
+    pub patch_id: String,
+    pub name: Option<String>,
+    pub target_file: String,
+    pub state: PatchState,
+    pub conflicts: Vec<DetectedConflict>,
+}
+
+/// `Default` clears the profile's launch method override.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "snake_case")]
+pub enum LaunchMethodChoice {
+    Default,
+    SteamUrl,
+    DirectExe,
+    Vanilla,
+}
+
+/// Fields left `None` are unchanged.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, specta::Type)]
+pub struct ProfileSettingsPatch {
+    pub launch_method: Option<LaunchMethodChoice>,
+    pub custom_launch_args: Option<Vec<String>>,
+    pub disable_console: Option<bool>,
+    pub linked_save_profile_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]

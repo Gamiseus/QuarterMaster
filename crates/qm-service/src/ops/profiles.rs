@@ -1,9 +1,11 @@
 //! Profile queries and actions.
-use crate::dto::{NewProfile, ProfileSummary, SwitchPreview};
+use crate::dto::{
+    LaunchMethodChoice, NewProfile, ProfileSettingsPatch, ProfileSummary, SwitchPreview,
+};
 use crate::error::{ErrorKind, OrKind, QmError, QmResult};
 use crate::events::Scope;
 use crate::service::Service;
-use qm_manager::{decode_profile_code, ModProfile};
+use qm_manager::{decode_profile_code, LaunchMethod, ModProfile};
 
 const MSG_DELETE_ACTIVE: &str = "Switch to another profile before deleting this one.";
 
@@ -80,6 +82,58 @@ impl Service {
             self.notify(Scope::Profiles);
         }
         Ok(p)
+    }
+
+    /// Edit launch settings and the linked save slot. Active profile edits are refused while the
+    /// game runs; inactive ones are always allowed.
+    pub fn profile_update(&self, id: &str, patch: ProfileSettingsPatch) -> QmResult<ModProfile> {
+        let mut p = self.profile_get(id)?;
+        if let Some(save_id) = patch.linked_save_profile_id.as_deref() {
+            if !self
+                .paths()
+                .list_save_profiles()
+                .iter()
+                .any(|s| s.id == save_id)
+            {
+                return Err(QmError::new(
+                    ErrorKind::NotFound,
+                    format!("Save slot '{save_id}' does not exist."),
+                ));
+            }
+        }
+        let save_changed = patch
+            .linked_save_profile_id
+            .as_deref()
+            .is_some_and(|s| s != p.linked_save_profile_id);
+        if let Some(choice) = patch.launch_method {
+            p.launch_method = match choice {
+                LaunchMethodChoice::Default => None,
+                LaunchMethodChoice::SteamUrl => Some(LaunchMethod::SteamUrl),
+                LaunchMethodChoice::DirectExe => Some(LaunchMethod::DirectExe),
+                LaunchMethodChoice::Vanilla => Some(LaunchMethod::Vanilla),
+            };
+        }
+        if let Some(args) = patch.custom_launch_args {
+            p.custom_launch_args = args;
+        }
+        if let Some(v) = patch.disable_console {
+            p.disable_console = v;
+        }
+        if let Some(save_id) = patch.linked_save_profile_id {
+            p.linked_save_profile_id = save_id;
+        }
+        if self.is_active_profile(id) {
+            let p = self.commit_active_profile(p)?;
+            if save_changed {
+                self.invalidate(Scope::Saves);
+            }
+            Ok(p)
+        } else {
+            p.updated_at = jiff::Zoned::now().to_string();
+            self.paths().save_profile(&p).or_kind(ErrorKind::Io)?;
+            self.notify(Scope::Profiles);
+            Ok(p)
+        }
     }
 
     pub fn profile_delete(&self, id: &str) -> QmResult<()> {

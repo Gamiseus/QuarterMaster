@@ -229,6 +229,7 @@ fn placeholder_mod_detail() -> ModDetail {
             installed_versions: vec![],
             is_workspace_linked: false,
             has_config: false,
+            load_priority: 50,
         },
         manifest,
         readme_md: None,

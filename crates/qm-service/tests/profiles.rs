@@ -1,7 +1,11 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 mod support;
+use qm_manager::LaunchMethod;
 use qm_service::testing::{FakeProbe, RecordingSink};
-use qm_service::{ErrorKind, NewProfile, QmEvent, Scope, Service};
+use qm_service::{
+    ErrorKind, LaunchMethodChoice, Loadable, NewProfile, ProfileSettingsPatch, QmEvent, Scope,
+    Service,
+};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -172,4 +176,111 @@ fn export_then_import_code_roundtrip() {
         c.svc.profile_import_code("nope", "x").unwrap_err().kind,
         ErrorKind::InvalidInput
     );
+}
+
+fn settings_patch() -> ProfileSettingsPatch {
+    ProfileSettingsPatch {
+        launch_method: Some(LaunchMethodChoice::Vanilla),
+        custom_launch_args: Some(vec!["-windowed".into()]),
+        disable_console: Some(true),
+        linked_save_profile_id: None,
+    }
+}
+
+#[test]
+fn profile_update_sets_launch_args_and_console() {
+    let c = ctx();
+    let active = c.svc.settings_get().active_profile_id;
+    c.sink.clear();
+    let p = c.svc.profile_update(&active, settings_patch()).unwrap();
+    assert_eq!(p.launch_method, Some(LaunchMethod::Vanilla));
+    assert_eq!(p.custom_launch_args, vec!["-windowed".to_string()]);
+    assert!(p.disable_console);
+    let saved = c.svc.profile_get(&active).unwrap();
+    assert_eq!(saved.launch_method, Some(LaunchMethod::Vanilla));
+    assert!(c.sink.events().iter().any(|e| matches!(
+        e,
+        QmEvent::Invalidated {
+            scope: Scope::Profiles
+        }
+    )));
+
+    let cleared = ProfileSettingsPatch {
+        launch_method: Some(LaunchMethodChoice::Default),
+        ..Default::default()
+    };
+    let p = c.svc.profile_update(&active, cleared).unwrap();
+    assert_eq!(p.launch_method, None);
+    assert_eq!(p.custom_launch_args, vec!["-windowed".to_string()]);
+
+    let relink = ProfileSettingsPatch {
+        linked_save_profile_id: Some("vanilla".into()),
+        ..Default::default()
+    };
+    let p = c.svc.profile_update(&active, relink).unwrap();
+    assert_eq!(p.linked_save_profile_id, "vanilla");
+}
+
+#[test]
+fn profile_update_unknown_save_is_not_found() {
+    let c = ctx();
+    let active = c.svc.settings_get().active_profile_id;
+    let bad = ProfileSettingsPatch {
+        linked_save_profile_id: Some("no-such-slot".into()),
+        ..Default::default()
+    };
+    assert_eq!(
+        c.svc.profile_update(&active, bad.clone()).unwrap_err().kind,
+        ErrorKind::NotFound
+    );
+    assert_eq!(
+        c.svc
+            .profile_update("no-such-profile", settings_patch())
+            .unwrap_err()
+            .kind,
+        ErrorKind::NotFound
+    );
+}
+
+#[test]
+fn profile_update_active_refused_while_running() {
+    let c = ctx();
+    let active = c.svc.settings_get().active_profile_id;
+    c.probe.set_running(Some(4242));
+    assert_eq!(
+        c.svc
+            .profile_update(&active, settings_patch())
+            .unwrap_err()
+            .kind,
+        ErrorKind::GameRunning
+    );
+    assert!(!c.svc.profile_get(&active).unwrap().disable_console);
+    stop_game(&c);
+}
+
+#[test]
+fn profile_update_inactive_allowed_while_running() {
+    let c = ctx();
+    c.svc.profile_create(new_profile("Alpha")).unwrap();
+    c.probe.set_running(Some(4242));
+    let p = c.svc.profile_update("alpha", settings_patch()).unwrap();
+    assert!(p.disable_console);
+    assert_eq!(
+        c.svc.profile_get("alpha").unwrap().custom_launch_args,
+        vec!["-windowed".to_string()]
+    );
+    stop_game(&c);
+}
+
+#[test]
+fn mods_list_exposes_load_priority() {
+    let c = ctx();
+    c.fx.add_mod_with_priority("prio", "1.0.0", PROBE_TOML, Some(42));
+    c.svc.warm_mods();
+    assert!(c.svc.jobs().wait_idle(Duration::from_secs(20)));
+    let Loadable::Ready(mods) = c.svc.mods_list() else {
+        panic!("mods still loading");
+    };
+    let m = mods.iter().find(|m| m.id == "prio").unwrap();
+    assert_eq!(m.load_priority, 42);
 }

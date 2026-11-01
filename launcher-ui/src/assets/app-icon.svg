@@ -1,0 +1,70 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <!-- QuarterMaster app icon: an olive-drab supply crate stenciled "QM" with brass corner fittings.
+       Colors follow the Field Command palette (tokens.css): canvas #111612, brass #d4a742.
+       To regenerate the app icons: render this file to a 1024x1024 PNG (assets/app-icon.png), then run
+       `cargo tauri icon ../../assets/app-icon.png` from crates/qm-launcher and delete icons/android and icons/ios. -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2a3826"/>
+      <stop offset="1" stop-color="#111612"/>
+    </linearGradient>
+    <linearGradient id="crate" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#6b7a45"/>
+      <stop offset="1" stop-color="#4f5c32"/>
+    </linearGradient>
+    <linearGradient id="brass" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ecc463"/>
+      <stop offset="1" stop-color="#b48a2c"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Badge -->
+  <rect x="40" y="40" width="944" height="944" rx="208" fill="url(#bg)"/>
+  <rect x="64" y="64" width="896" height="896" rx="186" fill="none" stroke="#d4a742" stroke-opacity="0.35" stroke-width="8"/>
+
+  <!-- Crate, scaled up about its center so it reads at 16-32 px -->
+  <g transform="translate(-61.44 -60.48) scale(1.12)">
+  <!-- Crate body with drop shadow -->
+  <rect x="196" y="244" width="632" height="584" rx="36" fill="#0b0f0a" opacity="0.45"/>
+  <rect x="196" y="212" width="632" height="584" rx="36" fill="url(#crate)"/>
+  <!-- Plank seams -->
+  <g stroke="#3d4727" stroke-width="10" stroke-linecap="round">
+    <line x1="236" y1="358" x2="788" y2="358"/>
+    <line x1="236" y1="650" x2="788" y2="650"/>
+  </g>
+  <!-- Frame -->
+  <rect x="214" y="230" width="596" height="548" rx="22" fill="none" stroke="#3d4727" stroke-width="28"/>
+
+  <!-- Brass corner fittings -->
+  <g fill="url(#brass)">
+    <path d="M196 248a36 36 0 0 1 36-36h112v56h-92v92h-56z"/>
+    <path d="M828 248a36 36 0 0 0-36-36h-112v56h92v92h56z"/>
+    <path d="M196 760a36 36 0 0 0 36 36h112v-56h-92v-92h-56z"/>
+    <path d="M828 760a36 36 0 0 1-36 36h-112v-56h92v-92h56z"/>
+  </g>
+  <g fill="#7a5a14">
+    <circle cx="232" cy="248" r="10"/>
+    <circle cx="792" cy="248" r="10"/>
+    <circle cx="232" cy="760" r="10"/>
+    <circle cx="792" cy="760" r="10"/>
+  </g>
+
+  <!-- Stencil "QM" (shifted to center on the crate) -->
+  <g transform="translate(-27 0)">
+  <g fill="#efe4c2">
+    <!-- Q: ring with stencil bridges, plus tail -->
+    <path fill-rule="evenodd" d="M398 382a128 128 0 1 1 0 256a128 128 0 1 1 0-256zm0 68a60 60 0 1 0 0 120a60 60 0 1 0 0-120z"/>
+    <path d="M430 586l48-44l92 98l-48 44z"/>
+    <!-- M -->
+    <path d="M584 638V382h62l50 92l50-92h62v256h-62V496l-34 64h-32l-34-64v142z"/>
+  </g>
+  <!-- Stencil bridges cut through the letters in crate color -->
+  <g fill="#5c6a3b">
+    <rect x="386" y="374" width="24" height="76"/>
+    <rect x="386" y="570" width="24" height="76"/>
+    <rect x="584" y="498" width="62" height="18"/>
+    <rect x="746" y="498" width="62" height="18"/>
+  </g>
+  </g>
+  </g>
+</svg>

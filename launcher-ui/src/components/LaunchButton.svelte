@@ -1,7 +1,8 @@
 <script lang="ts">
   import type { GameStage } from "../lib/bindings";
   import { game } from "../lib/stores/game.svelte";
-  import { profiles } from "../lib/stores/profiles.svelte";
+  import { prelaunch } from "../lib/stores/prelaunch.svelte";
+  import { Button } from "./ui";
 
   const LABELS: Record<GameStage["stage"], string> = {
     idle: "Launch",
@@ -13,69 +14,32 @@
   };
 
   const stage = $derived(game.status.stage);
-  const label = $derived(LABELS[stage.stage]);
-  const profileId = $derived(profiles.active?.id ?? null);
-  let pending = $state(false);
-
-  async function launch() {
-    if (!profileId || game.isBusy) return;
-    pending = true;
-    try {
-      await game.launch(profileId);
-    } catch {
-      // Routed to the UI by call().
-    } finally {
-      pending = false;
-    }
-  }
+  const label = $derived(prelaunch.vanilla && LABELS[stage.stage] === "Launch" ? "Launch vanilla" : LABELS[stage.stage]);
 </script>
 
 <div class="launch">
-  <button
-    type="button"
-    class="launch-button"
-    data-testid="launch-button"
-    disabled={game.isBusy || pending || !profileId}
-    onclick={launch}
-  >
+  <Button variant="primary" data-testid="launch-button" disabled={!prelaunch.canLaunch} onclick={() => prelaunch.request()}>
     {label}
-  </button>
+  </Button>
   {#if stage.stage === "failed"}
-    <p class="reason" role="alert">{stage.reason}</p>
+    <span class="reason" role="alert" title={stage.reason}>{stage.reason}</span>
   {/if}
 </div>
 
 <style>
   .launch {
     display: flex;
-    flex-direction: column;
-    align-items: flex-start;
+    align-items: center;
     gap: var(--qm-space-2);
-  }
-
-  .launch-button {
-    min-width: 200px;
-    padding: var(--qm-space-3) var(--qm-space-6);
-    border: 0;
-    border-radius: var(--qm-radius-md);
-    background: var(--qm-accent);
-    color: var(--qm-accent-contrast);
-    font-size: 16px;
-    font-weight: 600;
-    letter-spacing: 0.02em;
-    transition: filter var(--qm-dur-fast) var(--qm-ease), opacity var(--qm-dur-fast) var(--qm-ease);
-  }
-
-  .launch-button:hover:not(:disabled) {
-    filter: brightness(1.08);
-  }
-
-  .launch-button:disabled {
-    opacity: 0.6;
+    min-width: 0;
   }
 
   .reason {
-    margin: 0;
+    overflow: hidden;
+    max-width: calc(var(--qm-detail-w) / 2);
     color: var(--qm-danger);
+    font-size: var(--qm-text-12);
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 </style>

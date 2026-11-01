@@ -1,5 +1,10 @@
 <script lang="ts">
   import { getCurrentWindow } from "@tauri-apps/api/window";
+  import iconUrl from "../assets/app-icon.svg";
+  import ProfilePicker from "../screens/profiles/ProfilePicker.svelte";
+  import HealthSummary from "./HealthSummary.svelte";
+  import LaunchButton from "./LaunchButton.svelte";
+  import SaveSlotChip from "./SaveSlotChip.svelte";
 
   // Resolved per click so module load works outside Tauri.
   function win(action: "minimize" | "toggleMaximize" | "close") {
@@ -10,7 +15,12 @@
 </script>
 
 <header class="titlebar" data-tauri-drag-region>
-  <span class="title" data-tauri-drag-region>QuarterMaster</span>
+  <img class="icon" src={iconUrl} alt="" data-tauri-drag-region />
+  <ProfilePicker />
+  <SaveSlotChip />
+  <span class="spacer" data-tauri-drag-region></span>
+  <HealthSummary />
+  <LaunchButton />
   <div class="controls">
     <button type="button" aria-label="Minimize" onclick={() => win("minimize")}>
       <svg viewBox="0 0 10 10" aria-hidden="true"><path d="M1 5h8" /></svg>
@@ -28,25 +38,29 @@
   .titlebar {
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    height: 36px;
-    padding-left: var(--qm-space-4);
+    gap: var(--qm-space-3);
+    height: var(--qm-titlebar-h);
+    padding-left: var(--qm-space-3);
     background: var(--qm-surface);
     border-bottom: 1px solid var(--qm-border);
     user-select: none;
   }
 
-  .title {
+  .icon {
+    flex: none;
+    width: var(--qm-space-5);
+    height: var(--qm-space-5);
+  }
+
+  .spacer {
     flex: 1;
-    font-size: 12px;
-    font-weight: 600;
-    letter-spacing: 0.04em;
-    color: var(--qm-text-muted);
+    align-self: stretch;
   }
 
   .controls {
     display: flex;
-    height: 100%;
+    align-self: stretch;
+    margin-left: var(--qm-space-2);
   }
 
   .controls button {
@@ -60,12 +74,12 @@
   }
 
   .controls button:hover {
-    background: var(--qm-surface-raised);
+    background: var(--qm-raised);
   }
 
   .controls button.close:hover {
     background: var(--qm-danger);
-    color: #ffffff;
+    color: var(--qm-accent-contrast);
   }
 
   svg {

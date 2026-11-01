@@ -1,5 +1,5 @@
 import { call } from "../api";
-import { commands, type GameStatus, type QmEvent } from "../bindings";
+import { commands, type GameStatus, type LaunchMethod, type QmEvent } from "../bindings";
 
 const IDLE: GameStatus = { stage: { stage: "idle" }, profile_id: null, is_modded: false };
 
@@ -26,8 +26,9 @@ class GameStore {
     if (!this.isBusy) this.banner = null;
   }
 
-  async launch(profileId: string): Promise<void> {
-    const status = await call(commands.gameLaunch({ profile_id: profileId, method: null }));
+  /** `method` null uses the profile's own launch method. */
+  async launch(profileId: string, method: LaunchMethod | null = null): Promise<void> {
+    const status = await call(commands.gameLaunch({ profile_id: profileId, method }));
     this.#seq++;
     this.#set(status);
   }

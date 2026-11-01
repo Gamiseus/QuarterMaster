@@ -1,7 +1,7 @@
 <script lang="ts">
-  import { call } from "../lib/api";
-  import { commands, type SaveSlotSummary } from "../lib/bindings";
-  import { onEvent } from "../lib/events";
+  import { call } from "../../lib/api";
+  import { commands, type SaveSlotSummary } from "../../lib/bindings";
+  import { onEvent } from "../../lib/events";
 
   let saves = $state<SaveSlotSummary[] | null>(null);
 

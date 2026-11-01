@@ -21,6 +21,11 @@ lto = true
 strip = true
 codegen-units = 1
 
-# The injected DLL runs in the game process; optimize it for speed.
+# Third-party dependencies (including those of the injected DLL) are optimized for size;
+# workspace crates keep the profile default above.
+[profile.release.package."*"]
+opt-level = "z"
+
+# The injected DLL crate itself runs in the game process; optimize it for speed.
 [profile.release.package.qm-win]
 opt-level = 3

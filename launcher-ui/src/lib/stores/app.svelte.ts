@@ -2,7 +2,7 @@ import { call } from "../api";
 import { commands, type AppInfo, type QmEvent, type SettingsPatch, type SettingsView } from "../bindings";
 import { toasts } from "./toasts.svelte";
 
-export type Page = "play" | "mods" | "saves" | "diagnostics" | "settings";
+export type Page = "mods" | "saves" | "diagnostics" | "settings";
 export type Mode = "launcher" | "engine";
 
 const STARTUP_POLL_MS = 250;
@@ -31,7 +31,8 @@ function applyTheme(theme: string | undefined): void {
 class AppStore {
   info = $state<AppInfo | null>(null);
   settings = $state<SettingsView | null>(null);
-  page = $state<Page>("play");
+  page = $state<Page>("mods");
+  startupDone = $state(false);
   mode = $state<Mode>("launcher");
   #shownRecoveries = new Set<string>();
   #seq = 0;
@@ -61,6 +62,7 @@ class AppStore {
       const status = await call(commands.startupStatus());
       if (status.done) {
         if (status.recovered) this.showRecovered(status.recovered);
+        this.startupDone = true;
         return;
       }
       await new Promise((r) => setTimeout(r, STARTUP_POLL_MS));

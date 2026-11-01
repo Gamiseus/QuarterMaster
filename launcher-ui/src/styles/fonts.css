@@ -1,0 +1,17 @@
+/* Stardos Stencil, latin subset, woff2 only (WebView2 supports it; skips the woff fallbacks
+   that @fontsource/stardos-stencil/latin-*.css would also bundle). Vite emits these as assets. */
+@font-face {
+  font-family: "Stardos Stencil";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 400;
+  src: url("@fontsource/stardos-stencil/files/stardos-stencil-latin-400-normal.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Stardos Stencil";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 700;
+  src: url("@fontsource/stardos-stencil/files/stardos-stencil-latin-700-normal.woff2") format("woff2");
+}

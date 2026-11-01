@@ -54,13 +54,27 @@ impl Fixture {
     }
 
     pub fn add_mod(&self, id: &str, version: &str, qm_toml: &str) -> PathBuf {
+        self.add_mod_with_priority(id, version, qm_toml, None)
+    }
+
+    /// Like `add_mod`, with an optional `load_priority` written to `mod.json`.
+    pub fn add_mod_with_priority(
+        &self,
+        id: &str,
+        version: &str,
+        qm_toml: &str,
+        load_priority: Option<i32>,
+    ) -> PathBuf {
         let dir = self
             .tmp
             .path()
             .join("src_mods")
             .join(format!("{id}-{version}"));
         std::fs::create_dir_all(&dir).unwrap();
-        let mod_json = serde_json::json!({ "id": id, "name": id, "version": version });
+        let mut mod_json = serde_json::json!({ "id": id, "name": id, "version": version });
+        if let Some(p) = load_priority {
+            mod_json["load_priority"] = p.into();
+        }
         std::fs::write(
             dir.join("mod.json"),
             serde_json::to_string_pretty(&mod_json).unwrap(),

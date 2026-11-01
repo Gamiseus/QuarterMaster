@@ -107,6 +107,14 @@ async profileRename(id: string, name: string) : Promise<Result<ModProfile, QmErr
     else return { status: "error", error: e  as any };
 }
 },
+async profileUpdate(id: string, patch: ProfileSettingsPatch) : Promise<Result<ModProfile, QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("profile_update", { id, patch }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async profileDelete(id: string) : Promise<Result<null, QmError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("profile_delete", { id }) };
@@ -158,6 +166,14 @@ async modsList() : Promise<Result<Loadable<ModSummary[]>, QmError>> {
 async modDetail(id: string) : Promise<Result<ModDetail, QmError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("mod_detail", { id }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async modPatchesGet(modId: string) : Promise<Result<Loadable<ModPatchStatus[]>, QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("mod_patches_get", { modId }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -563,6 +579,10 @@ export type JobId = number
 export type JobInfo = { id: JobId; kind: JobKind; progress: number; label: string; cancelling: boolean }
 export type JobKind = "warm_mods" | "warm_vanilla" | "simulation" | "updates_refresh" | "catalog_refresh" | "catalog_install" | "mod_import" | "launcher_update_download" | "diagnostic_bundle"
 export type LaunchMethod = "steam_url" | "direct_exe" | "vanilla"
+/**
+ * `Default` clears the profile's launch method override.
+ */
+export type LaunchMethodChoice = "default" | "steam_url" | "direct_exe" | "vanilla"
 export type LaunchRequest = { profile_id: string; method: LaunchMethod | null }
 export type LauncherUpdateInfo = { current_version: string; latest_version: string; update_available: boolean; opt_in_prereleases: boolean; signature_verification: string; rollback_available: boolean }
 export type LoadOrderResolution = { ordered_mods: ResolvedModOrderEntry[]; diagnostics: SolverDiagnostic[]; has_cycles: boolean; cycle_paths: string[][]; rule_hierarchy: string }
@@ -583,6 +603,10 @@ load_priority?: number; game_version?: string | null; entry_patch?: string;
  * SMAPI-style update keys, e.g. `["GitHub:Gamiseus/MnB-Mods#GCore.zip", "Nexus:1234"]`.
  */
 update_keys?: string[]; homepage?: string | null; github?: string | null; nexus?: string | null; relationships?: ModRelationships }
+/**
+ * One patch of a mod as seen by the cached simulation.
+ */
+export type ModPatchStatus = { patch_id: string; name: string | null; target_file: string; state: PatchState; conflicts: DetectedConflict[] }
 export type ModProfile = { id: string; name: string; description?: string; created_at: string; updated_at: string; enabled_mods: string[]; separators?: ProfileSeparator[]; mod_priorities?: Partial<{ [key in string]: number }>; user_load_after?: Partial<{ [key in string]: string[] }>; patch_priorities?: Partial<{ [key in string]: number }>; disabled_patches?: string[]; glue_patches?: GluePatchEntry[]; linked_save_profile_id?: string; launch_method?: LaunchMethod | null; disable_console?: boolean; custom_launch_args?: string[]; 
 /**
  * Optional LÖVE `t.identity` override if the user wants complete Steam Cloud isolation.
@@ -636,7 +660,7 @@ load_before?: string[];
  * Virtual capability IDs satisfied by this mod.
  */
 provides?: string[] }
-export type ModSummary = { id: string; name: string; version: string; authors: string[]; category: string | null; enabled: boolean; patch_count: number; installed_versions: string[]; is_workspace_linked: boolean; has_config: boolean }
+export type ModSummary = { id: string; name: string; version: string; authors: string[]; category: string | null; enabled: boolean; patch_count: number; installed_versions: string[]; is_workspace_linked: boolean; has_config: boolean; load_priority: number }
 export type ModUpdateInfo = { mod_id: string; name: string; installed_version: string; latest_version: string; update_available: boolean; update_key: string; pinned_source_url: string | null; source_changed_warning: boolean; auto_update: boolean; changelog: string }
 export type ModulePatch = { source: string; before?: string | null; name: string; load_now?: boolean; id: string | null; priority: number | null; on_failure?: OnFailurePolicy }
 export type NewProfile = { name: string; id: string | null; clone_from: string | null; linked_save_profile_id: string | null; description: string | null }
@@ -648,6 +672,7 @@ export type Patch = { pattern: PatternPatch } | { regex: RegexPatch } | { copy: 
 export type PatchExecutionRecord = { patch_id: string; patch_name: string; mod_id: string; source_file: string; target_file: string; patch_type: string; priority: number; matched_count: number; expected_count: number | null; on_failure: OnFailurePolicy; status: PatchOutcomeStatus; warnings: string[]; regions: PatchRegion[] }
 export type PatchOutcomeStatus = "applied" | "zero_matches" | "count_mismatch" | "skipped_by_policy" | "skipped_disabled" | "aborted"
 export type PatchRegion = { start_line: number; end_line: number }
+export type PatchState = "applied" | "broken" | "disabled" | "skipped"
 export type PatternPatch = { pattern: string; position: InsertPosition; target: Target; payload: string; match_indent?: boolean; times?: number | null; 
 /**
  * We keep this field around for legacy compat. It doesn't do anything (and never has).
@@ -655,6 +680,10 @@ export type PatternPatch = { pattern: string; position: InsertPosition; target: 
 overwrite?: boolean; id: string | null; name: string | null; description?: string | null; requires?: string[]; priority: number | null; before?: string[]; after?: string[]; on_failure?: OnFailurePolicy }
 export type ProfileDiff = { profile_a_id: string; profile_b_id: string; only_in_a: string[]; only_in_b: string[]; priority_diffs: ([string, number, number])[]; setting_diffs: ([string, string, string, string])[] }
 export type ProfileSeparator = { id: string; title: string; color: string; insert_before_mod_id: string | null; collapsed?: boolean }
+/**
+ * Fields left `None` are unchanged.
+ */
+export type ProfileSettingsPatch = { launch_method: LaunchMethodChoice | null; custom_launch_args: string[] | null; disable_console: boolean | null; linked_save_profile_id: string | null }
 export type ProfileSummary = { id: string; name: string; description: string; enabled_count: number; is_active: boolean; linked_save_profile_id: string; updated_at: string }
 export type QmError = { kind: ErrorKind; message: string; details: string | null }
 export type QmEvent = { type: "game_status_changed"; status: GameStatus } | { type: "job_progress"; id: JobId; kind: JobKind; progress: number; label: string } | { type: "job_finished"; id: JobId; kind: JobKind; error: QmError | null; output: string | null } | { type: "invalidated"; scope: Scope } | { type: "log_line"; source: LogSource; line: string } | { type: "recovered"; summary: string }

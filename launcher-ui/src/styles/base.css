@@ -26,9 +26,13 @@ body {
 
 h1,
 h2,
-h3 {
+h3,
+.qm-stencil {
   margin: 0;
-  font-weight: 600;
+  font-family: var(--qm-font-stencil);
+  font-weight: 700;
+  letter-spacing: .06em;
+  text-transform: uppercase;
 }
 
 h1 {
@@ -50,8 +54,8 @@ button:disabled {
 }
 
 :focus-visible {
-  outline: 2px solid var(--qm-accent);
-  outline-offset: 2px;
+  outline: none;
+  box-shadow: var(--qm-focus-ring);
 }
 
 code,
@@ -90,6 +94,32 @@ pre {
   flex-direction: column;
   gap: var(--qm-space-5);
   padding: var(--qm-space-6);
+}
+
+/* Brass corner brackets (top-left and bottom-right); shared by Panel and Dialog.
+   The host must be positioned (Panel is relative, Dialog is fixed). */
+.qm-corners::before,
+.qm-corners::after {
+  content: "";
+  position: absolute;
+  width: var(--qm-space-3);
+  height: var(--qm-space-3);
+  border: 0 solid var(--qm-accent);
+  pointer-events: none;
+}
+
+.qm-corners::before {
+  top: calc(var(--qm-space-1) * -1);
+  left: calc(var(--qm-space-1) * -1);
+  border-top-width: 2px;
+  border-left-width: 2px;
+}
+
+.qm-corners::after {
+  right: calc(var(--qm-space-1) * -1);
+  bottom: calc(var(--qm-space-1) * -1);
+  border-right-width: 2px;
+  border-bottom-width: 2px;
 }
 
 @media (prefers-reduced-motion: reduce) {

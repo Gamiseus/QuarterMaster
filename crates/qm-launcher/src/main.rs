@@ -11,7 +11,7 @@
 compile_error!("Build release with `cargo tauri build` (custom-protocol), not plain cargo build.");
 
 use qm_launcher_lib::commands::{run_startup, Startup};
-use qm_launcher_lib::{bindings, logging, sink::TauriSink};
+use qm_launcher_lib::{bindings, logging, navigation, sink::TauriSink};
 use qm_manager::QuarterMasterPaths;
 use qm_service::{Service, Win32Probe};
 use std::sync::Arc;
@@ -26,6 +26,13 @@ fn main() {
     let builder = bindings::specta_builder();
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        // The UI opens links itself (https only); no injected click handler.
+        .plugin(
+            tauri_plugin_opener::Builder::new()
+                .open_js_links_on_click(false)
+                .build(),
+        )
+        .plugin(navigation::plugin())
         .plugin(tauri_plugin_window_state::Builder::default().build())
         .invoke_handler(builder.invoke_handler())
         .setup(move |app| {

@@ -1,8 +1,8 @@
 <script lang="ts">
-  import { call } from "../lib/api";
-  import { commands, type HealthReport, type Loadable } from "../lib/bindings";
-  import { onEvent } from "../lib/events";
-  import { logs } from "../lib/stores/logs.svelte";
+  import { call } from "../../lib/api";
+  import { commands, type HealthReport, type Loadable } from "../../lib/bindings";
+  import { onEvent } from "../../lib/events";
+  import { logs } from "../../lib/stores/logs.svelte";
 
   let health = $state<Loadable<HealthReport>>({ status: "loading" });
 

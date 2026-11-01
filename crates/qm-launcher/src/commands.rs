@@ -9,9 +9,9 @@ use qm_schema::{ConfigValue, SaveComparison, SaveSummary};
 use qm_service::{
     AppInfo, CatalogQuery, CatalogResult, ConfigResetMode, ErrorKind, FileDiff, GameStatus,
     HealthReport, ImportRequest, JobId, JobInfo, LaunchRequest, LoadOrderUpdate, Loadable,
-    LogSource, ModDetail, ModSummary, NewProfile, ProfileSummary, QmError, QmResult, RevealKind,
-    SaveSlotSummary, Service, SettingsPatch, SettingsView, SimulationOverview, StartupReport,
-    SwitchPreview, UpdatesReport,
+    LogSource, ModDetail, ModPatchStatus, ModSummary, NewProfile, ProfileSettingsPatch,
+    ProfileSummary, QmError, QmResult, RevealKind, SaveSlotSummary, Service, SettingsPatch,
+    SettingsView, SimulationOverview, StartupReport, SwitchPreview, UpdatesReport,
 };
 use serde::Serialize;
 use std::collections::HashMap;
@@ -175,6 +175,16 @@ pub async fn profile_rename(svc: Svc<'_>, id: String, name: String) -> Result<Mo
 
 #[tauri::command]
 #[specta::specta]
+pub async fn profile_update(
+    svc: Svc<'_>,
+    id: String,
+    patch: ProfileSettingsPatch,
+) -> Result<ModProfile, QmError> {
+    run(&svc, move |s| s.profile_update(&id, patch)).await
+}
+
+#[tauri::command]
+#[specta::specta]
 pub async fn profile_delete(svc: Svc<'_>, id: String) -> Result<(), QmError> {
     run(&svc, move |s| s.profile_delete(&id)).await
 }
@@ -217,6 +227,15 @@ pub async fn profile_import_code(
 #[specta::specta]
 pub async fn mods_list(svc: Svc<'_>) -> Result<Loadable<Vec<ModSummary>>, QmError> {
     run(&svc, move |s| Ok(s.mods_list())).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn mod_patches_get(
+    svc: Svc<'_>,
+    mod_id: String,
+) -> Result<Loadable<Vec<ModPatchStatus>>, QmError> {
+    run(&svc, move |s| s.mod_patches_get(&mod_id)).await
 }
 
 #[tauri::command]

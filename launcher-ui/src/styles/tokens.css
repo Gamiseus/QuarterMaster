@@ -2,9 +2,14 @@
 :root {
   color-scheme: light dark;
 
-  --qm-bg: light-dark(#e9ece6, #111612);
-  --qm-surface: light-dark(#f4f6f2, #181f19);
-  --qm-surface-raised: light-dark(#e2e6de, #212a22);
+  /* Surfaces (new names); the old --qm-bg/-surface/-surface-raised remain as aliases. */
+  --qm-canvas: light-dark(#e9ece6, #111612);
+  --qm-panel: light-dark(#f4f6f2, #181f19);
+  --qm-raised: light-dark(#e2e6de, #212a22);
+  --qm-popover: light-dark(#ffffff, #263027);
+  --qm-bg: var(--qm-canvas);
+  --qm-surface: var(--qm-panel);
+  --qm-surface-raised: var(--qm-raised);
   --qm-border: light-dark(#c5cdc0, #2d3a2f);
   --qm-text: light-dark(#171d17, #e7ece6);
   --qm-text-muted: light-dark(#647566, #6e8070);
@@ -13,6 +18,16 @@
   --qm-ok: light-dark(#15803d, #22c55e);
   --qm-warn: light-dark(#b45309, #f59e0b);
   --qm-danger: light-dark(#b91c1c, #ef4444);
+  --qm-enabled: light-dark(#2e5c38, #3d7a49);
+  --qm-focus-ring: 0 0 0 2px var(--qm-accent);
+
+  /* Separator row colors (same in both themes). */
+  --qm-sep-1: #d4a742;
+  --qm-sep-2: #6b7a45;
+  --qm-sep-3: #b5562e;
+  --qm-sep-4: #5b7a8c;
+  --qm-sep-5: #c9b98f;
+  --qm-sep-6: #6e8070;
 
   --qm-space-1: 4px;
   --qm-space-2: 8px;
@@ -23,9 +38,33 @@
 
   --qm-radius-sm: 4px;
   --qm-radius-md: 8px;
+  --qm-radius-lg: 12px;
+
+  --qm-row-h: 34px;
+  --qm-icon-size: 16px;
+  --qm-titlebar-h: 44px;
+  --qm-sidebar-w: 52px;
+  --qm-sidebar-w-open: 184px;
+  --qm-detail-w: 360px;
 
   --qm-font-sans: "Segoe UI Variable", "Segoe UI", sans-serif;
+  --qm-font-stencil: "Stardos Stencil", var(--qm-font-sans);
   --qm-font-mono: "Cascadia Code", Consolas, monospace;
+
+  --qm-text-11: 11px;
+  --qm-text-12: 12px;
+  --qm-text-13: 13px;
+  --qm-text-14: 14px;
+  --qm-text-16: 16px;
+  --qm-text-20: 20px;
+  --qm-text-28: 28px;
+
+  /* Stacking order: dialog < popover (menus, selects) < toast < tooltip. */
+  --qm-z-overlay: 40;
+  --qm-z-dialog: 41;
+  --qm-z-popover: 50;
+  --qm-z-toast: 70;
+  --qm-z-tooltip: 80;
 
   --qm-dur-fast: 120ms;
   --qm-ease: cubic-bezier(.2,0,0,1);

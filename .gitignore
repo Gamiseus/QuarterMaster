@@ -36,3 +36,4 @@ launcher-ui/node_modules/
 launcher-ui/dist/
 launcher-ui/test-results/
 launcher-ui/playwright-report/
+/launcher-ui/tests

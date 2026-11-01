@@ -1,7 +1,7 @@
 <script lang="ts">
   import { open } from "@tauri-apps/plugin-dialog";
-  import { app } from "../lib/stores/app.svelte";
-  import { toasts } from "../lib/stores/toasts.svelte";
+  import { app } from "../../lib/stores/app.svelte";
+  import { toasts } from "../../lib/stores/toasts.svelte";
 
   async function browse() {
     let path: string | null;

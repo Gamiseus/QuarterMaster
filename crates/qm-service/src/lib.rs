@@ -25,9 +25,9 @@ pub use cache::{Cached, Loadable, VanillaFiles};
 pub use dto::{
     AppInfo, CatalogEntry, CatalogQuery, CatalogResult, ConfigResetMode, ConflictPolicy, FileDiff,
     GameInfo, GameUpdateDetected, HealthLogLine, HealthPatchReport, HealthReport, ImportRequest,
-    LauncherUpdateInfo, LoadOrderUpdate, ModDetail, ModSummary, ModUpdateInfo, NewProfile,
-    ProfileSummary, RevealKind, SaveSlotSummary, SettingsPatch, SettingsView, SimulationOverview,
-    SwitchPreview, UpdatesReport,
+    LaunchMethodChoice, LauncherUpdateInfo, LoadOrderUpdate, ModDetail, ModPatchStatus, ModSummary,
+    ModUpdateInfo, NewProfile, PatchState, ProfileSettingsPatch, ProfileSummary, RevealKind,
+    SaveSlotSummary, SettingsPatch, SettingsView, SimulationOverview, SwitchPreview, UpdatesReport,
 };
 pub use error::{ErrorKind, OrKind, QmError, QmResult};
 pub use events::{EventSink, LogSource, QmEvent, Scope};

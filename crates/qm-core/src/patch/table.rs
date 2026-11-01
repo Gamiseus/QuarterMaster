@@ -11,6 +11,11 @@ use crop::Rope;
 use itertools::Itertools;
 use log::*;
 
+/// Warning on records of patches skipped because an earlier patch in their mod failed under
+/// `on_failure = "skip_mod"`. Consumers match it exactly to tell these from genuine failures.
+pub const SKIPPED_WITH_MOD_WARNING: &str =
+    "Skipped because an earlier patch in this mod failed with skip_mod";
+
 /// Structure to manage patch tables for QuarterMaster runtime and offline simulation
 pub struct PatchTable {
     pub mod_dir: PathBuf,
@@ -295,10 +300,7 @@ impl PatchTable {
                         expected_count: None,
                         on_failure: policy,
                         status: PatchOutcomeStatus::SkippedByPolicy,
-                        warnings: vec![
-                            "Skipped because an earlier patch in this mod failed with skip_mod"
-                                .to_string(),
-                        ],
+                        warnings: vec![SKIPPED_WITH_MOD_WARNING.to_string()],
                         regions: Vec::new(),
                     },
                 ));
