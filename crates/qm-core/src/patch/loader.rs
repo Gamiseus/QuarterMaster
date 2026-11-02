@@ -50,8 +50,8 @@ pub fn patch_buffer(target: &str, rope: &mut crop::Rope) {
     }
 }
 
-const STEAM_SAFETY_PAYLOAD: &str = r#"
--- Quartermaster: Steam Safety Lockdown
+pub const STEAM_SAFETY_PAYLOAD: &str = r#"
+-- Quartermaster: Steam Safety Lockdown & Auto-Asset Runtime
 print("[QM] *** STEAM SAFETY HOOK INITIALIZED ***")
 
 local function qm_neuter_steam()
@@ -111,11 +111,316 @@ for name, _ in pairs(blocked_globals) do
   end
 end
 
+-- QuarterMaster Auto-Asset Runtime State
+local __qm_obj_info = {}
+local __qm_path_overrides = {}
+local __qm_by_cat_stem = {}
+local __qm_by_stem = {}
+local __qm_var_lower = {}
+local __qm_vanilla_keys = {}
+local __qm_indexed_vanilla = false
+local __qm_touched_audio_prefixes = {}
+local __qm_touched_weapon_tags = {}
+local __qm_pool_key_map = {}
+local __qm_pools_by_prefix = {}
+
+local orig_newSource = love and love.audio and love.audio.newSource or nil
+local orig_newImage = love and love.graphics and love.graphics.newImage or nil
+
+if orig_newSource then
+  love.audio.newSource = function(a, b, ...)
+    if type(a) == "string" then
+      local norm = a:gsub("\\", "/"):gsub("^/+", "")
+      local cat_stem = (norm:match("^(.+)%.[^%.]+$") or norm):lower()
+      local stem = (norm:match("([^/]+)%.[^%.]+$") or norm):lower()
+      local ov = __qm_path_overrides[norm:lower()] or __qm_path_overrides[cat_stem]
+      if ov and ov.fd then
+        local ok, s = pcall(orig_newSource, ov.fd, b or ov.mode or "static", ...)
+        if ok and s then return s end
+      end
+      local src = orig_newSource(a, b, ...)
+      if src then
+        __qm_obj_info[src] = {
+          kind = "audio",
+          path = norm:lower(),
+          cat_stem = cat_stem,
+          stem = stem,
+          mode = b or "static",
+        }
+      end
+      return src
+    end
+    return orig_newSource(a, b, ...)
+  end
+end
+
+if orig_newImage then
+  love.graphics.newImage = function(a, ...)
+    if type(a) == "string" then
+      local norm = a:gsub("\\", "/"):gsub("^/+", "")
+      local cat_stem = (norm:match("^(.+)%.[^%.]+$") or norm):lower()
+      local stem = (norm:match("([^/]+)%.[^%.]+$") or norm):lower()
+      local ov = __qm_path_overrides[norm:lower()] or __qm_path_overrides[cat_stem]
+      if ov and ov.fd then
+        local ok, img = pcall(orig_newImage, ov.fd, ...)
+        if ok and img then return img end
+      end
+      local img = orig_newImage(a, ...)
+      if img then
+        __qm_obj_info[img] = {
+          kind = "image",
+          path = norm:lower(),
+          cat_stem = cat_stem,
+          stem = stem,
+        }
+      end
+      return img
+    end
+    return orig_newImage(a, ...)
+  end
+end
+
+local function __qm_build_vanilla_index()
+  if __qm_indexed_vanilla then return end
+  __qm_indexed_vanilla = true
+  for k, v in pairs(_G) do
+    if type(k) == "string" then
+      __qm_var_lower[k:lower()] = k
+      __qm_vanilla_keys[k] = true
+      local info = __qm_obj_info[v]
+      if info then
+        local cs = info.cat_stem
+        if cs then
+          __qm_by_cat_stem[cs] = __qm_by_cat_stem[cs] or {}
+          table.insert(__qm_by_cat_stem[cs], k)
+        end
+        local st = info.stem
+        if st then
+          __qm_by_stem[st] = __qm_by_stem[st] or {}
+          table.insert(__qm_by_stem[st], k)
+        end
+      end
+    end
+  end
+end
+
+_G.__qm_auto_asset = function(mod_dir, rel_path, category, stem, ext, default_mode)
+  __qm_build_vanilla_index()
+  local full_path = tostring(mod_dir) .. "/" .. tostring(rel_path)
+  local f = io and io.open and io.open(full_path, "rb") or nil
+  if not f then
+    print("[QM] WARN: Could not open auto-asset file: " .. full_path)
+    return false
+  end
+  local bytes = f:read("*all")
+  f:close()
+  if not bytes then return false end
+
+  local ext_l = tostring(ext or ""):lower()
+  local cat_l = tostring(category or ""):lower()
+  local stem_l = tostring(stem or ""):lower()
+
+  if ext_l == "txt" then
+    local text = bytes:gsub("^\239\187\191", ""):gsub("\r\n", "\n"):gsub("\n+$", "")
+    local target_var = __qm_var_lower[stem_l] or stem
+    rawset(_G, target_var, text)
+    __qm_var_lower[target_var:lower()] = target_var
+    return true
+  end
+
+  if not (love and love.filesystem and love.filesystem.newFileData) then
+    return false
+  end
+  local ok_fd, fd = pcall(love.filesystem.newFileData, bytes, tostring(stem) .. "." .. ext_l)
+  if not ok_fd or not fd then return false end
+
+  local targets = {}
+  local seen = {}
+  local function add_target(name)
+    if name and not seen[name] then
+      seen[name] = true
+      table.insert(targets, name)
+    end
+  end
+
+  if rawget(_G, stem) ~= nil or __qm_pool_key_map[stem] ~= nil then
+    add_target(stem)
+  elseif __qm_var_lower[stem_l] then
+    add_target(__qm_var_lower[stem_l])
+  end
+
+  local by_cs = __qm_by_cat_stem[cat_l .. "/" .. stem_l]
+  if by_cs then
+    for _, vname in ipairs(by_cs) do add_target(vname) end
+  end
+
+  if #targets == 0 then
+    local by_s = __qm_by_stem[stem_l]
+    if by_s then
+      for _, vname in ipairs(by_s) do add_target(vname) end
+    end
+  end
+
+  if #targets == 0 then
+    add_target(stem)
+  end
+
+  __qm_path_overrides[cat_l .. "/" .. stem_l .. "." .. ext_l] = { fd = fd, mode = default_mode }
+  __qm_path_overrides[cat_l .. "/" .. stem_l] = { fd = fd, mode = default_mode }
+
+  if ext_l == "wav" or ext_l == "mp3" or ext_l == "ogg" then
+    if not orig_newSource then return false end
+    for _, var_name in ipairs(targets) do
+      local old = rawget(_G, var_name)
+      local mode = (default_mode and default_mode ~= "") and default_mode or "static"
+      local was_loop = false
+      local old_vol = nil
+      local old_info = old and __qm_obj_info[old] or nil
+      if old ~= nil and type(old) == "userdata" then
+        pcall(function() mode = old:getType() or mode end)
+        pcall(function() was_loop = old:isLooping() end)
+        pcall(function() old_vol = old:getVolume() end)
+        pcall(function() old:stop() end)
+      end
+      local ok_src, src = pcall(orig_newSource, fd, mode)
+      if ok_src and src then
+        if was_loop then pcall(function() src:setLooping(true) end) end
+        if old_vol then pcall(function() src:setVolume(old_vol) end) end
+        __qm_obj_info[src] = old_info or {
+          kind = "audio",
+          path = cat_l .. "/" .. stem_l .. "." .. ext_l,
+          cat_stem = cat_l .. "/" .. stem_l,
+          stem = stem_l,
+          mode = mode,
+        }
+        if old_info then
+          __qm_path_overrides[old_info.path] = { fd = fd, mode = mode }
+          __qm_path_overrides[old_info.cat_stem] = { fd = fd, mode = mode }
+        end
+        rawset(_G, var_name, src)
+        __qm_var_lower[var_name:lower()] = var_name
+        local pfx = var_name:match("^(.-[^%d])(%d+)$")
+        if pfx then __qm_touched_audio_prefixes[pfx] = true end
+      end
+    end
+    return true
+  elseif ext_l == "png" or ext_l == "jpg" or ext_l == "jpeg" or ext_l == "bmp" then
+    if not orig_newImage then return false end
+    local ok_img, img = pcall(orig_newImage, fd)
+    if not ok_img or not img then return false end
+    for _, var_name in ipairs(targets) do
+      local old = rawget(_G, var_name)
+      local old_info = old and __qm_obj_info[old] or nil
+      __qm_obj_info[img] = old_info or {
+        kind = "image",
+        path = cat_l .. "/" .. stem_l .. "." .. ext_l,
+        cat_stem = cat_l .. "/" .. stem_l,
+        stem = stem_l,
+      }
+      if old_info then
+        __qm_path_overrides[old_info.path] = { fd = fd }
+        __qm_path_overrides[old_info.cat_stem] = { fd = fd }
+      end
+      rawset(_G, var_name, img)
+      __qm_var_lower[var_name:lower()] = var_name
+      local wep_tag = var_name:match("^top_(.+)$") or var_name:match("^side_(.+)$")
+      if wep_tag then __qm_touched_weapon_tags[wep_tag] = true end
+    end
+    return true
+  elseif ext_l == "ttf" or ext_l == "otf" then
+    if not (love and love.graphics and love.graphics.newFont) then return false end
+    local ok_fnt, fnt = pcall(love.graphics.newFont, fd, 16)
+    if not ok_fnt or not fnt then return false end
+    for _, var_name in ipairs(targets) do
+      rawset(_G, var_name, fnt)
+      __qm_var_lower[var_name:lower()] = var_name
+    end
+    return true
+  end
+  return false
+end
+
+_G.__qm_finalize_auto_assets = function()
+  for tag, _ in pairs(__qm_touched_weapon_tags) do
+    local wt_key = "weaponText_" .. tag
+    if rawget(_G, wt_key) == nil then
+      rawset(_G, wt_key, tag:upper() .. "\nCustom weapon loaded via QuarterMaster.")
+    end
+  end
+
+  for pfx, _ in pairs(__qm_touched_audio_prefixes) do
+    -- Restore any previously pooled entries into _G before rescanning
+    local prev_pool = __qm_pools_by_prefix[pfx]
+    if prev_pool then
+      for idx, s in ipairs(prev_pool) do
+        local k = pfx .. tostring(idx)
+        if rawget(_G, k) == nil then rawset(_G, k, s) end
+        __qm_pool_key_map[k] = nil
+      end
+    end
+
+    local pool = {}
+    local vanilla_count = 0
+    local i = 1
+    while true do
+      local k = pfx .. tostring(i)
+      local v = rawget(_G, k)
+      if v == nil then break end
+      table.insert(pool, v)
+      if __qm_vanilla_keys[k] then vanilla_count = i end
+      i = i + 1
+    end
+
+    if #pool >= 2 then
+      __qm_pools_by_prefix[pfx] = pool
+      -- If a mod added extra numbered variations beyond vanilla's count (e.g. garand5..6 when vanilla had 1..4),
+      -- route lookups through __qm_pool_key_map so _G[pfx .. randNbr(vanilla_count)] rolls across 1..#pool.
+      if vanilla_count > 0 and #pool > vanilla_count then
+        for idx = 1, #pool do
+          local k = pfx .. tostring(idx)
+          __qm_pool_key_map[k] = pool
+          rawset(_G, k, nil)
+        end
+      end
+      -- If vanilla had a single sound at _G[pfx] (e.g. mg42Sound) and a mod added mg42Sound1..N,
+      -- route _G[pfx] through the pool as well.
+      local base_Name = pfx:gsub("_$", "")
+      if __qm_vanilla_keys[base_Name] and rawget(_G, base_Name) ~= nil then
+        __qm_pool_key_map[base_Name] = pool
+        rawset(_G, base_Name, nil)
+      end
+    end
+  end
+end
+
 local prev_mt = getmetatable(_G) or {}
+local prev_index = prev_mt.__index
 local prev_newindex = prev_mt.__newindex
 
 setmetatable(_G, {
-  __index = prev_mt.__index,
+  __index = function(t, k)
+    local pool = __qm_pool_key_map[k]
+    if pool and #pool > 0 then
+      return pool[math.random(1, #pool)]
+    end
+    if type(k) == "string" then
+      local direct_pool = __qm_pools_by_prefix[k] or __qm_pools_by_prefix[k .. "_"]
+      if direct_pool and #direct_pool > 0 then
+        return direct_pool[math.random(1, #direct_pool)]
+      end
+      local pfx = k:match("^(.-[^%d])(%d+)$")
+      if pfx and __qm_pools_by_prefix[pfx] then
+        local p = __qm_pools_by_prefix[pfx]
+        return p[math.random(1, #p)]
+      end
+    end
+    if type(prev_index) == "function" then
+      return prev_index(t, k)
+    elseif type(prev_index) == "table" then
+      return prev_index[k]
+    end
+    return nil
+  end,
   __newindex = function(t, k, v)
     if blocked_globals[k] then
       rawset(t, k, function(...)
@@ -141,6 +446,247 @@ fn filename_cmp(first: &Path, second: &Path) -> Ordering {
     let first = first.file_name().unwrap().to_string_lossy().to_lowercase();
     let second = second.file_name().unwrap().to_string_lossy().to_lowercase();
     first.cmp(&second)
+}
+
+/// Metadata for an asset file discovered under a mod's `assets/` folder.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DiscoveredAsset {
+    pub rel_path: String,
+    pub category: String,
+    pub stem: String,
+    pub ext: String,
+    pub default_mode: String,
+}
+
+/// Classifies a relative path from a mod root (e.g. `"assets/sounds/garand1.wav"`) into a `DiscoveredAsset`.
+/// Returns `None` if the path is not inside `assets/`, is a hidden file, or has an unsupported extension.
+pub fn classify_asset_relative_path(rel_from_mod_root: &str) -> Option<DiscoveredAsset> {
+    let norm = rel_from_mod_root.replace('\\', "/");
+    let norm = norm.trim_start_matches('/');
+    let parts: Vec<&str> = norm.split('/').filter(|s| !s.is_empty()).collect();
+    if parts.len() < 2 || !parts[0].eq_ignore_ascii_case("assets") {
+        return None;
+    }
+    if parts.iter().any(|seg| seg.starts_with('.')) {
+        return None;
+    }
+
+    let file_name = *parts.last()?;
+    let dot_idx = file_name.rfind('.')?;
+    if dot_idx == 0 || dot_idx + 1 >= file_name.len() {
+        return None;
+    }
+    let stem = file_name[..dot_idx].to_string();
+    let ext = file_name[dot_idx + 1..].to_ascii_lowercase();
+
+    let is_audio = matches!(ext.as_str(), "wav" | "mp3" | "ogg");
+    let is_image = matches!(ext.as_str(), "png" | "jpg" | "jpeg" | "bmp");
+    let is_font = matches!(ext.as_str(), "ttf" | "otf");
+    let is_text = ext == "txt";
+
+    if !is_audio && !is_image && !is_font && !is_text {
+        return None;
+    }
+
+    let subdirs: Vec<String> = parts[1..parts.len() - 1]
+        .iter()
+        .map(|s| s.to_ascii_lowercase())
+        .collect();
+
+    let (category, default_mode) = match subdirs.first().map(|s| s.as_str()) {
+        Some("sounds") | Some("sfx") | Some("audio") => {
+            if subdirs.get(1).is_some_and(|s| s == "vo" || s == "voice" || s == "voices") {
+                ("sounds/vo".to_string(), "stream".to_string())
+            } else {
+                ("sounds".to_string(), "static".to_string())
+            }
+        }
+        Some("vo") | Some("voice") | Some("voices") => {
+            ("sounds/vo".to_string(), "stream".to_string())
+        }
+        Some("music") | Some("bgm") => ("music".to_string(), "stream".to_string()),
+        Some("ui") => ("ui".to_string(), String::new()),
+        Some("cheevos") => ("cheevos".to_string(), String::new()),
+        Some("splash") => ("splash".to_string(), String::new()),
+        Some("sprites") | Some("gfx") | Some("images") => {
+            ("sprites".to_string(), String::new())
+        }
+        Some("fonts") => ("fonts".to_string(), String::new()),
+        Some("text") | Some("descriptions") => ("text".to_string(), String::new()),
+        _ => {
+            if is_audio {
+                ("sounds".to_string(), "static".to_string())
+            } else if is_image {
+                ("sprites".to_string(), String::new())
+            } else if is_font {
+                ("fonts".to_string(), String::new())
+            } else {
+                ("text".to_string(), String::new())
+            }
+        }
+    };
+
+    let canonical_rel = format!("assets/{}", parts[1..].join("/"));
+    Some(DiscoveredAsset {
+        rel_path: canonical_rel,
+        category,
+        stem,
+        ext,
+        default_mode,
+    })
+}
+
+/// Recursively scans `<mod_dir>/assets` and returns all supported assets in deterministic path order.
+pub fn discover_dir_assets(mod_dir: &Path) -> Vec<DiscoveredAsset> {
+    let assets_dir = mod_dir.join("assets");
+    if !assets_dir.is_dir() {
+        return Vec::new();
+    }
+    let mut assets: Vec<DiscoveredAsset> = WalkDir::new(&assets_dir)
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().is_file())
+        .filter_map(|e| {
+            let rel = e.path().strip_prefix(mod_dir).ok()?;
+            classify_asset_relative_path(&rel.to_string_lossy())
+        })
+        .collect();
+    assets.sort_by(|a, b| a.rel_path.cmp(&b.rel_path));
+    assets
+}
+
+/// Synthesizes a `Patch::Pattern` that auto-loads all discovered assets in `<mod_id>` immediately before `setOptionVolume()`.
+pub fn build_auto_asset_patch(
+    mod_id: &str,
+    asset_root_dir: &Path,
+    assets: &[DiscoveredAsset],
+    priority: Priority,
+) -> Option<Patch> {
+    if assets.is_empty() {
+        return None;
+    }
+    let escaped_dir = asset_root_dir
+        .to_string_lossy()
+        .replace('\\', "/")
+        .replace('"', "\\\"");
+
+    let mut payload = format!(
+        "-- QuarterMaster Auto-Asset Patch ({mod_id}: {} files)\nif _G.__qm_auto_asset then\n  local _qm_mod_dir = \"{escaped_dir}\"\n",
+        assets.len()
+    );
+    for a in assets {
+        let rel_esc = a.rel_path.replace('\\', "/").replace('"', "\\\"");
+        let cat_esc = a.category.replace('"', "\\\"");
+        let stem_esc = a.stem.replace('"', "\\\"");
+        let ext_esc = a.ext.replace('"', "\\\"");
+        let mode_esc = a.default_mode.replace('"', "\\\"");
+        payload.push_str(&format!(
+            "  _G.__qm_auto_asset(_qm_mod_dir, \"{rel_esc}\", \"{cat_esc}\", \"{stem_esc}\", \"{ext_esc}\", \"{mode_esc}\")\n"
+        ));
+    }
+    payload.push_str("  if _G.__qm_finalize_auto_assets then _G.__qm_finalize_auto_assets() end\nend");
+
+    Some(Patch::Pattern(crate::patch::PatternPatch {
+        pattern: "setOptionVolume()".to_string(),
+        position: crate::patch::InsertPosition::Before,
+        target: crate::patch::Target::Single("main.lua".to_string()),
+        payload,
+        match_indent: true,
+        times: Some(1),
+        overwrite: false,
+        id: Some(format!("{mod_id}_auto_assets")),
+        name: Some(format!("Auto-Load Assets ({} files)", assets.len())),
+        description: Some(format!(
+            "Automatically loads and replaces {} asset file(s) from assets/.",
+            assets.len()
+        )),
+        requires: Vec::new(),
+        priority: Some(priority),
+        before: Vec::new(),
+        after: Vec::new(),
+        on_failure: crate::patch::OnFailurePolicy::Warn,
+        mod_id: Some(mod_id.to_string()),
+        disabled: false,
+    }))
+}
+
+/// Extracts and discovers `assets/` inside a `.zip` mod archive if present.
+fn discover_zip_assets(zip_file: &Path) -> Result<(PathBuf, Vec<DiscoveredAsset>)> {
+    let file = fs::File::open(zip_file)
+        .with_context(|| format!("Failed to open zip file at {:?}", zip_file))?;
+    let mut zip = ZipArchive::new(file)
+        .with_context(|| format!("Failed to open zip archive for {:?}", zip_file))?;
+
+    let names: Vec<String> = (0..zip.len())
+        .filter_map(|i| zip.by_index(i).ok().map(|f| f.name().to_string()))
+        .collect();
+
+    let mod_root = names
+        .iter()
+        .find_map(|name| {
+            let parent = get_parent(name);
+            let qm_toml = format!("{}qm.toml", parent);
+            let qm_dir = format!("{}qm/", parent);
+            if names.iter().any(|n| n == &qm_toml || n.starts_with(&qm_dir)) {
+                Some(parent)
+            } else {
+                None
+            }
+        })
+        .or_else(|| {
+            names.iter().find_map(|name| {
+                let norm = name.replace('\\', "/");
+                if let Some(idx) = norm.find("assets/") {
+                    if idx == 0 || norm.as_bytes().get(idx - 1) == Some(&b'/') {
+                        let parent = &norm[..idx];
+                        let rel = &norm[idx..];
+                        if classify_asset_relative_path(rel).is_some() {
+                            return Some(parent.to_string());
+                        }
+                    }
+                }
+                None
+            })
+        });
+
+    let Some(mod_root) = mod_root else {
+        return Ok((zip_file.to_path_buf(), Vec::new()));
+    };
+
+    let zip_stem = zip_file
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("zip_mod");
+    let extract_root = zip_file
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join("qm")
+        .join("zip_assets")
+        .join(zip_stem);
+
+    let mut discovered = Vec::new();
+    for name in &names {
+        if name.ends_with('/') || name.ends_with('\\') || !name.starts_with(&mod_root) {
+            continue;
+        }
+        let rel = &name[mod_root.len()..];
+        if let Some(asset) = classify_asset_relative_path(rel) {
+            if let Ok(mut entry) = zip.by_name(name) {
+                let out_path = extract_root.join(&asset.rel_path);
+                if let Some(p) = out_path.parent() {
+                    let _ = fs::create_dir_all(p);
+                }
+                let mut buf = Vec::new();
+                if entry.read_to_end(&mut buf).is_ok() {
+                    let _ = fs::write(&out_path, &buf);
+                    discovered.push(asset);
+                }
+            }
+        }
+    }
+
+    discovered.sort_by(|a, b| a.rel_path.cmp(&b.rel_path));
+    Ok((extract_root, discovered))
 }
 
 /// Load patch files from the specified mod directory.
@@ -390,33 +936,46 @@ pub fn load_patches_new(mod_dir: &Path) -> Result<Vec<(Patch, Priority, PathBuf,
         })
         .collect_vec();
 
-    // Collect directory patches (read TOMLs into IntermediatePatch)
-    let dir_results: Vec<(PathBuf, Vec<IntermediatePatch>)> = mod_contents
-        .iter()
-        .filter(|x| x.is_dir())
-        .filter(|x| {
-            let ignore_file = x.join(".qmignore");
-            let dirname = x
-                .file_name()
-                .unwrap_or_else(|| panic!("Failed to read directory name of {x:?}"))
-                .to_string_lossy();
-            if ignore_file.is_file() {
-                info!("Found .qmignore in '{dirname}', skipping it.");
-            }
-            !ignore_file.is_file()
-        })
-        .sorted_by(|a, b| filename_cmp(a, b))
-        .map(|x| get_dir_patches(x))
-        .collect::<Result<Vec<_>>>()?;
+    // Collect directory patches (read TOMLs into IntermediatePatch) and discovered assets
+    let dir_results: Vec<(PathBuf, Vec<IntermediatePatch>, PathBuf, Vec<DiscoveredAsset>)> =
+        mod_contents
+            .iter()
+            .filter(|x| x.is_dir())
+            .filter(|x| {
+                let ignore_file = x.join(".qmignore");
+                let dirname = x
+                    .file_name()
+                    .unwrap_or_else(|| panic!("Failed to read directory name of {x:?}"))
+                    .to_string_lossy();
+                if dirname == "qm" || dirname.starts_with('.') {
+                    return false;
+                }
+                if ignore_file.is_file() {
+                    info!("Found .qmignore in '{dirname}', skipping it.");
+                }
+                !ignore_file.is_file()
+            })
+            .sorted_by(|a, b| filename_cmp(a, b))
+            .map(|x| {
+                let (bp, ips) = get_dir_patches(x)?;
+                let assets = discover_dir_assets(x);
+                Ok((bp, ips, x.to_path_buf(), assets))
+            })
+            .collect::<Result<Vec<_>>>()?;
 
-    // Collect zip patches (read TOMLs into IntermediatePatch)
-    let zip_results: Vec<(PathBuf, Vec<IntermediatePatch>)> = mod_contents
-        .iter()
-        .filter(|x| x.is_file())
-        .filter(|x| x.extension().is_some_and(|ext| ext == "zip"))
-        .sorted_by(|a, b| filename_cmp(a, b))
-        .map(|x| get_zip_patches(x))
-        .collect::<Result<Vec<_>>>()?;
+    // Collect zip patches (read TOMLs into IntermediatePatch) and discovered assets
+    let zip_results: Vec<(PathBuf, Vec<IntermediatePatch>, PathBuf, Vec<DiscoveredAsset>)> =
+        mod_contents
+            .iter()
+            .filter(|x| x.is_file())
+            .filter(|x| x.extension().is_some_and(|ext| ext == "zip"))
+            .sorted_by(|a, b| filename_cmp(a, b))
+            .map(|x| {
+                let (bp, ips) = get_zip_patches(x)?;
+                let (asset_root, assets) = discover_zip_assets(x)?;
+                Ok((bp, ips, asset_root, assets))
+            })
+            .collect::<Result<Vec<_>>>()?;
 
     // Parse TOML contents into PatchFile structures
     let mut patches: Vec<(Patch, Priority, PathBuf, HashMap<String, String>)> = Vec::new();
@@ -434,12 +993,24 @@ pub fn load_patches_new(mod_dir: &Path) -> Result<Vec<(Patch, Priority, PathBuf,
         })
         .unwrap_or_default();
 
-    for (base_path, ips) in all_results {
-        let folder_name = base_path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("unknown")
-            .to_string();
+    for (base_path, ips, asset_root, discovered_assets) in all_results {
+        if ips.is_empty() && discovered_assets.is_empty() {
+            continue;
+        }
+
+        let folder_name = if base_path.extension().is_some_and(|e| e == "zip") {
+            base_path
+                .file_stem()
+                .and_then(|n| n.to_str())
+                .unwrap_or("unknown")
+                .to_string()
+        } else {
+            base_path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("unknown")
+                .to_string()
+        };
 
         // Read mod.json if present for authoritative mod_id and load_priority
         let manifest_meta = ModManifest::from_path(&base_path.join("mod.json")).ok();
@@ -457,6 +1028,59 @@ pub fn load_patches_new(mod_dir: &Path) -> Result<Vec<(Patch, Priority, PathBuf,
                     mod_id, folder_name
                 );
                 continue;
+            }
+        }
+
+        // Determine mod-level base priority for synthesized auto-asset patches
+        let first_toml_prio = ips.first().and_then(|ip| {
+            let fid = format!("{:?}", ip.path);
+            parse_patch_file(&ip.content, &fid, &base_path)
+                .ok()
+                .map(|pf| pf.manifest.priority)
+        });
+        let mut mod_base_priority = manifest_meta
+            .as_ref()
+            .map(|m| m.load_priority)
+            .or(first_toml_prio)
+            .unwrap_or(50);
+        if let Some(ref plan) = load_order_plan {
+            if let Some(&override_prio) = plan
+                .mod_priorities
+                .get(&mod_id)
+                .or_else(|| plan.mod_priorities.get(&folder_name))
+            {
+                mod_base_priority = override_prio;
+            }
+        }
+
+        if let Some(mut auto_patch) =
+            build_auto_asset_patch(&mod_id, &asset_root, &discovered_assets, mod_base_priority)
+        {
+            let patch_id = auto_patch.id().unwrap_or_default().to_string();
+            let named_id = format!("{}:{}", mod_id, auto_patch.name().unwrap_or(""));
+            if !replaced_patch_ids.contains(&patch_id) && !replaced_patch_ids.contains(&named_id) {
+                if let Some(ref plan) = load_order_plan {
+                    if plan.disabled_patches.contains(&patch_id)
+                        || plan.disabled_patches.contains(&named_id)
+                    {
+                        auto_patch.set_disabled(true);
+                    }
+                }
+                let mut effective_prio = mod_base_priority;
+                if let Some(ref plan) = load_order_plan {
+                    if let Some(&p_override) = plan
+                        .patch_priorities
+                        .get(&patch_id)
+                        .or_else(|| plan.patch_priorities.get(&named_id))
+                    {
+                        effective_prio = p_override;
+                    }
+                }
+                let rel_assets_path = base_path
+                    .strip_prefix(mod_dir)
+                    .unwrap_or(&base_path)
+                    .join("assets");
+                patches.push((auto_patch, effective_prio, rel_assets_path, HashMap::new()));
             }
         }
 
@@ -925,5 +1549,110 @@ payload = "-- hi"
         assert_eq!(get_parent("a/b/c.txt"), "a/b/");
         assert_eq!(get_parent("file.txt"), "");
         assert_eq!(get_parent(""), "");
+    }
+
+    #[test]
+    fn classify_asset_relative_path_maps_categories_and_modes() {
+        let sfx = classify_asset_relative_path("assets/sounds/garand1.wav").unwrap();
+        assert_eq!(sfx.category, "sounds");
+        assert_eq!(sfx.stem, "garand1");
+        assert_eq!(sfx.ext, "wav");
+        assert_eq!(sfx.default_mode, "static");
+
+        let vo = classify_asset_relative_path("assets/sounds/vo/allied/rog1.wav").unwrap();
+        assert_eq!(vo.category, "sounds/vo");
+        assert_eq!(vo.stem, "rog1");
+        assert_eq!(vo.default_mode, "stream");
+
+        let vo_alias = classify_asset_relative_path("assets/vo/axis/ger1.ogg").unwrap();
+        assert_eq!(vo_alias.category, "sounds/vo");
+        assert_eq!(vo_alias.stem, "ger1");
+        assert_eq!(vo_alias.default_mode, "stream");
+
+        let music = classify_asset_relative_path("assets/music/MudAndBloodFull.mp3").unwrap();
+        assert_eq!(music.category, "music");
+        assert_eq!(music.stem, "MudAndBloodFull");
+        assert_eq!(music.default_mode, "stream");
+
+        let sprite = classify_asset_relative_path("assets/sprites/weapons/top_carcano.png").unwrap();
+        assert_eq!(sprite.category, "sprites");
+        assert_eq!(sprite.stem, "top_carcano");
+        assert_eq!(sprite.default_mode, "");
+
+        let ui = classify_asset_relative_path("assets/ui/ambulance.png").unwrap();
+        assert_eq!(ui.category, "ui");
+        assert_eq!(ui.stem, "ambulance");
+
+        let txt = classify_asset_relative_path("assets/text/weaponText_carcano.txt").unwrap();
+        assert_eq!(txt.category, "text");
+        assert_eq!(txt.stem, "weaponText_carcano");
+
+        let root_wav = classify_asset_relative_path("assets/garand2.wav").unwrap();
+        assert_eq!(root_wav.category, "sounds");
+        assert_eq!(root_wav.stem, "garand2");
+        assert_eq!(root_wav.default_mode, "static");
+
+        assert!(classify_asset_relative_path("assets/custom/script.lua").is_none());
+        assert!(classify_asset_relative_path("assets/.DS_Store").is_none());
+        assert!(classify_asset_relative_path("other/garand1.wav").is_none());
+    }
+
+    #[test]
+    fn asset_only_dir_mod_synthesizes_auto_asset_patch_without_qm_toml() {
+        let temp = TempDir::new().unwrap();
+        let mods = temp.path();
+        fs::create_dir_all(mods.join("qm")).unwrap();
+
+        let sound_mod = mods.join("MySoundSwap");
+        fs::create_dir_all(sound_mod.join("assets/sounds")).unwrap();
+        fs::create_dir_all(sound_mod.join("assets/music")).unwrap();
+        fs::write(sound_mod.join("assets/sounds/garand1.wav"), b"RIFF_GARAND").unwrap();
+        fs::write(sound_mod.join("assets/music/MudAndBloodFull.mp3"), b"ID3_MUSIC").unwrap();
+
+        let patches = load_patches_new(mods).unwrap();
+        assert_eq!(patches.len(), 1);
+        let (patch, prio, _, _) = &patches[0];
+        assert_eq!(patch.id(), Some("mysoundswap_auto_assets"));
+        assert_eq!(patch.mod_id(), Some("mysoundswap"));
+        assert_eq!(patch.primary_target(), "main.lua");
+        assert_eq!(*prio, 50);
+
+        if let Patch::Pattern(p) = patch {
+            assert_eq!(p.pattern, "setOptionVolume()");
+            assert_eq!(p.position, crate::patch::InsertPosition::Before);
+            assert!(p.payload.contains("\"assets/music/MudAndBloodFull.mp3\""));
+            assert!(p.payload.contains("\"assets/sounds/garand1.wav\""));
+        } else {
+            panic!("Expected Pattern patch");
+        }
+    }
+
+    #[test]
+    fn asset_only_zip_mod_extracts_and_synthesizes_auto_asset_patch() {
+        let temp = TempDir::new().unwrap();
+        let mods = temp.path();
+        fs::create_dir_all(mods.join("qm")).unwrap();
+
+        make_zip(
+            &temp,
+            "ZipSoundMod.zip",
+            &[("NestedMod/assets/sounds/m60_1.wav", "RIFF_M60")],
+        );
+
+        let patches = load_patches_new(mods).unwrap();
+        assert_eq!(patches.len(), 1);
+        let (patch, _, _, _) = &patches[0];
+        assert_eq!(patch.primary_target(), "main.lua");
+        if let Patch::Pattern(p) = patch {
+            assert!(p.payload.contains("\"assets/sounds/m60_1.wav\""));
+        } else {
+            panic!("Expected Pattern patch");
+        }
+        let extracted = mods
+            .join("qm")
+            .join("zip_assets")
+            .join("ZipSoundMod")
+            .join("assets/sounds/m60_1.wav");
+        assert!(extracted.is_file());
     }
 }

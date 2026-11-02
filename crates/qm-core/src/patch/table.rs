@@ -607,4 +607,84 @@ mod tests {
         assert_eq!(records[0].matched_count, 0);
         assert!(debug.entries.is_empty());
     }
+
+    #[test]
+    fn auto_assets_multi_mod_priority_and_custom_patch_ordering() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let mods = temp.path();
+        std::fs::create_dir_all(mods.join("qm")).unwrap();
+
+        // ModEarly (priority = 10) provides garand1.wav and m60_1.wav
+        let mod_early = mods.join("ModEarly");
+        std::fs::create_dir_all(mod_early.join("assets/sounds")).unwrap();
+        std::fs::write(mod_early.join("assets/sounds/garand1.wav"), b"EARLY_GARAND").unwrap();
+        std::fs::write(mod_early.join("assets/sounds/m60_1.wav"), b"EARLY_M60").unwrap();
+        std::fs::write(
+            mod_early.join("qm.toml"),
+            r#"[manifest]
+version = "1.0.0"
+priority = 10
+"#,
+        )
+        .unwrap();
+
+        // ModLate (priority = 50) overrides m60_1.wav, adds top_m60.png, and uses them in a manual patch after setOptionVolume()
+        let mod_late = mods.join("ModLate");
+        std::fs::create_dir_all(mod_late.join("assets/sounds")).unwrap();
+        std::fs::create_dir_all(mod_late.join("assets/sprites")).unwrap();
+        std::fs::write(mod_late.join("assets/sounds/m60_1.wav"), b"LATE_M60").unwrap();
+        std::fs::write(mod_late.join("assets/sprites/top_m60.png"), b"PNG_M60").unwrap();
+        std::fs::write(
+            mod_late.join("qm.toml"),
+            r#"[manifest]
+version = "1.0.0"
+priority = 50
+
+[[patches]]
+[patches.pattern]
+id = "modlate_use_m60"
+name = "Use M60 Assets"
+target = "main.lua"
+pattern = '''
+setOptionVolume()
+'''
+position = "after"
+payload = '''
+  m60_ready = (m60_1 ~= nil and top_m60 ~= nil)
+'''
+match_indent = true
+"#,
+        )
+        .unwrap();
+
+        let table = PatchTable::load(mods).unwrap();
+        assert!(table.needs_patching("main.lua"));
+
+        let sample_main = "function love.load()\n  repairSound = love.audio.newSource(\"sounds/repairSound.wav\", \"static\")\n  setOptionVolume()\n  tensionLoop:setLooping(true)\nend\n";
+        let (patched, _debug, records) = table
+            .apply_patches_offline("main.lua", sample_main)
+            .unwrap();
+
+        assert_eq!(records.len(), 3);
+        for rec in &records {
+            assert_eq!(rec.status, PatchOutcomeStatus::Applied);
+            assert!(!rec.regions.is_empty());
+        }
+        // Verify non-overlapping line regions between ModEarly and ModLate auto-asset patches
+        assert!(records[0].regions[0].end_line < records[1].regions[0].start_line);
+
+        // Verify exact execution order in patched buffer:
+        // 1. ModEarly auto-assets (priority 10)
+        // 2. ModLate auto-assets (priority 50)
+        // 3. setOptionVolume()
+        // 4. ModLate manual patch after setOptionVolume()
+        let idx_early = patched.find("Auto-Asset Patch (modearly").unwrap();
+        let idx_late = patched.find("Auto-Asset Patch (modlate").unwrap();
+        let idx_vol = patched.find("setOptionVolume()").unwrap();
+        let idx_manual = patched.find("m60_ready =").unwrap();
+
+        assert!(idx_early < idx_late, "ModEarly must run before ModLate");
+        assert!(idx_late < idx_vol, "ModLate auto-assets must run before setOptionVolume()");
+        assert!(idx_vol < idx_manual, "Manual patch must run after setOptionVolume()");
+    }
 }

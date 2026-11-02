@@ -47,6 +47,7 @@ pub struct Manifest {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct PatchFile {
     pub manifest: Manifest,
+    #[serde(default)]
     pub patches: Vec<Patch>,
 
     // A table of variable name = value bindings. These are interpolated

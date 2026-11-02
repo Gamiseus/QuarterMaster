@@ -217,7 +217,10 @@ impl QuarterMasterPaths {
             if dir_name.starts_with('.') || dir_name == "qm" {
                 continue;
             }
-            if path.join("qm.toml").is_file() || path.join("mod.json").is_file() {
+            if path.join("qm.toml").is_file()
+                || path.join("mod.json").is_file()
+                || has_supported_assets_dir(&path)
+            {
                 if let Ok(summary) = self.import_mod_from_path(&path, None, false) {
                     synced.extend(summary.imported_mods);
                 }
@@ -240,23 +243,10 @@ impl QuarterMasterPaths {
 
         let inspect_root =
             |root: &Path, fallback_name: &str| -> Result<Vec<ArchiveModCandidate>, String> {
-                let mut mod_roots = Vec::new();
-                for entry in WalkDir::new(root).into_iter().filter_map(|e| e.ok()) {
-                    let p = entry.path();
-                    if p.is_file() {
-                        let fname = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
-                        if fname == "qm.toml" || fname == "quartermaster.toml" {
-                            if let Some(parent) = p.parent() {
-                                if !mod_roots.contains(&parent.to_path_buf()) {
-                                    mod_roots.push(parent.to_path_buf());
-                                }
-                            }
-                        }
-                    }
-                }
+                let mut mod_roots = find_mod_roots_in_tree(root);
                 if mod_roots.is_empty() {
                     if !allow_unmanaged {
-                        return Err(format!("No `qm.toml` found in '{fallback_name}'."));
+                        return Err(format!("No `qm.toml` or supported `assets/` directory found in '{fallback_name}'."));
                     }
                     mod_roots.push(root.to_path_buf());
                 }
@@ -395,26 +385,12 @@ impl QuarterMasterPaths {
         selected_mod_ids: Option<&[String]>,
         conflict_policy: Option<&str>,
     ) -> Result<ImportSummary, String> {
-        // Search downward recursively for all folders containing `qm.toml` or `quartermaster.toml`
-        let mut mod_roots = Vec::new();
-        for entry in WalkDir::new(root).into_iter().filter_map(|e| e.ok()) {
-            let p = entry.path();
-            if p.is_file() {
-                let fname = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
-                if fname == "qm.toml" || fname == "quartermaster.toml" {
-                    if let Some(parent) = p.parent() {
-                        if !mod_roots.contains(&parent.to_path_buf()) {
-                            mod_roots.push(parent.to_path_buf());
-                        }
-                    }
-                }
-            }
-        }
+        let mut mod_roots = find_mod_roots_in_tree(root);
 
         if mod_roots.is_empty() {
             if !allow_unmanaged {
                 return Err(format!(
-                    "No `qm.toml` found in '{}'. Pass `allow_unmanaged = true` to import as an unmanaged mod.",
+                    "No `qm.toml` or supported `assets/` directory found in '{}'. Pass `allow_unmanaged = true` to import as an unmanaged mod.",
                     fallback_name
                 ));
             }
@@ -680,6 +656,40 @@ pub fn extract_zip_safely(zip_path: &Path, dest_dir: &Path) -> Result<(), String
     Ok(())
 }
 
+/// Returns `true` if `mod_dir/assets/` contains at least one supported asset file.
+pub fn has_supported_assets_dir(mod_dir: &Path) -> bool {
+    !qm_core::patch::loader::discover_dir_assets(mod_dir).is_empty()
+}
+
+/// Discovers all mod root directories inside `root` that contain either `qm.toml` / `quartermaster.toml`
+/// or a supported `assets/` directory.
+fn find_mod_roots_in_tree(root: &Path) -> Vec<PathBuf> {
+    let mut mod_roots = Vec::new();
+    for entry in WalkDir::new(root).into_iter().filter_map(|e| e.ok()) {
+        let p = entry.path();
+        if p.is_file() {
+            let fname = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            if fname == "qm.toml" || fname == "quartermaster.toml" {
+                if let Some(parent) = p.parent() {
+                    if !mod_roots.contains(&parent.to_path_buf()) {
+                        mod_roots.push(parent.to_path_buf());
+                    }
+                }
+            }
+        } else if p.is_dir() {
+            let dname = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            if dname.eq_ignore_ascii_case("assets") {
+                if let Some(parent) = p.parent() {
+                    if !mod_roots.contains(&parent.to_path_buf()) && has_supported_assets_dir(parent) {
+                        mod_roots.push(parent.to_path_buf());
+                    }
+                }
+            }
+        }
+    }
+    mod_roots
+}
+
 fn load_or_synthesize_manifest(
     mod_root: &Path,
     fallback_name: &str,
@@ -786,6 +796,10 @@ pub fn inspect_mod_directory(
             }
         }
     }
+    if has_supported_assets_dir(mod_dir) {
+        patch_count += 1;
+        targets_set.insert("main.lua".to_string());
+    }
 
     Ok(InstalledMod {
         manifest,
@@ -858,5 +872,59 @@ mod tests {
         assert!(validate_safe_relative_path("mod/NUL").is_err());
         assert!(validate_safe_relative_path("mod/trailing.").is_err());
         assert!(validate_safe_relative_path("GCore/qm.toml").is_ok());
+    }
+
+    #[test]
+    fn imports_and_syncs_asset_only_mods_without_qm_toml() {
+        use std::io::Write;
+        use zip::write::SimpleFileOptions;
+        use zip::ZipWriter;
+
+        let temp = tempfile::TempDir::new().unwrap();
+        let paths = QuarterMasterPaths::resolve(Some(temp.path()));
+        let ws_mods = temp.path().join("ws_mods");
+        fs::create_dir_all(ws_mods.join("PureSoundPack/assets/sounds")).unwrap();
+        fs::create_dir_all(ws_mods.join("PureSoundPack/assets/music")).unwrap();
+        fs::write(
+            ws_mods.join("PureSoundPack/assets/sounds/garand1.wav"),
+            b"RIFF_GARAND",
+        )
+        .unwrap();
+        fs::write(
+            ws_mods.join("PureSoundPack/assets/music/MudAndBloodFull.mp3"),
+            b"ID3_MUSIC",
+        )
+        .unwrap();
+
+        let synced = paths.sync_workspace_mods(&ws_mods).unwrap();
+        assert_eq!(synced.len(), 1);
+        assert_eq!(synced[0].manifest.id, "puresoundpack");
+        assert_eq!(synced[0].patch_count, 1);
+        assert_eq!(synced[0].target_files, vec!["main.lua".to_string()]);
+
+        let zip_path = temp.path().join("PureSpritePack.zip");
+        {
+            let mut zip = ZipWriter::new(fs::File::create(&zip_path).unwrap());
+            zip.start_file(
+                "PureSpritePack/assets/sprites/top_garand.png",
+                SimpleFileOptions::default(),
+            )
+            .unwrap();
+            zip.write_all(b"PNG_GARAND").unwrap();
+            zip.finish().unwrap();
+        }
+
+        let candidates = paths.inspect_archive_candidates(&zip_path, false).unwrap();
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].manifest.id, "purespritepack");
+
+        let imported = paths.import_mod_from_path(&zip_path, None, false).unwrap();
+        assert_eq!(imported.imported_mods.len(), 1);
+        assert_eq!(imported.imported_mods[0].manifest.id, "purespritepack");
+        assert_eq!(imported.imported_mods[0].patch_count, 1);
+        assert_eq!(
+            imported.imported_mods[0].target_files,
+            vec!["main.lua".to_string()]
+        );
     }
 }

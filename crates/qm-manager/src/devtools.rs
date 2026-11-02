@@ -1992,8 +1992,19 @@ if exist %LAUNCHER_EXE% start "" %LAUNCHER_EXE%
                 if !p.is_file() {
                     continue;
                 }
-                let ext = p.extension().and_then(|s| s.to_str()).unwrap_or("");
-                if !matches!(ext, "lua" | "toml" | "json") {
+                let ext = p
+                    .extension()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("")
+                    .to_ascii_lowercase();
+                let is_code_or_meta = matches!(ext.as_str(), "lua" | "toml" | "json");
+                let is_asset = matches!(
+                    ext.as_str(),
+                    "wav" | "mp3" | "ogg" | "png" | "jpg" | "jpeg" | "bmp" | "ttf" | "otf" | "txt"
+                ) && p
+                    .components()
+                    .any(|c| c.as_os_str().to_string_lossy().eq_ignore_ascii_case("assets"));
+                if !is_code_or_meta && !is_asset {
                     continue;
                 }
                 if let Ok(meta) = p.metadata() {
@@ -2242,6 +2253,11 @@ pub fn scaffold_new_mod(
 
     let mod_json = serde_json::to_string_pretty(&manifest).map_err(|e| e.to_string())?;
     fs::write(mod_dir.join("mod.json"), mod_json).map_err(|e| e.to_string())?;
+
+    // Scaffold standard game-matching assets/ subdirectories for automatic drop-in asset loading
+    for sub in &["sounds/vo", "music", "sprites", "ui"] {
+        let _ = fs::create_dir_all(mod_dir.join("assets").join(sub));
+    }
 
     // Find preview code from built-in templates if matching
     let tpl_def = BUILTIN_TEMPLATES.iter().find(|t| t.id == norm_template);
@@ -3301,6 +3317,39 @@ mod tests {
         assert!(resolve_mod_dir(sample_mod.to_str().unwrap(), &paths, false).is_ok());
 
         let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn lints_and_watches_asset_only_mod() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let paths = QuarterMasterPaths::resolve(Some(temp.path()));
+        let ws_mods = temp.path().join("ws_mods");
+        let mod_dir = ws_mods.join("AssetOnlyMod");
+        fs::create_dir_all(mod_dir.join("assets/sounds")).unwrap();
+        fs::write(mod_dir.join("assets/sounds/garand1.wav"), b"RIFF_GARAND").unwrap();
+
+        let mut settings = paths.load_settings();
+        settings.workspace_mods_dir = Some(ws_mods.clone());
+        paths.save_settings(&settings).unwrap();
+
+        let mut vanilla_files = HashMap::new();
+        vanilla_files.insert(
+            "main.lua".to_string(),
+            "function love.load()\n  setOptionVolume()\nend\n".to_string(),
+        );
+
+        let report = lint_mod_directory(&mod_dir, &vanilla_files).unwrap();
+        assert!(report.passed, "Diagnostics: {:?}", report.diagnostics);
+        assert_eq!(report.patch_count, 1);
+        assert_eq!(report.matched_patches, 1);
+        assert!(report.zero_match_patches.is_empty());
+
+        let poll = paths.poll_dev_watch_changes(1);
+        assert_eq!(poll["changed"], serde_json::json!(true));
+        let changed_files = poll["changed_files"].as_array().unwrap();
+        assert!(changed_files
+            .iter()
+            .any(|v| v.as_str() == Some("AssetOnlyMod/assets/sounds/garand1.wav")));
     }
 }
 
