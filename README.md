@@ -1,98 +1,97 @@
-# QuarterMaster (QM) — Mod Loader & Runtime Hook for Mud and Blood
+# QuarterMaster (QM) — Mod Loader & Manager for Mud and Blood
 
-**QuarterMaster (QM)** is the dedicated, high-performance runtime mod loader and in-memory patch engine built specifically for **Mud and Blood** (running on the LÖVE 2D engine).
+QuarterMaster is a runtime mod loader, patch engine, and desktop mod manager for **Mud and Blood** (LÖVE 11.4).
 
-Named after the military logistics officer responsible for provisioning supplies, rations, and equipment to troops on the front line, QuarterMaster equips *Mud and Blood* with dynamic mod support without ever altering the original game files or executable on disk.
+Because *Mud and Blood* packs all of its Lua scripts and assets inside `mnb.exe`, traditional modding requires unpacking the executable, editing the decompiled scripts by hand, and repacking it—which breaks whenever the game updates and makes combining multiple mods a mess. QuarterMaster hooks into the game in memory at launch and applies mod patches on the fly, leaving `mnb.exe` and your install folder untouched on disk.
 
----
-
-
-1. **Self-Contained Portable Mod Discovery**:
-   - Checks local `<game_dir>/Mods` first before falling back to system `%APPDATA%/mnb/Mods`. The game and mods run 100% portably from any directory, external drive, or custom installation.
-2. **Dedicated Mod Manifests & Variables**:
-   - Uses native `qm.toml` (or `quartermaster.toml`) patch manifests.
-   - Interpolates `{{qm:VAR}}` and `{{quartermaster:VAR}}` tokens.
-3. **Auto-Rotating Log Architecture**:
-   - **`latest.log` & `prev.log`**: Automatically rotates the previous log to `prev.log` upon each launch, preventing file clutter.
-   - **`err.log` & `prev_err.log`**: Errors and unhandled warnings are mirrored into a dedicated `err.log` for immediate visibility.
-   - **`crashes/` Directory**: Captures full crash dumps and panics into `Mods/qm/log/crashes/crash-{timestamp}.log`, capped at a maximum of 10 logs (oldest pruned automatically).
-4. **Hardened Safety & Export Forwarding**:
-   - Safe UTF-16 panic hooks prevent secondary crashes during unhandled errors.
-   - Windows Multimedia API exports (`timeGetTime`, etc.) forward directly to `C:\Windows\System32\winmm.dll`.
-5. **Disabled Steam Achievements**:
-   - Disables tracking for achievements and leaderboards
-
-See **[`VERIFICATION.md`](VERIFICATION.md)** for info on how to build and verify the dll contents on your own.
+For details on how the `winmm.dll` proxy works under the hood, what it touches on your system, and how to compile or inspect it yourself, see **[`VERIFICATION.md`](VERIFICATION.md)**.
 
 ---
 
-## Directory Structure
+## Features
 
-```
+- **In-Memory Lua Patching (`qm.toml`)**:
+  Applies pattern patches, regex replacements, file appends/prepends, and new Lua modules in RAM as `mnb.exe` loads its scripts (`main.lua`, `includes/ai.lua`, `includes/urb_engine.lua`, etc.).
+- **Zero-Code Asset Autopatcher (`assets/`)**:
+  Mods can drop replacement or new `.wav`, `.mp3`, `.ogg`, `.png`, and `.txt` files directly into `Mods/<ModName>/assets/` (`sounds/`, `music/`, `sprites/`, `ui/`, `cursors/`, `weapons/`) without writing Lua or `qm.toml` patches. Numbered audio variations (like adding `garand5.wav` to vanilla's `garand1`–`garand4`) are pooled automatically.
+- **Portable Mod Discovery**:
+  Loads mods from `<game_dir>/Mods` first, falling back to `%APPDATA%/mnb/Mods`. Works from any install drive or portable folder.
+- **Steam Leaderboard & Achievement Lockdown**:
+  Automatically blocks Steam leaderboard uploads (`uploadLeaderboardScore`) and achievement/stat writes in memory while running modded so modded runs never pollute vanilla leaderboards.
+- **Desktop Mod Manager & Patch Studio (`qm-launcher`)**:
+  Includes a Tauri/Svelte desktop app for managing mod profiles, load order, save backups, conflict simulation, and authoring `qm.toml` patches against decompiled vanilla code.
+- **Diagnostics & Dumps (`Mods/qm/`)**:
+  - `Mods/qm/log/latest.log` & `err.log` (rotated to `prev.log` / `prev_err.log` on each launch)
+  - `Mods/qm/log/crashes/` (stores up to 10 crash logs if the game panics)
+  - `Mods/qm/dump/` (writes out the final patched Lua scripts so you can inspect the exact code that ran)
+  - `Mods/qm/patch-report.json` (summary of every applied, warned, or failed patch)
+
+---
+
+## Workspace Layout
+
+```text
 Quartermaster/
-├── Cargo.toml                       # Root Cargo workspace manifest
-├── Cargo.lock                       # Locked dependency tree for deterministic builds
-├── VERIFICATION.md              # Security audit, guarantees, and verification steps
-├── README.md                        # This documentation
-├── crates/
-│   ├── qm-win/                      # Windows DLL proxy implementation (compiles qm_winmm.dll)
-│   │   ├── Cargo.toml
-│   │   ├── build.rs                 # Forward-dll build script referencing system32\winmm.dll
-│   │   └── src/
-│   │       ├── lib.rs               # DllMain, detour registration, and console integration
-│   │       └── lualib.rs            # Safe FFI bindings for lua51.dll functions
-│   ├── qm-core/                     # Core patch engine and TOML/regex processor
-│   │   ├── Cargo.toml
-│   │   └── src/                     # In-memory buffer patcher, rope edits, and module loader
-│   └── minimal-minhook-reference/   # Standalone minimal reference hook (~120 lines of Rust)
-│       ├── Cargo.toml
-│       ├── build.rs
-│       └── src/lib.rs
+├── Cargo.toml                       # Workspace manifest
+├── rust-toolchain.toml              # Pinned nightly toolchain (required by retour in qm-win)
+├── README.md                        # Project overview and build instructions
+├── VERIFICATION.md                  # Proxy DLL explanation, security scope, and verification steps
+├── launcher-ui/                     # Svelte 5 frontend for the desktop mod manager & Patch Studio
+└── crates/
+    ├── qm-win/                      # Windows proxy DLL (compiles to qm_winmm.dll -> winmm.dll)
+    ├── qm-core/                     # Core patch engine, TOML parser, and asset autopatcher
+    ├── qm-schema/                   # Shared data types and qm.toml schema definitions
+    ├── qm-manager/                  # Profile staging, CAS library, save manager, and dev tools
+    ├── qm-service/                  # IPC/service layer backing the desktop app and CLI
+    ├── qm-launcher/                 # Tauri desktop application host
+    ├── qm-cli/                      # Command-line interface (compiles to qm.exe)
+    ├── qm-app/                      # Legacy standalone GUI
+    └── minimal-minhook-reference/   # Minimal ~120-line Rust hook reference
 ```
 
 ---
 
-## How It Works
+## How the Loader Works
 
-1. **Proxy Loading**:
-   Windows launches `mnb.exe`. Because `mnb.exe` imports `winmm.dll`, Windows loads the `winmm.dll` located in the game directory first (Windows DLL Search Order).
-2. **Export Forwarding**:
-   All Windows Multimedia calls (`timeGetTime`, `PlaySound`, `waveOutWrite`, etc.) pass through with zero delay to `C:\Windows\System32\winmm.dll`.
-3. **Lua Interception**:
-   QuarterMaster detects `lua51.dll` in memory and installs an in-memory detour on `luaL_loadbuffer` / `luaL_loadbufferx`.
-4. **Mod Injection**:
-   When the game loads scripts (`main.lua`, `includes/ai.lua`, `includes/urb_engine.lua`, etc.), QuarterMaster applies patches from active mods in `Mods/` directly in RAM before passing the bytecode to the LÖVE Lua interpreter.
-5. **Clean Disk State**:
-   Vanilla game files remain 100% unaltered.
+1. **DLL Loading**: When Windows launches `mnb.exe`, it looks for `winmm.dll` in the game folder before `C:\Windows\System32`. Placing QuarterMaster's `winmm.dll` next to `mnb.exe` loads QuarterMaster with the game.
+2. **Multimedia Forwarding**: All real Windows Multimedia calls (`timeGetTime`, `PlaySound`, `waveOutWrite`, etc.) are forwarded straight to `C:\Windows\System32\winmm.dll`.
+3. **Lua Hooking**: QuarterMaster locates `lua51.dll` in the process and hooks `luaL_loadbuffer` / `luaL_loadbufferx`.
+4. **Patch Execution**: Each time LÖVE loads a Lua file from `mnb.exe`, QuarterMaster intercepts the text buffer, runs all matching patches from enabled mods in priority order, writes the patched copy to `Mods/qm/dump/` for debugging, and hands the modified buffer back to Lua.
 
 ---
 
 ## Building from Source
 
-### Requirements
-- **Rust Toolchain**: 1.75+ (`stable-x86_64-pc-windows-msvc` or `nightly-x86_64-pc-windows-msvc`)
-- **Visual Studio Build Tools**: 2019 or 2022 with C++ / Windows SDK
+### Prerequisites
+- **Rust**: Install via [rustup.rs](https://rustup.rs). `qm-win` uses the `retour` crate for function hooking, which requires the `nightly` compiler (automatically selected by `rust-toolchain.toml`) or `RUSTC_BOOTSTRAP=1` on stable.
+- **Visual Studio C++ Build Tools**: Visual Studio 2019 or 2022 with the "Desktop development with C++" workload (MSVC linker and Windows SDK).
+- **Node.js 20+** *(only needed if building the `qm-launcher` desktop UI)*.
 
-### Build Commands
-```cmd
-# Navigate to the Quartermaster workspace
+### Build the Loader DLL (`winmm.dll`)
+```powershell
 cd Quartermaster
 
-# Run test suite
-cargo test
+# Run the core test suite
+cargo test -p qm-schema -p qm-core -p qm-manager -p qm-service
 
-# Compile release DLL
-cargo build --release --package qm-win
+# Build the proxy DLL
+cargo build --release -p qm-win
 ```
+The compiled DLL is output to `target\release\qm_winmm.dll`. Copy it into your *Mud and Blood* folder next to `mnb.exe` and rename it to `winmm.dll`.
 
-The compiled proxy DLL will be output to:
+### Build the Desktop Launcher (`qm-launcher.exe`)
+```powershell
+cd Quartermaster\launcher-ui
+npm install
+npm run build
+
+cd ..\crates\qm-launcher
+cargo tauri build
 ```
-target\release\qm_winmm.dll
-```
-Copy `qm_winmm.dll` into the `MudandBlood` game folder next to `mnb.exe`, renamed to `winmm.dll`, to deploy.
+The standalone executable is output to `Quartermaster\target\release\qm-launcher.exe`.
 
 ---
 
-## Attribution & Credits
+## Credits
 
-- **Original Architecture & Concept**: QuarterMaster's in-memory Lua hooking architecture was inspired by the **Lovely** injector created by **Ethan Green (@ethangreen-dev)** for *Balatro*.
+- QuarterMaster's in-memory Lua hooking approach and TOML patch model were inspired by [**Lovely**](https://github.com/ethangreen-dev/lovely-injector) by Ethan Green (`@ethangreen-dev`) for *Balatro*.
