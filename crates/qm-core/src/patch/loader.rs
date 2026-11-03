@@ -127,6 +127,21 @@ local __qm_pools_by_prefix = {}
 local orig_newSource = love and love.audio and love.audio.newSource or nil
 local orig_newImage = love and love.graphics and love.graphics.newImage or nil
 
+local function __qm_load_ov_fd(ov)
+  if not ov then return nil end
+  if ov.fd then return ov.fd end
+  if ov.full_path and io and io.open and love and love.filesystem and love.filesystem.newFileData then
+    local f = io.open(ov.full_path, "rb")
+    if not f then return nil end
+    local bytes = f:read("*all")
+    f:close()
+    if not bytes then return nil end
+    local ok, fd = pcall(love.filesystem.newFileData, bytes, ov.fname or "asset")
+    if ok and fd then return fd end
+  end
+  return nil
+end
+
 if orig_newSource then
   love.audio.newSource = function(a, b, ...)
     if type(a) == "string" then
@@ -134,8 +149,9 @@ if orig_newSource then
       local cat_stem = (norm:match("^(.+)%.[^%.]+$") or norm):lower()
       local stem = (norm:match("([^/]+)%.[^%.]+$") or norm):lower()
       local ov = __qm_path_overrides[norm:lower()] or __qm_path_overrides[cat_stem]
-      if ov and ov.fd then
-        local ok, s = pcall(orig_newSource, ov.fd, b or ov.mode or "static", ...)
+      local ov_fd = __qm_load_ov_fd(ov)
+      if ov and ov_fd then
+        local ok, s = pcall(orig_newSource, ov_fd, b or ov.mode or "static", ...)
         if ok and s then return s end
       end
       local src = orig_newSource(a, b, ...)
@@ -161,8 +177,9 @@ if orig_newImage then
       local cat_stem = (norm:match("^(.+)%.[^%.]+$") or norm):lower()
       local stem = (norm:match("([^/]+)%.[^%.]+$") or norm):lower()
       local ov = __qm_path_overrides[norm:lower()] or __qm_path_overrides[cat_stem]
-      if ov and ov.fd then
-        local ok, img = pcall(orig_newImage, ov.fd, ...)
+      local ov_fd = __qm_load_ov_fd(ov)
+      if ov and ov_fd then
+        local ok, img = pcall(orig_newImage, ov_fd, ...)
         if ok and img then return img end
       end
       local img = orig_newImage(a, ...)
@@ -231,7 +248,8 @@ _G.__qm_auto_asset = function(mod_dir, rel_path, category, stem, ext, default_mo
   if not (love and love.filesystem and love.filesystem.newFileData) then
     return false
   end
-  local ok_fd, fd = pcall(love.filesystem.newFileData, bytes, tostring(stem) .. "." .. ext_l)
+  local fname = tostring(stem) .. "." .. ext_l
+  local ok_fd, fd = pcall(love.filesystem.newFileData, bytes, fname)
   if not ok_fd or not fd then return false end
 
   local targets = {}
@@ -265,13 +283,19 @@ _G.__qm_auto_asset = function(mod_dir, rel_path, category, stem, ext, default_mo
     add_target(stem)
   end
 
-  __qm_path_overrides[cat_l .. "/" .. stem_l .. "." .. ext_l] = { fd = fd, mode = default_mode }
-  __qm_path_overrides[cat_l .. "/" .. stem_l] = { fd = fd, mode = default_mode }
+  __qm_path_overrides[cat_l .. "/" .. stem_l .. "." .. ext_l] = { full_path = full_path, fname = fname, mode = default_mode }
+  __qm_path_overrides[cat_l .. "/" .. stem_l] = { full_path = full_path, fname = fname, mode = default_mode }
 
   if ext_l == "wav" or ext_l == "mp3" or ext_l == "ogg" then
     if not orig_newSource then return false end
     for _, var_name in ipairs(targets) do
       local old = rawget(_G, var_name)
+      if old == nil and __qm_pool_key_map[var_name] then
+        local pfx, idx_s = var_name:match("^(.-[^%d])(%d+)$")
+        if pfx and idx_s and __qm_pools_by_prefix[pfx] then
+          old = __qm_pools_by_prefix[pfx][tonumber(idx_s)]
+        end
+      end
       local mode = (default_mode and default_mode ~= "") and default_mode or "static"
       local was_loop = false
       local old_vol = nil
@@ -294,8 +318,8 @@ _G.__qm_auto_asset = function(mod_dir, rel_path, category, stem, ext, default_mo
           mode = mode,
         }
         if old_info then
-          __qm_path_overrides[old_info.path] = { fd = fd, mode = mode }
-          __qm_path_overrides[old_info.cat_stem] = { fd = fd, mode = mode }
+          __qm_path_overrides[old_info.path] = { full_path = full_path, fname = fname, mode = mode }
+          __qm_path_overrides[old_info.cat_stem] = { full_path = full_path, fname = fname, mode = mode }
         end
         rawset(_G, var_name, src)
         __qm_var_lower[var_name:lower()] = var_name
@@ -318,8 +342,8 @@ _G.__qm_auto_asset = function(mod_dir, rel_path, category, stem, ext, default_mo
         stem = stem_l,
       }
       if old_info then
-        __qm_path_overrides[old_info.path] = { fd = fd }
-        __qm_path_overrides[old_info.cat_stem] = { fd = fd }
+        __qm_path_overrides[old_info.path] = { full_path = full_path, fname = fname }
+        __qm_path_overrides[old_info.cat_stem] = { full_path = full_path, fname = fname }
       end
       rawset(_G, var_name, img)
       __qm_var_lower[var_name:lower()] = var_name
@@ -391,6 +415,103 @@ _G.__qm_finalize_auto_assets = function()
       end
     end
   end
+end
+
+_G.__qm_auto_asset_manifest = function(mod_dir, manifest)
+  if type(manifest) ~= "string" then return false end
+  __qm_build_vanilla_index()
+
+  local entries = {}
+  local by_key = {}
+  for line in manifest:gmatch("[^\r\n]+") do
+    local rel_path, category, stem, ext, mode =
+      line:match('^%s*"([^"]+)"\t"([^"]*)"\t"([^"]+)"\t"([^"]+)"\t"([^"]*)"%s*$')
+    if rel_path and stem and ext then
+      local cat_l = category:lower()
+      local stem_l = stem:lower()
+      local ext_l = ext:lower()
+      local key = cat_l .. "/" .. stem_l
+      local entry = {
+        rel_path = rel_path,
+        category = category,
+        stem = stem,
+        ext = ext,
+        mode = mode,
+        cat_l = cat_l,
+        stem_l = stem_l,
+        ext_l = ext_l,
+        key = key,
+      }
+      table.insert(entries, entry)
+      by_key[key] = by_key[key] or {}
+      table.insert(by_key[key], entry)
+    end
+  end
+
+  local skip_entry = {}
+  for key, group in pairs(by_key) do
+    if #group > 1 then
+      local vanilla_path = nil
+      local target_var = rawget(_G, group[1].stem) and group[1].stem or __qm_var_lower[group[1].stem_l]
+      if not target_var and __qm_by_cat_stem[key] then
+        target_var = __qm_by_cat_stem[key][1]
+      end
+      if target_var then
+        local old_obj = rawget(_G, target_var)
+        local old_info = old_obj and __qm_obj_info[old_obj] or nil
+        if old_info and old_info.path then
+          vanilla_path = old_info.path
+        end
+      end
+
+      local best_idx = 1
+      local best_score = -1
+      for idx, e in ipairs(group) do
+        local score = 0
+        local candidate_path = e.cat_l .. "/" .. e.stem_l .. "." .. e.ext_l
+        if vanilla_path and candidate_path == vanilla_path then
+          score = 100
+        elseif e.cat_l == "music" then
+          if e.ext_l == "mp3" then score = 30
+          elseif e.ext_l == "ogg" then score = 20
+          elseif e.ext_l == "wav" then score = 10 end
+        else
+          if e.ext_l == "wav" then score = 30
+          elseif e.ext_l == "ogg" then score = 20
+          elseif e.ext_l == "mp3" then score = 10 end
+        end
+        if score > best_score then
+          best_score = score
+          best_idx = idx
+        end
+      end
+
+      for idx, e in ipairs(group) do
+        if idx ~= best_idx then
+          skip_entry[e] = true
+        end
+      end
+    end
+  end
+
+  local loaded_count = 0
+  for _, e in ipairs(entries) do
+    if not skip_entry[e] then
+      _G.__qm_auto_asset(mod_dir, e.rel_path, e.category, e.stem, e.ext, e.mode)
+      loaded_count = loaded_count + 1
+      if loaded_count % 100 == 0 and collectgarbage then
+        pcall(collectgarbage, "step", 200)
+      end
+    end
+  end
+
+  if _G.__qm_finalize_auto_assets then
+    _G.__qm_finalize_auto_assets()
+  end
+  if loaded_count >= 100 and collectgarbage then
+    pcall(collectgarbage, "collect")
+  end
+  return true
 end
 
 local prev_mt = getmetatable(_G) or {}
@@ -570,21 +691,26 @@ pub fn build_auto_asset_patch(
         .replace('\\', "/")
         .replace('"', "\\\"");
 
-    let mut payload = format!(
-        "-- QuarterMaster Auto-Asset Patch ({mod_id}: {} files)\nif _G.__qm_auto_asset then\n  local _qm_mod_dir = \"{escaped_dir}\"\n",
-        assets.len()
-    );
+    let mut manifest_body = String::new();
     for a in assets {
-        let rel_esc = a.rel_path.replace('\\', "/").replace('"', "\\\"");
-        let cat_esc = a.category.replace('"', "\\\"");
-        let stem_esc = a.stem.replace('"', "\\\"");
-        let ext_esc = a.ext.replace('"', "\\\"");
-        let mode_esc = a.default_mode.replace('"', "\\\"");
-        payload.push_str(&format!(
-            "  _G.__qm_auto_asset(_qm_mod_dir, \"{rel_esc}\", \"{cat_esc}\", \"{stem_esc}\", \"{ext_esc}\", \"{mode_esc}\")\n"
+        let rel_esc = a.rel_path.replace('\\', "/").replace(['\t', '\r', '\n', '"'], "");
+        let cat_esc = a.category.replace(['\t', '\r', '\n', '"'], "");
+        let stem_esc = a.stem.replace(['\t', '\r', '\n', '"'], "");
+        let ext_esc = a.ext.replace(['\t', '\r', '\n', '"'], "");
+        let mode_esc = a.default_mode.replace(['\t', '\r', '\n', '"'], "");
+        manifest_body.push_str(&format!(
+            "\"{rel_esc}\"\t\"{cat_esc}\"\t\"{stem_esc}\"\t\"{ext_esc}\"\t\"{mode_esc}\"\n"
         ));
     }
-    payload.push_str("  if _G.__qm_finalize_auto_assets then _G.__qm_finalize_auto_assets() end\nend");
+    let mut eq_len = 3usize;
+    while manifest_body.contains(&format!("]{}]", "=".repeat(eq_len))) {
+        eq_len += 1;
+    }
+    let eqs = "=".repeat(eq_len);
+    let payload = format!(
+        "-- QuarterMaster Auto-Asset Patch ({mod_id}: {} files)\nif _G.__qm_auto_asset_manifest then\n  _G.__qm_auto_asset_manifest(\"{escaped_dir}\", [{eqs}[\n{manifest_body}]{eqs}])\nend",
+        assets.len()
+    );
 
     Some(Patch::Pattern(crate::patch::PatternPatch {
         pattern: "setOptionVolume()".to_string(),
@@ -1654,5 +1780,34 @@ payload = "-- hi"
             .join("ZipSoundMod")
             .join("assets/sounds/m60_1.wav");
         assert!(extracted.is_file());
+    }
+
+    #[test]
+    fn auto_asset_patch_with_thousands_of_files_uses_compact_manifest_block() {
+        let assets: Vec<DiscoveredAsset> = (1..=3500)
+            .map(|i| DiscoveredAsset {
+                rel_path: format!("assets/sounds/vo/axis/germ{i}.wav"),
+                category: "sounds/vo".to_string(),
+                stem: format!("germ{i}"),
+                ext: "wav".to_string(),
+                default_mode: "stream".to_string(),
+            })
+            .collect();
+
+        let patch = build_auto_asset_patch("bigpack", Path::new("D:/Mods/BigPack"), &assets, 50)
+            .expect("should build patch");
+
+        if let Patch::Pattern(p) = patch {
+            assert!(p.payload.contains("_G.__qm_auto_asset_manifest("));
+            assert!(p.payload.contains("[===["));
+            assert!(p.payload.contains("]===])"));
+            assert_eq!(
+                p.payload.matches("_G.__qm_auto_asset(").count(),
+                0,
+                "must not emit thousands of individual function calls inside if..end block"
+            );
+        } else {
+            panic!("Expected Pattern patch");
+        }
     }
 }

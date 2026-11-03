@@ -37,3 +37,4 @@ launcher-ui/dist/
 launcher-ui/test-results/
 launcher-ui/playwright-report/
 /launcher-ui/tests
+/crates/qm-core/tests
