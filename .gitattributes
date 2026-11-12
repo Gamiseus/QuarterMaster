@@ -1,0 +1,4 @@
+# Lua and Rust sources stay LF on every checkout: the loader embeds them (include_str! and raw
+# strings), and core.autocrlf would otherwise turn them into CRLF and change the Lua it ships.
+*.lua text eol=lf
+*.rs  text eol=lf

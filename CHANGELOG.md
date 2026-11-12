@@ -11,6 +11,8 @@ Versions are `Major.Minor.Patch`.
 - fixed: a mod with only a `faction.toml` is found in a zip or folder; it needed "Import as unmanaged" before
 - fixed: QuarterMaster's own new-profile settings patch no longer reports a count warning on every launch
 - fixed: the game's log no longer warns about the `[publish]` table of a `qm.toml`
+- fixed: the launcher builds from a fresh clone; its build script needed the local test folder
+- fixed: a Windows checkout keeps Lua and Rust sources LF (`.gitattributes`), so the start-up Lua QuarterMaster embeds no longer changes with `core.autocrlf`
 
 ## 1.2.0
 
