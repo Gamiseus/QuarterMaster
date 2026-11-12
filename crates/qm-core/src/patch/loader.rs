@@ -2154,6 +2154,35 @@ struct ModRead {
     files: Result<ModFiles>,
 }
 
+/// The mod ids already taken in one Mods folder, each with the folder or zip that took it.
+/// One mod per id: a second copy (`ExampleMod.zip` next to `ExampleMod/`, or a renamed copy of
+/// a folder) would apply every patch twice.
+#[derive(Default)]
+struct ModIds(HashMap<String, (String, bool)>);
+
+impl ModIds {
+    /// Takes `mod_id` for `name`. False, with a load warning, when another folder or zip
+    /// already has it: that one loads and `name` is skipped.
+    fn take(&mut self, mod_id: &str, name: &str, is_zip: bool, warnings: &mut Vec<String>) -> bool {
+        let key = mod_id.to_lowercase();
+        if let Some((first, first_is_zip)) = self.0.get(&key) {
+            let first = if *first_is_zip {
+                first.clone()
+            } else {
+                format!("the folder {first}")
+            };
+            let w = format!(
+                "{name}: not loaded, {first} has the same mod id '{mod_id}' and is loaded instead; remove one of them"
+            );
+            warn!("{w}");
+            warnings.push(w);
+            return false;
+        }
+        self.0.insert(key, (name.to_string(), is_zip));
+        true
+    }
+}
+
 /// What the per-mod load needs to know about the mod and the profile.
 struct ModCtx<'a> {
     mod_dir: &'a Path,
@@ -2413,10 +2442,12 @@ fn read_mods_with(
         })
         .collect();
 
+    // Folders come before zips, so a folder keeps its id over a zip of the same mod.
     let all_results = dir_results.into_iter().chain(zip_results);
     let mut loaded: Vec<LoadedMod> = Vec::new();
     let mut failed: Vec<FailedMod> = Vec::new();
     let mut warnings: Vec<String> = Vec::new();
+    let mut ids = ModIds::default();
 
     for ModRead {
         base: base_path,
@@ -2448,14 +2479,20 @@ fn read_mods_with(
             keys
         };
 
+        let shown_name = if is_zip {
+            format!("{folder_name}.zip")
+        } else {
+            folder_name.clone()
+        };
+
         let (ips, asset_root, discovered_assets) = match files {
             Ok(files) => files,
             Err(e) => {
-                if enabled {
+                if enabled && ids.take(&mod_id, &shown_name, is_zip, &mut warnings) {
                     let mut f = failed_mod(&mod_id, &folder_name, manifest_meta.as_ref(), &e);
                     f.keys = keys();
                     failed.push(f);
-                } else {
+                } else if !enabled {
                     warn!("Mod '{mod_id}' ({folder_name}) is not enabled and could not be read: {e:#}");
                 }
                 continue;
@@ -2477,6 +2514,9 @@ fn read_mods_with(
             .flatten()
             .and_then(|m| crate::features::gate_error_with(m, qm_version, qm_features));
         if let Some(why) = gate {
+            if !ids.take(&mod_id, &shown_name, is_zip, &mut warnings) {
+                continue;
+            }
             let mut f = failed_mod(&mod_id, &folder_name, manifest_meta.as_ref(), &anyhow!(why));
             f.keys = keys();
             failed.push(f);
@@ -2504,14 +2544,14 @@ fn read_mods_with(
             continue;
         }
 
+        if !ids.take(&mod_id, &shown_name, is_zip, &mut warnings) {
+            continue;
+        }
+
         if let Some(Err(e)) = &manifest_read {
-            let (name, kind) = if is_zip {
-                (format!("{folder_name}.zip"), "zip")
-            } else {
-                (folder_name.clone(), "folder")
-            };
+            let kind = if is_zip { "zip" } else { "folder" };
             let w = format!(
-                "{name}: mod.json unreadable, using the {kind} name as id; fixes by id may not match ({e})"
+                "{shown_name}: mod.json unreadable, using the {kind} name as id; fixes by id may not match ({e})"
             );
             warn!("{w}");
             warnings.push(w);
@@ -3587,6 +3627,57 @@ version = "1.0.0"
 
     fn loaded_ids(raw: &RawLoad) -> Vec<String> {
         raw.mods.iter().map(|m| m.id.clone()).collect()
+    }
+
+    /// A zip or second folder with a mod id already taken is skipped with a warning, so its
+    /// patches are not applied twice; folders come first, then zips, each in name order.
+    #[test]
+    fn a_second_copy_of_a_mod_id_is_skipped_and_the_folder_wins() {
+        let temp = TempDir::new().unwrap();
+        let mods = temp.path();
+        let json = r#"{"id": "example_mod", "name": "Example", "version": "1.0.0"}"#;
+        write_mod(mods, "ExampleMod", Some(json), &copy_toml("a.lua"));
+        write_mod(mods, "ExampleMod - Copy", Some(json), &copy_toml("a.lua"));
+        let toml = copy_toml("a.lua");
+        // A release zip of the same mod (one folder inside), and one without mod.json whose
+        // stem gives the same id.
+        make_zip(&temp, "ExampleMod.zip", &[
+            ("ExampleMod/mod.json", json),
+            ("ExampleMod/qm.toml", &toml),
+        ]);
+        make_zip(&temp, "example_mod.zip", &[("qm.toml", &toml)]);
+        make_zip(&temp, "OtherMod.zip", &[
+            ("OtherMod/mod.json", r#"{"id": "other_mod", "name": "O", "version": "1.0.0"}"#),
+            ("OtherMod/qm.toml", &copy_toml("b.lua")),
+        ]);
+
+        let raw = read_mods(mods, None).unwrap();
+        assert_eq!(loaded_ids(&raw), ["example_mod", "other_mod"]);
+        assert_eq!(raw.mods[0].base, mods.join("ExampleMod"));
+        assert_eq!(raw.patches.len(), 2);
+        assert!(raw.load_errors.is_empty(), "{:?}", raw.load_errors);
+        let skipped: Vec<&str> = raw
+            .warnings
+            .iter()
+            .filter(|w| w.contains("has the same mod id 'example_mod'"))
+            .map(|w| w.split(':').next().unwrap())
+            .collect();
+        assert_eq!(skipped, ["ExampleMod - Copy", "example_mod.zip", "ExampleMod.zip"]);
+        assert!(raw.warnings.contains(&
+            "ExampleMod.zip: not loaded, the folder ExampleMod has the same mod id 'example_mod' and is loaded instead; remove one of them"
+                .to_string()
+        ));
+
+        // With the folders gone, the first zip by name (case aside) loads and the other is skipped.
+        fs::remove_dir_all(mods.join("ExampleMod")).unwrap();
+        fs::remove_dir_all(mods.join("ExampleMod - Copy")).unwrap();
+        let raw = read_mods(mods, None).unwrap();
+        assert_eq!(loaded_ids(&raw), ["example_mod", "other_mod"]);
+        assert_eq!(raw.patches.len(), 2);
+        assert_eq!(raw.mods[0].base, mods.join("example_mod.zip"));
+        assert!(raw.warnings.iter().any(|w| w.starts_with(
+            "ExampleMod.zip: not loaded, example_mod.zip has the same mod id"
+        )), "{:?}", raw.warnings);
     }
 
     /// `[publish]` is the site builder's, so it is no unknown key; a key inside another

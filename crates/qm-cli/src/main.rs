@@ -435,6 +435,7 @@ fn cmd_validate(paths: &QuarterMasterPaths, args: &[String]) -> Result<(), Strin
         let combined = serde_json::json!({
             "game_version": game_ver,
             "load_order": load_order,
+            "load_warnings": table.plan_report.warnings,
             "simulation": sim,
         });
         println!("{}", serde_json::to_string_pretty(&combined).unwrap());
@@ -458,6 +459,14 @@ fn cmd_validate(paths: &QuarterMasterPaths, args: &[String]) -> Result<(), Strin
             entry.version,
             entry.reasons.join("; ")
         );
+    }
+
+    // Notes from reading the mods, such as a second copy of a mod id that was skipped.
+    if !table.plan_report.warnings.is_empty() {
+        println!("\nLoad Warnings:");
+        for w in &table.plan_report.warnings {
+            println!("  - {w}");
+        }
     }
 
     if !load_order.diagnostics.is_empty() {

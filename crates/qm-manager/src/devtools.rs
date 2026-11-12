@@ -3009,6 +3009,9 @@ pub fn package_mod_release(
 
     let asset_name = format!("{}.zip", installed.folder_name);
     let zip_path = output_dir.join(&asset_name);
+    // Every entry sits under one folder named after the mod (`ExampleMod/mod.json`), so the
+    // zip unpacked into a Mods folder gives `Mods/ExampleMod/`.
+    let top = &installed.folder_name;
 
     {
         let file = fs::File::create(&zip_path)
@@ -3032,7 +3035,7 @@ pub fn package_mod_release(
             {
                 continue;
             }
-            zip.start_file(&rel, SimpleFileOptions::default())
+            zip.start_file(format!("{top}/{rel}"), SimpleFileOptions::default())
                 .map_err(|e| e.to_string())?;
             let bytes = fs::read(p).map_err(|e| e.to_string())?;
             zip.write_all(&bytes).map_err(|e| e.to_string())?;
@@ -3339,6 +3342,56 @@ mod tests {
         assert_eq!(decoded.name, "Tactical Vet Pack");
         assert_eq!(decoded.mods.len(), 1);
         assert_eq!(decoded.mods[0].id, "gcore");
+    }
+
+    /// `qm pack` puts every entry under one folder named after the mod, leaves out
+    /// leftovers, and the loader reads the zip as the mod.
+    #[test]
+    fn pack_puts_the_mod_in_one_folder_named_after_it() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let mod_dir = temp.path().join("ExampleMod");
+        fs::create_dir_all(mod_dir.join("qm")).unwrap();
+        fs::write(
+            mod_dir.join("mod.json"),
+            r#"{"id": "example_mod", "name": "Example", "version": "1.2.3"}"#,
+        )
+        .unwrap();
+        fs::write(
+            mod_dir.join("qm.toml"),
+            "[manifest]\nversion = \"1.2.3\"\n\n[[patches]]\n[patches.copy]\ntarget = \"main.lua\"\nposition = \"append\"\nsources = [\"inject.lua\"]\n",
+        )
+        .unwrap();
+        fs::write(mod_dir.join("inject.lua"), "-- example").unwrap();
+        fs::write(mod_dir.join("qm").join("extra.toml"), "[manifest]\nversion = \"1.2.3\"\n").unwrap();
+        fs::write(mod_dir.join("old.bak"), "").unwrap();
+        fs::write(mod_dir.join(".qm-integrity.json"), "{}").unwrap();
+
+        let out = temp.path().join("dist");
+        let (zip_path, entry) = package_mod_release(&mod_dir, &out).unwrap();
+        assert_eq!(zip_path, out.join("ExampleMod.zip"));
+        assert_eq!((entry.id.as_str(), entry.asset_name.as_str()), ("example_mod", "ExampleMod.zip"));
+
+        let mut archive = ZipArchive::new(fs::File::open(&zip_path).unwrap()).unwrap();
+        let mut names: Vec<String> =
+            (0..archive.len()).map(|i| archive.by_index(i).unwrap().name().to_string()).collect();
+        names.sort();
+        assert_eq!(
+            names,
+            [
+                "ExampleMod/inject.lua",
+                "ExampleMod/mod.json",
+                "ExampleMod/qm.toml",
+                "ExampleMod/qm/extra.toml",
+            ]
+        );
+
+        // Dropped into a Mods folder as is, the zip loads as the mod.
+        let mods = temp.path().join("Mods");
+        fs::create_dir_all(&mods).unwrap();
+        fs::copy(&zip_path, mods.join("ExampleMod.zip")).unwrap();
+        let patches = qm_core::patch::loader::load_patches_new(&mods).unwrap();
+        assert_eq!(patches.len(), 1);
+        assert_eq!(patches[0].0.mod_id(), Some("example_mod"));
     }
 
     #[test]
