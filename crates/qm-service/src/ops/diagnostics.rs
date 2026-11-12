@@ -4,13 +4,17 @@ use crate::dto::HealthReport;
 use crate::error::{ErrorKind, OrKind, QmError, QmResult};
 use crate::events::{LogSource, Scope};
 use crate::jobs::{JobId, JobKind};
+use crate::ops::launch::{SuspectKind, TrialSuspect};
 use crate::service::Service;
 use qm_core::handshake::CrashReport;
+use qm_manager::fixes;
+use qm_manager::runs::{RunEntry, TrialChanges};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
 pub const MAX_LOG_LINES: u32 = 1000;
 const BUNDLE_LOG_LINES: u32 = 500;
+const BUNDLE_CRASHES: usize = 10;
 const REDACTED_USER: &str = "[REDACTED]";
 
 impl Service {
@@ -27,6 +31,20 @@ impl Service {
 
     pub fn crashes_list(&self) -> Vec<CrashReport> {
         self.paths().list_crash_reports()
+    }
+
+    /// A profile's run log, newest first (D67). Only ids of existing profiles are read.
+    pub fn runs_list(&self, profile_id: &str) -> QmResult<Vec<RunEntry>> {
+        let paths = self.paths();
+        if !paths.list_profiles().iter().any(|p| p.id == profile_id) {
+            return Err(QmError::new(
+                ErrorKind::NotFound,
+                format!("Profile '{profile_id}' was not found."),
+            ));
+        }
+        let mut runs = paths.list_runs(profile_id);
+        runs.reverse();
+        Ok(runs)
     }
 
     /// The last `lines` lines (at most 1000) of a log; a missing log is empty.
@@ -51,11 +69,22 @@ impl Service {
                 .paths()
                 .build_redacted_diagnostic_bundle()
                 .or_kind(ErrorKind::Io)?;
-            ctx.progress(0.7, "Adding launcher log");
+            ctx.progress(0.7, "Adding logs and crash reports");
             let log = svc.logs_tail(LogSource::Launcher, BUNDLE_LOG_LINES)?;
+            let runtime = svc.logs_tail(LogSource::Runtime, BUNDLE_LOG_LINES)?;
+            let runtime_errors = svc.logs_tail(LogSource::RuntimeErrors, BUNDLE_LOG_LINES)?;
+            // Newest first; the whole bundle is redacted below.
+            let mut crashes = svc.crashes_list();
+            crashes.truncate(BUNDLE_CRASHES);
             match bundle.as_object_mut() {
                 Some(obj) => {
                     obj.insert("launcher_log".into(), serde_json::json!(log));
+                    obj.insert("runtime_log".into(), serde_json::json!(runtime));
+                    obj.insert(
+                        "runtime_errors_log".into(),
+                        serde_json::json!(runtime_errors),
+                    );
+                    obj.insert("crashes".into(), serde_json::json!(crashes));
                 }
                 None => {
                     return Err(QmError::new(
@@ -82,7 +111,9 @@ impl Service {
         }))
     }
 
-    /// Disable the mod a crash report blames, in the active profile.
+    /// Disable the mod a crash report blames, in the active profile. When the suspect is an
+    /// adjusted copy, its fix is paused instead: the copy is the profile's, not its base
+    /// mod's (D58).
     pub fn crash_disable_suspect(&self, crash_id: &str) -> QmResult<()> {
         self.ensure_not_running()?;
         let crash = self
@@ -95,6 +126,16 @@ impl Service {
                     format!("Crash report '{crash_id}' was not found."),
                 )
             })?;
+        if crash.suspected_adjusted_copy {
+            let fix = crash.suspected_fix_ids.first().ok_or_else(|| {
+                QmError::new(
+                    ErrorKind::NotFound,
+                    "The crash names an adjusted copy but not the fix that made it.",
+                )
+            })?;
+            self.fix_set_paused(fix, true)?;
+            return Ok(());
+        }
         let mod_id = crash
             .suspected_mod_id
             .filter(|m| !m.is_empty())
@@ -108,12 +149,151 @@ impl Service {
         Ok(())
     }
 
+    /// What crash report `crash_id` blames, as a trial run can leave it out (D68 step 1). An
+    /// adjusted copy's suspect is the fix that made it, never its base mod (D58); otherwise
+    /// the patch, else the mod. None when the report names none of them.
+    pub fn crash_suspect(&self, crash_id: &str) -> QmResult<Option<TrialSuspect>> {
+        let crash = self
+            .crashes_list()
+            .into_iter()
+            .find(|c| c.id == crash_id)
+            .ok_or_else(|| {
+                QmError::new(
+                    ErrorKind::NotFound,
+                    format!("Crash report '{crash_id}' was not found."),
+                )
+            })?;
+        let profile = self.active_profile().ok();
+        let mod_name = |id: &str| {
+            self.paths()
+                .list_installed_mods()
+                .into_iter()
+                .find(|m| m.manifest.id.eq_ignore_ascii_case(id))
+                .map(|m| m.manifest.name)
+                .filter(|n| !n.trim().is_empty())
+                .unwrap_or_else(|| id.to_string())
+        };
+        let nonempty = |s: &Option<String>| s.clone().filter(|v| !v.trim().is_empty());
+        if crash.suspected_adjusted_copy {
+            let Some(fix) = crash.suspected_fix_ids.first() else {
+                return Ok(None);
+            };
+            let label = profile
+                .as_ref()
+                .and_then(|p| fixes::find(p, fix))
+                .map(|f| f.label)
+                .or_else(|| nonempty(&crash.suspected_patch_name))
+                .unwrap_or_else(|| fix.clone());
+            return Ok(Some(TrialSuspect {
+                kind: SuspectKind::Fix,
+                id: fix.clone(),
+                label: format!("the fix \"{label}\""),
+                name: label,
+                changes: TrialChanges {
+                    pause_fixes: vec![fix.clone()],
+                    ..TrialChanges::default()
+                },
+            }));
+        }
+        if let Some(patch) = nonempty(&crash.suspected_patch_id) {
+            let name = nonempty(&crash.suspected_patch_name).unwrap_or_else(|| patch.clone());
+            let label = match nonempty(&crash.suspected_mod_id) {
+                Some(m) => format!("the patch \"{name}\" of {}", mod_name(&m)),
+                None => format!("the patch \"{name}\""),
+            };
+            return Ok(Some(TrialSuspect {
+                kind: SuspectKind::Patch,
+                id: patch.clone(),
+                label,
+                name,
+                changes: TrialChanges {
+                    disable_patches: vec![patch],
+                    ..TrialChanges::default()
+                },
+            }));
+        }
+        Ok(nonempty(&crash.suspected_mod_id).map(|m| TrialSuspect {
+            kind: SuspectKind::Mod,
+            label: mod_name(&m),
+            name: mod_name(&m),
+            changes: TrialChanges {
+                disable_mods: vec![m.clone()],
+                ..TrialChanges::default()
+            },
+            id: m,
+        }))
+    }
+
     /// Reinstall the QuarterMaster winmm.dll; returns the installed hash.
     pub fn dll_repair(&self) -> QmResult<String> {
         self.ensure_not_running()?;
         let result = self.tx_repair_dll();
         self.invalidate(Scope::Health);
         result
+    }
+
+    /// Empty the active profile's overwrite folder; returns how many files were removed.
+    pub fn overwrite_clear(&self) -> QmResult<u32> {
+        self.ensure_not_running()?;
+        let paths = self.paths();
+        let profile = paths.load_settings().active_profile_id;
+        let result = paths
+            .clear_overwrite_files(&profile)
+            .or_kind(ErrorKind::Io)
+            .and_then(|before| {
+                // The legacy call ignores delete errors, so check what is left.
+                let left = paths.list_overwrite_files(&profile);
+                if left.is_empty() {
+                    Ok(u32::try_from(before).unwrap_or(u32::MAX))
+                } else {
+                    Err(QmError::new(
+                        ErrorKind::Io,
+                        "Some overwrite files could not be removed. Close any program using them and try again.",
+                    )
+                    .with_details(left.join("\n")))
+                }
+            });
+        self.invalidate(Scope::Health);
+        result
+    }
+
+    /// Record the current game exe hash, so the game update warning stops.
+    pub fn game_update_acknowledge(&self) -> QmResult<()> {
+        let paths = self.paths();
+        let exe = paths.load_settings().game_exe_path;
+        if !exe.as_deref().is_some_and(Path::is_file) {
+            return Err(QmError::new(
+                ErrorKind::NotFound,
+                "The game executable was not found. Set it in Settings.",
+            ));
+        }
+        let result = paths
+            .acknowledge_game_update()
+            .map(|_| ())
+            .or_kind(ErrorKind::Io);
+        self.invalidate(Scope::Health);
+        self.invalidate(Scope::Settings);
+        result
+    }
+
+    /// Source DLL state from `source_dll()` (so the debug override applies) and whether the game
+    /// folder DLL is a known QuarterMaster build.
+    fn fill_dll_state(&self, report: &mut HealthReport) {
+        let source_sha = self
+            .source_dll()
+            .ok()
+            .and_then(|p| std::fs::read(p).ok())
+            .map(|b| qm_schema::sha256_hex(&b));
+        report.dll_matches_build = match (&report.dll_sha256, &source_sha) {
+            (Some(dll), Some(src)) => dll.eq_ignore_ascii_case(src),
+            _ => true,
+        };
+        report.source_dll_ready = source_sha.is_some();
+        report.source_dll_sha256 = source_sha;
+        report.dll_is_known = report
+            .dll_sha256
+            .as_ref()
+            .is_some_and(|h| self.known_dll_hashes().contains(&h.to_ascii_lowercase()));
     }
 
     fn log_path(&self, source: LogSource) -> PathBuf {
@@ -178,13 +358,14 @@ impl Service {
             }
             let gen = self.generations().health;
             let raw = self.paths().check_system_health();
-            let report = match serde_json::from_value::<HealthReport>(raw) {
+            let mut report = match serde_json::from_value::<HealthReport>(raw) {
                 Ok(r) => r,
                 Err(e) => {
                     tracing::warn!("health report did not parse: {e}");
                     continue;
                 }
             };
+            self.fill_dll_state(&mut report);
             let stored = self.with_gens(|g| {
                 if g.health != gen {
                     return false;
@@ -232,7 +413,43 @@ pub(crate) fn redact_bundle_text(
             out = redact_named_user(&out, name);
         }
     }
-    redact_steam_ids(&redact_user_paths(&out))
+    redact_github_tokens(&redact_steam_ids(&redact_user_paths(&out)))
+}
+
+/// Prefixes of GitHub token formats: classic and OAuth (`ghp_`, `gho_`, `ghu_`, `ghs_`, `ghr_`)
+/// and fine-grained (`github_pat_`).
+const GITHUB_TOKEN_PREFIXES: [&str; 6] = ["github_pat_", "ghp_", "gho_", "ghu_", "ghs_", "ghr_"];
+/// GitHub tokens are longer than this; shorter runs are ordinary words like `ghp_x`.
+const MIN_TOKEN_BODY: usize = 20;
+
+/// Replaces anything shaped like a GitHub token with `[REDACTED]`. No source puts the token in a
+/// bundle today; this keeps a future log line from leaking one.
+fn redact_github_tokens(text: &str) -> String {
+    let is_body = |c: char| c.is_ascii_alphanumeric() || c == '_';
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    'scan: while !rest.is_empty() {
+        // A token starts at a word boundary, so `xghp_...` is left alone.
+        let at_boundary = out.chars().last().is_none_or(|c| !is_body(c));
+        if at_boundary {
+            for prefix in GITHUB_TOKEN_PREFIXES {
+                if rest.starts_with(prefix) {
+                    let body = rest[prefix.len()..]
+                        .find(|c: char| !is_body(c))
+                        .unwrap_or(rest.len() - prefix.len());
+                    if body >= MIN_TOKEN_BODY {
+                        out.push_str("[REDACTED]");
+                        rest = &rest[prefix.len() + body..];
+                        continue 'scan;
+                    }
+                }
+            }
+        }
+        let c = rest.chars().next().unwrap_or_default();
+        out.push(c);
+        rest = &rest[c.len_utf8()..];
+    }
+    out
 }
 
 /// Byte length of the path separator at `i`: `\\` (JSON-escaped), `\`, or `/`.
@@ -409,7 +626,30 @@ fn bytecount(buf: &[u8], b: u8) -> usize {
 #[cfg(test)]
 #[allow(clippy::expect_used)]
 mod tests {
-    use super::{redact_bundle_text, redact_user_paths};
+    use super::{redact_bundle_text, redact_github_tokens, redact_user_paths};
+
+    #[test]
+    fn redacts_github_token_shapes() {
+        let classic = format!("ghp_{}", "A1b2C3d4".repeat(5));
+        let fine = format!("github_pat_{}", "11ABCDEFG0_xyz".repeat(4));
+        let text = format!(
+            r#"{{"line":"auth {classic} ok","b":"{fine}","c":"gho_{}"}}"#,
+            "z".repeat(36)
+        );
+        let out = redact_github_tokens(&text);
+        assert_eq!(
+            out,
+            r#"{"line":"auth [REDACTED] ok","b":"[REDACTED]","c":"[REDACTED]"}"#
+        );
+        // Short runs, prefixes inside a word and unrelated text are kept.
+        assert_eq!(
+            redact_github_tokens("ghp_short and xghp_aaaaaaaaaaaaaaaaaaaaaaaa"),
+            "ghp_short and xghp_aaaaaaaaaaaaaaaaaaaaaaaa"
+        );
+        assert_eq!(redact_github_tokens("über ghp_ end"), "über ghp_ end");
+        // The full bundle redaction includes it.
+        assert!(!redact_bundle_text(&text, None, None).contains(&classic));
+    }
 
     #[test]
     fn redacts_any_case_and_keeps_other_text() {

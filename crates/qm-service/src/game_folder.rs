@@ -88,7 +88,7 @@ impl Service {
         // Stage the profile first: activate_profile journals its own profile_swap.
         let paths = self.paths();
         if !paths.profiles_dir.join(profile_id).join("Mods").is_dir() {
-            paths.activate_profile(profile_id).or_kind(ErrorKind::Io)?;
+            self.stage_profile(profile_id)?;
         }
 
         self.begin(KIND_DEPLOY, None, profile_id)?;
@@ -201,10 +201,11 @@ impl Service {
                 .or_kind(ErrorKind::Io)?;
         }
         self.begin(KIND_SAVE_SWAP, Some(current.clone()), save_id)?;
-        match paths.activate_save_profile(save_id) {
+        // The backup above is the only one; the manager must not make a second.
+        match paths.activate_save_profile_with(save_id, false) {
             Ok(()) => self.commit(),
             Err(m) => {
-                match paths.activate_save_profile(&current) {
+                match paths.activate_save_profile_with(&current, false) {
                     Ok(()) => {
                         if let Err(ce) = self.clear_pending() {
                             tracing::warn!("failed to clear journal after save rollback: {ce}");
@@ -265,7 +266,7 @@ impl Service {
                 Ok(false)
             }
             KIND_SAVE_SWAP => paths
-                .activate_save_profile(fallback)
+                .activate_save_profile_with(fallback, false)
                 .or_kind(ErrorKind::Io)
                 .map(|()| false),
             KIND_PROFILE_SWAP => paths

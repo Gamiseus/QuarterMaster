@@ -12,6 +12,8 @@ class PatchesStore {
   /** Bumped on every invalidation so responses started before it are dropped. */
   #generation = 0;
   #seqs = new Map<string, number>();
+  /** Shared across mods so a sequence is never reused after `retain` forgets a mod. */
+  #lastSeq = 0;
   /** Every mod loaded so far; all of them are refetched on invalidation. */
   #loaded = new Set<string>();
   /** Mods with a current request in flight. */
@@ -25,13 +27,14 @@ class PatchesStore {
     this.#loaded.add(modId);
     this.#pending.add(modId);
     const generation = this.#generation;
-    const seq = (this.#seqs.get(modId) ?? 0) + 1;
+    const seq = ++this.#lastSeq;
     this.#seqs.set(modId, seq);
     const current = () => generation === this.#generation && seq === this.#seqs.get(modId);
     if (this.#cache[modId]?.status === "error") this.#cache[modId] = LOADING;
     let status: Loadable<ModPatchStatus[]>;
     try {
-      status = await call(commands.modPatchesGet(modId));
+      // A mod uninstalled while its refetch was queued answers not_found: keep it inline, not as a toast.
+      status = await call(commands.modPatchesGet(modId), { expect: ["not_found"] });
     } catch (e) {
       if (current()) {
         this.#pending.delete(modId);
@@ -60,6 +63,15 @@ class PatchesStore {
     this.#generation++;
     this.#pending.clear();
     for (const id of this.#loaded) this.load(id).catch(() => {});
+  }
+
+  /** Forgets every mod not in `ids` (the installed mods): its entry, request sequence and refetch. */
+  retain(ids: string[]): void {
+    const keep = new Set(ids);
+    for (const id of Object.keys(this.#cache)) if (!keep.has(id)) delete this.#cache[id];
+    for (const id of [...this.#seqs.keys()]) if (!keep.has(id)) this.#seqs.delete(id);
+    for (const id of [...this.#loaded]) if (!keep.has(id)) this.#loaded.delete(id);
+    for (const id of [...this.#pending]) if (!keep.has(id)) this.#pending.delete(id);
   }
 
   /** Test-only: forget cache, in-flight tracking and loaded mods. */

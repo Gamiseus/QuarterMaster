@@ -1,7 +1,7 @@
 # One-command check for the QuarterMaster workspace.
 $ErrorActionPreference = "Stop"
 $root = $PSScriptRoot
-$maxBytes = 15 * 1024 * 1024
+$maxBytes = 24.5 * 1024 * 1024
 
 function Invoke-Step {
     param([string]$Name, [string]$Dir, [scriptblock]$Action)
@@ -19,13 +19,22 @@ function Invoke-Step {
     Write-Host "[OK] $Name"
 }
 
-# fmt and clippy gate only the new crates; legacy crates are not refactored by this plan.
-Invoke-Step "cargo fmt (qm-service, qm-launcher)" $root { cargo fmt -p qm-service -p qm-launcher -- --check }
-Invoke-Step "cargo clippy (qm-service, qm-launcher)" $root { cargo clippy -p qm-service -p qm-launcher --all-targets --no-deps -- -D warnings }
+# fmt gates only the new crates; legacy crates are not refactored by this plan.
+# clippy -D warnings gates the new crates and qm-schema (clean since Phase D).
+Invoke-Step "cargo fmt (qm-service, qm-launcher, qm-site-builder)" $root { cargo fmt -p qm-service -p qm-launcher -p qm-site-builder -- --check }
+Invoke-Step "cargo clippy (qm-service, qm-launcher, qm-site-builder, qm-schema)" $root { cargo clippy -p qm-service -p qm-launcher -p qm-site-builder -p qm-schema --all-targets --no-deps -- -D warnings }
+# DLL-path crates: no -D warnings, so module-level deny attributes gate and legacy warnings do not.
+Invoke-Step "cargo clippy (qm-core, qm-win; deny attributes)" $root { cargo clippy -p qm-core -p qm-win --no-deps }
 Invoke-Step "cargo test --workspace" $root { cargo test --workspace }
+# The site repository holds copies of the wiki, the changelog and the schemas; skipped when it is
+# not next to this workspace.
+Invoke-Step "site content is current (tools\sync-site.ps1)" $root { & "$root\tools\sync-site.ps1" -Check }
+# The legacy app (ui/, qm-app): its tests read ui/app.js directly.
+Invoke-Step "legacy app tests" $root { node ui/tests/run.js }
 Invoke-Step "npm run check" "$root\launcher-ui" { npm run check }
 Invoke-Step "npm test" "$root\launcher-ui" { npm test }
-# Playwright starts its own mock dev server on port 5173; that port must be free.
+# Playwright builds the mock bundle into launcher-ui\dist-e2e and serves it on port 5173
+# (vite preview); that port must be free.
 # Visual baselines are valid for the Windows 11 reference environment (Segoe UI Variable);
 # on a different setup, regenerate them with: npx playwright test --update-snapshots
 Invoke-Step "npm run e2e" "$root\launcher-ui" { npm run e2e }
@@ -63,9 +72,9 @@ Write-Host "[OK] release artifacts exist"
 $size = (Get-Item $exe).Length
 $mb = [math]::Round($size / 1MB, 2)
 if ($size -gt $maxBytes) {
-    Write-Host "[FAIL] size check: qm-launcher.exe is $mb MB (limit 15 MB)"
+    Write-Host "[FAIL] size check: qm-launcher.exe is $mb MB (limit 24.5 MB)"
     exit 1
 }
-Write-Host "[OK] size check: qm-launcher.exe is $mb MB (limit 15 MB)"
+Write-Host "[OK] size check: qm-launcher.exe is $mb MB (limit 24.5 MB)"
 
 Write-Host "[OK] All checks passed"

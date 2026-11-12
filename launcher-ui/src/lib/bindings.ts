@@ -83,6 +83,42 @@ async profileGet(id: string) : Promise<Result<ModProfile, QmError>> {
     else return { status: "error", error: e  as any };
 }
 },
+async profileDiff(a: string, b: string) : Promise<Result<ProfileDiff, QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("profile_diff", { a, b }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Asks where to save the modpack with the native save dialog (the path never comes from the
+ * UI), then writes it in a job. `None` when the dialog was cancelled.
+ */
+async modpackExport(profileId: string) : Promise<Result<JobId | null, QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("modpack_export", { profileId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async modpackInspect(path: string) : Promise<Result<ModpackPreview, QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("modpack_inspect", { path }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async modpackImport(path: string, name: string, slot: string | null) : Promise<Result<JobId, QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("modpack_import", { path, name, slot }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async profilePreviewSwitch(id: string) : Promise<Result<SwitchPreview, QmError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("profile_preview_switch", { id }) };
@@ -179,6 +215,30 @@ async modPatchesGet(modId: string) : Promise<Result<Loadable<ModPatchStatus[]>, 
     else return { status: "error", error: e  as any };
 }
 },
+async compatChangesGet(modId: string) : Promise<Result<Loadable<CompatChangesView>, QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("compat_changes_get", { modId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async compatExportPreview(req: CompatExportRequest) : Promise<Result<CompatExportPreview, QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("compat_export_preview", { req }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async compatExport(req: CompatExportRequest) : Promise<Result<CompatExportResult, QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("compat_export", { req }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async modSetEnabled(id: string, enabled: boolean) : Promise<Result<ModSummary, QmError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("mod_set_enabled", { id, enabled }) };
@@ -203,9 +263,9 @@ async modConfigReset(id: string, mode: ConfigResetMode) : Promise<Result<Partial
     else return { status: "error", error: e  as any };
 }
 },
-async modImportInspect(path: string) : Promise<Result<ArchiveModCandidate[], QmError>> {
+async modImportInspect(path: string, allowUnmanaged: boolean) : Promise<Result<ArchiveModCandidate[], QmError>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("mod_import_inspect", { path }) };
+    return { status: "ok", data: await TAURI_INVOKE("mod_import_inspect", { path, allowUnmanaged }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -270,6 +330,214 @@ async patchSetEnabled(patchId: string, enabled: boolean) : Promise<Result<null, 
 async conflictResolve(suggestion: ConflictResolutionSuggestion, winnerIndex: number | null) : Promise<Result<null, QmError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("conflict_resolve", { suggestion, winnerIndex }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async patchDetail(patchId: string) : Promise<Result<PatchDetail, QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("patch_detail", { patchId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async simulationPreview(changes: PreviewChanges) : Promise<Result<PreviewResult, QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("simulation_preview", { changes }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async trialPreview(changes: TrialChanges) : Promise<Result<PreviewResult, QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("trial_preview", { changes }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async anchorCandidates(targetFile: string, line: number, radius: number, region: RegionRef | null) : Promise<Result<AnchorCandidate[], QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("anchor_candidates", { targetFile, line, radius, region }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async regionOptions(targetFile: string, patchId: string, conflictId: string | null) : Promise<Result<RegionOptions, QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("region_options", { targetFile, patchId, conflictId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async gluePatchCreate(basePatchId: string, pattern: string, position: InsertPosition, conflictId: string | null) : Promise<Result<GluePatchEntry, QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("glue_patch_create", { basePatchId, pattern, position, conflictId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async gluePatchRemove(glueId: string) : Promise<Result<null, QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("glue_patch_remove", { glueId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async patchOrderSet(rule: OrderRule) : Promise<Result<null, QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("patch_order_set", { rule }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async patchOrderReset(patchId: string) : Promise<Result<null, QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("patch_order_reset", { patchId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async patchSetEnabledMany(patchIds: string[], enabled: boolean) : Promise<Result<null, QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("patch_set_enabled_many", { patchIds, enabled }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async stacksGet(targetFile: string | null) : Promise<Result<SharedStack[], QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("stacks_get", { targetFile }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async stackingSet(mode: StackMode) : Promise<Result<null, QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("stacking_set", { mode }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async lineRulesSet(on: boolean) : Promise<Result<null, QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("line_rules_set", { on }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async noticeDismiss(key: string) : Promise<Result<null, QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("notice_dismiss", { key }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async fixesList() : Promise<Result<FixesView, QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("fixes_list") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async fixesImport() : Promise<Result<FixesView, QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("fixes_import") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async fixCreate(draft: FixDraft) : Promise<Result<FixView, QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("fix_create", { draft }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async fixCreateMany(drafts: FixDraft[]) : Promise<Result<FixView[], QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("fix_create_many", { drafts }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async fixSuggestionApply(drafts: FixDraft[], removes: string[]) : Promise<Result<FixView[], QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("fix_suggestion_apply", { drafts, removes }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async fixUndoPreview(fixId: string) : Promise<Result<UndoPreview, QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("fix_undo_preview", { fixId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async fixUndo(fixId: string, confirmed: boolean) : Promise<Result<null, QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("fix_undo", { fixId, confirmed }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async fixJournalUndoPreview(entryIndex: number) : Promise<Result<JournalUndoPreview, QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("fix_journal_undo_preview", { entryIndex }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async fixJournalUndo(entryIndex: number, choice: JournalUndoChoice | null) : Promise<Result<null, QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("fix_journal_undo", { entryIndex, choice }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async fixSetPaused(fixId: string, paused: boolean) : Promise<Result<FixView, QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("fix_set_paused", { fixId, paused }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async fixAccept(fixId: string) : Promise<Result<FixView, QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("fix_accept", { fixId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async fixRebind(fixId: string, patchId: string) : Promise<Result<FixView, QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("fix_rebind", { fixId, patchId }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -355,6 +623,86 @@ async gameLaunch(req: LaunchRequest) : Promise<Result<GameStatus, QmError>> {
     else return { status: "error", error: e  as any };
 }
 },
+async gameLaunchTrial(req: TrialRequest) : Promise<Result<GameStatus, QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("game_launch_trial", { req }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async diagnosticRunPreview() : Promise<Result<DiagnosticRunPreview, QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("diagnostic_run_preview") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async gameLaunchDiagnostic(req: DiagnosticRunRequest) : Promise<Result<GameStatus, QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("game_launch_diagnostic", { req }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async diagnosticRunResult() : Promise<Result<DiagnosticRunResult | null, QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("diagnostic_run_result") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async bisectStart(runId: string) : Promise<Result<BisectView, QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("bisect_start", { runId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async bisectGet() : Promise<Result<BisectStatus, QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("bisect_get") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async bisectPreview() : Promise<Result<BisectPreview, QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("bisect_preview") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async bisectLaunch(method: LaunchMethod | null) : Promise<Result<GameStatus, QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("bisect_launch", { method }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async bisectAnswer(result: TrialResult) : Promise<Result<BisectView, QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("bisect_answer", { result }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async bisectStop() : Promise<Result<BisectView, QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("bisect_stop") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async gameRestoreClean() : Promise<Result<null, QmError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("game_restore_clean") };
@@ -374,6 +722,54 @@ async healthGet() : Promise<Result<Loadable<HealthReport>, QmError>> {
 async crashesList() : Promise<Result<CrashReport[], QmError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("crashes_list") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async runsList(profileId: string) : Promise<Result<RunEntry[], QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("runs_list", { profileId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async assetsLedger() : Promise<Result<Loadable<AssetLedger>, QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("assets_ledger") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async assetChoicePreview(key: string, winner: string) : Promise<Result<AssetChoicePreview, QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("asset_choice_preview", { key, winner }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async assetChoiceClear(key: string) : Promise<Result<null, QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("asset_choice_clear", { key }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async factionChoices() : Promise<Result<Loadable<FactionSideChoice[]>, QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("faction_choices") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async factionPickSet(side: string, factionId: string | null) : Promise<Result<null, QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("faction_pick_set", { side, factionId }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -403,9 +799,126 @@ async crashDisableSuspect(crashId: string) : Promise<Result<null, QmError>> {
     else return { status: "error", error: e  as any };
 }
 },
+async crashSuspect(crashId: string) : Promise<Result<TrialSuspect | null, QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("crash_suspect", { crashId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async dllRepair() : Promise<Result<string, QmError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("dll_repair") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async overwriteClear() : Promise<Result<number, QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("overwrite_clear") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async gameUpdateAcknowledge() : Promise<Result<null, QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("game_update_acknowledge") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async workspaceSync() : Promise<Result<JobId, QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("workspace_sync") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async modAutoUpdateSet(modId: string, enabled: boolean | null) : Promise<Result<null, QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("mod_auto_update_set", { modId, enabled }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async saveRename(id: string, name: string) : Promise<Result<SaveProfile, QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("save_rename", { id, name }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async saveCreate(name: string) : Promise<Result<SaveProfile, QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("save_create", { name }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async saveDelete(id: string) : Promise<Result<null, QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("save_delete", { id }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async saveReset(id: string) : Promise<Result<null, QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("save_reset", { id }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async saveCleanup(id: string, fields: string[]) : Promise<Result<SaveCleanup, QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("save_cleanup", { id, fields }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async saveLockSet(id: string, locked: boolean) : Promise<Result<SaveProfile, QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("save_lock_set", { id, locked }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async gameSpriteGet(kind: SpriteKind, id: number) : Promise<Result<string, QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("game_sprite_get", { kind, id }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async gameRibbonsGet() : Promise<Result<RibbonInfo[], QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("game_ribbons_get") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Asks where to save a slot's dossier with the native save dialog, then writes `text` there.
+ * The path comes only from that dialog, never from the UI. Returns the file name, or `None`
+ * when the dialog was cancelled.
+ */
+async saveDossierExport(slotName: string, text: string) : Promise<Result<string | null, QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("save_dossier_export", { slotName, text }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -446,6 +959,14 @@ async catalogRefresh() : Promise<Result<JobId, QmError>> {
 async catalogInstall(downloadUrl: string, modId: string | null) : Promise<Result<JobId, QmError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("catalog_install", { downloadUrl, modId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async modUpdateInstall(modId: string) : Promise<Result<JobId, QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("mod_update_install", { modId }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -508,20 +1029,359 @@ qmEvent: "qm://event"
 
 /** user-defined types **/
 
+/**
+ * One place of a patch in the game's file.
+ */
+export type ASite = { key: SiteKey; 
+/**
+ * 1-based, as the file shows it.
+ */
+line: number; 
+/**
+ * 1-based line the place's code hangs on (its last line for `after`), as
+ * `consumer.site_line` names it.
+ */
+anchor_line: number; text: string }
+/**
+ * A line that could anchor a patch: `matches_in_file` above 1 means the anchor is ambiguous.
+ */
+export type AnchorCandidate = { 
+/**
+ * 1-based line in the patched file.
+ */
+line: number; text: string; 
+/**
+ * Lines of the patched file this one matches as a pattern anchor (before `[vars]`
+ * values are filled in, as patterns match).
+ */
+matches_in_file: number; 
+/**
+ * The patch that wrote the line; none for the game's own line.
+ */
+origin?: LineSource | null; 
+/**
+ * In region mode, how many of the other patch's lines at this place read the same; none
+ * for a line the other patch did not write (it cannot be picked).
+ */
+matches_in_region?: number | null; 
+/**
+ * The line before `[vars]` values are filled in: what a pattern on it must say.
+ */
+raw_text?: string }
+/**
+ * How a patch's anchor ladder resolved in one file (Phase C §3.9).
+ */
+export type AnchorReport = { sites: SiteResolution[]; 
+/**
+ * Where the rungs came from: "author", "profile:<fix id>" or "compat:<mod id>".
+ */
+source: string }
 export type AppInfo = { version: string; data_dir: string; is_portable: boolean; game: Loadable<GameInfo | null> }
+/**
+ * How an `at` patch runs. Absent means literal.
+ */
+export type ApplyAs = 
+/**
+ * The whole match is removed and the payload written in its place (today's rule).
+ */
+"literal" | 
+/**
+ * Separate edits: inserts next to the kept lines, changes and removals.
+ */
+"edits"
+/**
+ * What the preview showed when the user applied the fix.
+ */
+export type ApprovedImpact = { files_changed?: string[]; patch_changes?: number; stack_changes?: number; resolved?: string[] }
 export type ArchiveModCandidate = { manifest: ModManifest; relative_folder: string; already_installed_version: string | null; all_installed_versions: string[] }
+/**
+ * What giving `key` to `winner` would do. Nothing is stored.
+ */
+export type AssetChoicePreview = { key: string; winner: string; 
+/**
+ * The slots that get another winner, in ledger order.
+ */
+changes: AssetSlotChange[]; 
+/**
+ * Slots of the group the winner has no file for; they keep their current winner.
+ */
+unfilled: string[]; 
+/**
+ * Source -> the files (or, for a faction, the game names) the choice leaves out.
+ */
+leaves_out: Partial<{ [key in string]: string[] }> }
+/**
+ * One file under a mod's `assets/` folder.
+ */
+export type AssetFile = { 
+/**
+ * `assets/...`, with forward slashes.
+ */
+path: string; 
+/**
+ * Whether it replaces something the game has; `None` until the game files are read.
+ */
+overrides_vanilla: boolean | null }
+export type AssetGroup = { 
+/**
+ * The set key (`sounds/vo/axis/axishurt#`) or the folder (`sprites`).
+ */
+key: string; kind: GroupKind; 
+/**
+ * The key with the game's spelling (`sounds/vo/axis/axisHurt#`).
+ */
+label: string; 
+/**
+ * How many files the game has in the group (all members of a set; for a folder, the
+ * listed slots the game has).
+ */
+game_count: number; 
+/**
+ * In load order; without a choice the last one wins a slot both have.
+ */
+claimants: GroupClaimant[]; choice?: string | null; slots: AssetSlot[]; notes: LedgerNote[] }
+export type AssetKind = "sound" | "image" | "font" | "text"
+export type AssetLedger = { 
+/**
+ * False when the game's file list could not be read: then only files two sources both
+ * ship are listed, and nothing is known about the game's own files.
+ */
+has_game_files: boolean; groups: AssetGroup[] }
+export type AssetSlot = { 
+/**
+ * Lowercase `folder/stem`.
+ */
+key: string; 
+/**
+ * The file name without its extension, as the game or the first claim writes it.
+ */
+name: string; kind: AssetKind; 
+/**
+ * The number of a member of a numbered set.
+ */
+number?: number | null; game?: GameFile | null; 
+/**
+ * In the order the game loads them; without a choice the last one wins.
+ */
+claims: Claim[]; 
+/**
+ * The choice made for this slot alone.
+ */
+choice?: string | null; 
+/**
+ * Who wins with the choices as they are: a source, or `vanilla`.
+ */
+winner: string; 
+/**
+ * What the game used in the profile's last run, when it reported it.
+ */
+last_run_winner?: string | null; notes: LedgerNote[] }
+/**
+ * One slot whose winner a choice changes.
+ */
+export type AssetSlotChange = { slot: string; name: string; 
+/**
+ * A source, or `vanilla`.
+ */
+from: string; to: string }
 export type AttributedCodeLine = { line_number: number; text: string; mod_id: string | null; patch_id: string | null; patch_name: string | null }
-export type CatalogEntry = { id: string; name: string; repo_full_name: string; owner: string; description: string; stargazers_count: number; forks_count: number; updated_at: string; html_url: string; topics: string[]; license: string | null; source_type: string; latest_release_tag: string | null; download_url: string | null; download_asset_name: string | null; installed: boolean; installed_version: string | null; update_key: string | null }
+export type BindingStatus = { state: "bound" } | { state: "rebound"; from: string; to: string } | { state: "drifted"; anchor: boolean; payload: boolean } | { state: "ambiguous"; candidates: string[] } | { state: "missing" } | 
+/**
+ * The fix's mods are off, so it does nothing until they are on again.
+ */
+{ state: "waiting"; mods: string[] } | { state: "suspended"; reason: string }
+/**
+ * One thing the search can leave out.
+ */
+export type BisectCandidate = { suspect: TrialSuspect; source: CandidateSource }
+/**
+ * How a search ended.
+ */
+export type BisectEnd = "found" | "not_found" | "could_not_tell" | "stopped"
+/**
+ * The next trial and its preview; no preview when the search ended instead.
+ */
+export type BisectPreview = { bisect: BisectView; preview: PreviewResult | null }
+/**
+ * The search, or a note when a launcher restart ended one.
+ */
+export type BisectStatus = { bisect: BisectView | null; note: string | null }
+export type BisectTrial = { step: number; 
+/**
+ * Indexes into `candidates`.
+ */
+left_out: number[]; run_id: string | null; result: TrialResult }
+export type BisectView = { id: string; profile_id: string; 
+/**
+ * The crashed run the search started from.
+ */
+run_id: string; candidates: BisectCandidate[]; 
+/**
+ * Indexes of the candidates that may still be the cause.
+ */
+remaining: number[]; trials: BisectTrial[]; next: NextTrial | null; 
+/**
+ * About how many trials the whole search takes.
+ */
+expected_trials: number; 
+/**
+ * The trial in `next` was launched and its run has not finished.
+ */
+running: boolean; 
+/**
+ * The trial in `next` finished and the launcher could not tell how: ask the user.
+ */
+ask: boolean; 
+/**
+ * Splits not tried because they would stop a file from compiling.
+ */
+skipped: number; end: BisectEnd | null; 
+/**
+ * With `Found`: the index of the cause.
+ */
+found: number | null; message: string | null; 
+/**
+ * The backup made before the first trial: "Restore the save from before the tests".
+ */
+save_slot_id: string | null; save_backup_id: string | null }
+/**
+ * Where a candidate came from, in the order the search lists them (§7.3).
+ */
+export type CandidateSource = 
+/**
+ * What the crash report blames.
+ */
+"suspect" | 
+/**
+ * A fix created, changed or resumed since the last run without problems.
+ */
+"recent_fix" | 
+/**
+ * A patch of a file the crash names.
+ */
+"crash_file"
+export type CatalogEntry = { id: string; name: string; repo_full_name: string; owner: string; description: string; stargazers_count: number; forks_count: number; updated_at: string; html_url: string; topics: string[]; license: string | null; source_type: string; latest_release_tag: string | null; download_url: string | null; download_asset_name: string | null; installed: boolean; installed_version: string | null; update_key: string | null; 
+/**
+ * `registered` (submitted to the site) or `discovered` (found by topic); empty for Nexus.
+ */
+listing: string }
 /**
  * Local filter over the cached default catalog. `None`, empty, or `"all"` means no filter.
  */
 export type CatalogQuery = { text: string | null; topic: string | null; source: string | null }
-export type CatalogResult = { catalog: CatalogEntry[]; total_count: number; is_cached: boolean; query: string; rate_limited: boolean; error_message: string | null }
-export type ConfigOptionDef = { id: string; label: string; option_type: ConfigOptionType; default: ConfigValue | null; description: string | null; options: ConfigValue[]; labels: string[]; min: number | null; max: number | null; step: number | null; show_if: ShowIfRule | null }
+export type CatalogResult = { catalog: CatalogEntry[]; total_count: number; is_cached: boolean; query: string; rate_limited: boolean; error_message: string | null; 
+/**
+ * The mod index site could not be reached; the catalog is the last good copy.
+ */
+offline: boolean; 
+/**
+ * When the copy in use was last confirmed current.
+ */
+copy_from: string | null }
+/**
+ * One source's file for a slot.
+ */
+export type Claim = { 
+/**
+ * A mod id, or `faction:<id>`.
+ */
+source: string; 
+/**
+ * The file inside the mod: `assets/...` for a mod, the faction's own path for a faction.
+ */
+file: string; 
+/**
+ * For a faction: the game global the file is set on (`allied_idle`), or the voice file
+ * it replaces (`sounds/vo/allied/contact1`). It is how the plan tells the faction to
+ * leave the file alone.
+ */
+target?: string | null; width?: number | null; height?: number | null }
+/**
+ * What a mod's compatibility overrides did, and its rungs that are never used (§11.6).
+ */
+export type CompatChangesView = { applied: OverrideReport[]; 
+/**
+ * Every override that does not apply, with why: not required, waiting, missing, changed
+ * since, replaced by a later mod or by the profile, or unreadable.
+ */
+rejected: OverrideReport[]; 
+/**
+ * Rungs of the mod's patches, or from its overrides, that are never used (D33).
+ */
+rejected_rungs: InvalidRung[] }
+/**
+ * Whether the game code with the compatibility patch in place of the fixes is the same.
+ */
+export type CompatEquivalence = { kind: "equivalent" } | { kind: "differs"; files: string[] } | 
+/**
+ * Nothing to check: no fix can be saved.
+ */
+{ kind: "not_checked"; reason: string }
+/**
+ * What "Save as compatibility patch" would make (§8.2). Nothing is written.
+ */
+export type CompatExportPreview = { mod_id: string; name: string; version: string; requires: CompatRequirement[]; load_after: string[]; 
+/**
+ * mod.json, qm.toml and README.txt.
+ */
+files: CompatFile[]; equivalence: CompatEquivalence; 
+/**
+ * The fixes it includes, in ledger order.
+ */
+included: string[]; refused: CompatRefusal[] }
+/**
+ * Which fixes to save as a compatibility patch, and its name (§8.2).
+ */
+export type CompatExportRequest = { fix_ids: string[]; 
+/**
+ * The mod's name; empty: one is made from the mods it changes.
+ */
+name?: string }
+/**
+ * What `compat_export` did.
+ */
+export type CompatExportResult = { mod_id: string; version: string; 
+/**
+ * Where the mod is in the library, for display only.
+ */
+shown_path: string; removed_fix_ids: string[] }
+/**
+ * One file of the compatibility patch.
+ */
+export type CompatFile = { name: string; text: string }
+/**
+ * A fix the compatibility patch cannot include, and why.
+ */
+export type CompatRefusal = { fix_id: string; reason: string }
+/**
+ * A mod the compatibility patch requires.
+ */
+export type CompatRequirement = { mod_id: string; name: string; version: string | null; 
+/**
+ * The version range written to mod.json: ">=<version>", or "*" with no version.
+ */
+range: string; 
+/**
+ * Why, e.g. "it places code next to GCore's change".
+ */
+reasons: string[] }
+export type CompileCheck = { ran: boolean; files_checked: number; 
+/**
+ * Why the check did not run, or files it could not judge.
+ */
+note: string | null }
+export type ConfigModeDef = { id: string; title: string; subtitle: string | null; description: string | null; icon: string | null; priority: number | null; on_click: string | null }
+export type ConfigOptionDef = { id: string; label: string; option_type: ConfigOptionType; default: ConfigValue | null; description: string | null; options: ConfigValue[]; labels: string[]; min: number | null; max: number | null; step: number | null; show_if: ShowIfRule | null; button_text: string | null; aliases: string[]; 
+/**
+ * For a `button`: the global function the game calls on a click, by name. A dotted name
+ * (`ExampleMod.run`) is looked up one level into that global table.
+ */
+on_click?: string | null }
 /**
  * Normalized option control type for the Launcher UI and `GMenu`.
  */
 export type ConfigOptionType = "checkbox" | "cycle" | "slider" | "separator" | "button"
+export type ConfigPageDef = { id: string; title: string; page_type: string | null; content: string | null; action_label: string | null; action_on_click: string | null }
 export type ConfigResetMode = "defaults" | "safe"
 /**
  * Scalar value for a mod configuration option.
@@ -535,62 +1395,872 @@ export type ConflictResolutionSuggestion =
  */
 { tier: "swap_mod_order"; move_mod_id: string; before_mod_id: string; move_patch_id: string; suggested_priority: number; explanation: string } | 
 /**
- * Tier 2: Earlier mod replaced the vanilla anchor; offers a 1-click profile-local glue patch
- * that anchors onto the earlier mod's replacement lines.
+ * Tier 2: another mod's patch replaced the anchor line of a before/after patch; a
+ * profile-local copy anchored on that patch's code. It is simulated before it is applied,
+ * and refused when it breaks a file or adds a conflict (D63).
  */
 { tier: "generate_glue_patch"; glue_patch: GluePatchEntry; explanation: string } | 
 /**
  * Tier 3: Mutually exclusive replacement (`position = "at"` or duplicate module);
  * lets the user pick which mod's patch wins.
  */
-{ tier: "select_winner"; patch_a_id: string; mod_a_id: string; patch_b_id: string; mod_b_id: string; explanation: string }
+{ tier: "select_winner"; patch_a_id: string; mod_a_id: string; patch_b_id: string; mod_b_id: string; explanation: string } | 
+/**
+ * A pattern patch whose lines another mod changed or split: run it as separate edits
+ * (D46). Made as an ApplyAs fix, previewed before it is applied (D63).
+ */
+{ tier: "apply_as"; patch_id: string; mod_id: string; explanation: string } | 
+/**
+ * Two patches change one line: keep `keep_patch_id`'s change, so `patch_id` skips its
+ * own change there (edit `ordinal`) and runs its other edits (D49). Made as a SkipHunk
+ * fix, previewed before it is applied.
+ */
+{ tier: "skip_hunk"; patch_id: string; mod_id: string; ordinal: number; keep_patch_id: string; keep_mod_id: string; explanation: string }
+/**
+ * The patch that took a place, and what the line was and became.
+ */
+export type ConsumerInfo = { patch_id: string; mod_id: string; kind: ConsumerKind; 
+/**
+ * 1-based line of the place's anchor line in the game's file, as the file shows it.
+ */
+site_line: number; 
+/**
+ * The anchor line as the game has it.
+ */
+old_text: string; 
+/**
+ * What is there now: the new line, the new block, the code in between (Split), or the
+ * line written back (Reemitted). None when the line was removed.
+ */
+new_text: string | null }
+/**
+ * How another patch took one of a patch's places.
+ */
+export type ConsumerKind = 
+/**
+ * The lines are all there, but code from the consumer now sits between them.
+ */
+"split" | 
+/**
+ * The consumer wrote the line back unchanged, but not the rest of the place.
+ */
+"reemitted" | 
+/**
+ * The consumer replaced the line with one new line.
+ */
+"rewritten_1to1" | 
+/**
+ * The consumer replaced the line with a block of new lines.
+ */
+"replaced_by_block" | 
+/**
+ * The consumer removed the line and wrote nothing in its place.
+ */
+"deleted"
 export type CopyPatch = { position: CopyPosition; target: Target; sources: string[] | null; payload: string | null; id: string | null; name: string | null; priority: number | null; before?: string[]; after?: string[]; on_failure?: OnFailurePolicy }
 export type CopyPosition = "prepend" | "append"
 /**
  * Structured crash diagnostic report written to `Mods/qm/log/crashes/crash-{timestamp}.json`
  * whenever a Rust panic or in-game Lua `love.errorhandler` blue-screen occurs.
  */
-export type CrashReport = { id: string; timestamp: string; crash_kind: string; error_message: string; traceback: string; crashing_file: string | null; crashing_line: number | null; suspected_mod_id: string | null; suspected_patch_id: string | null; suspected_patch_name: string | null; code_snippet: CrashSnippetLine[]; active_profile_id: string | null; active_mods: Partial<{ [key in string]: string }> }
+export type CrashReport = { id: string; timestamp: string; crash_kind: string; error_message: string; traceback: string; crashing_file: string | null; crashing_line: number | null; suspected_mod_id: string | null; suspected_patch_id: string | null; suspected_patch_name: string | null; code_snippet: CrashSnippetLine[]; active_profile_id: string | null; active_mods: Partial<{ [key in string]: string }>; 
+/**
+ * launch-config.json's run id (D67); absent in reports from an older DLL.
+ */
+run_id?: string | null; 
+/**
+ * The profile fixes of the suspected patch (D58). For an adjusted copy, the fix that
+ * made it.
+ */
+suspected_fix_ids?: string[]; 
+/**
+ * The suspected patch is an adjusted copy: its fix is the suspect, not its base mod.
+ */
+suspected_adjusted_copy?: boolean }
 export type CrashSnippetLine = { line_number: number; text: string; is_crash_line: boolean; attributed_mod_id: string | null; attributed_patch_id: string | null }
-export type DetectedConflict = { id: string; severity: string; kind: string; target_file: string; mod_a_id: string; mod_b_id: string | null; patch_a_id: string; patch_b_id: string | null; description: string; suggestions: ConflictResolutionSuggestion[] }
-export type DetectedPaths = { game_exe_path: string | null; save_dir_path: string | null; library_dir_path: string; is_steam: boolean; game_version: string | null }
+export type DetectedConflict = { id: string; severity: string; kind: string; target_file: string; mod_a_id: string; mod_b_id: string | null; patch_a_id: string; patch_b_id: string | null; description: string; suggestions: ConflictResolutionSuggestion[]; 
+/**
+ * The patch that took patch A's place, and how (§9.1). Set on broken anchors and lost
+ * places when another patch took the line.
+ */
+consumer?: ConsumerInfo | null; 
+/**
+ * `(lost, total)`: how many of patch A's places in the game's file it lost.
+ */
+sites_lost?: [number, number] | null; 
+/**
+ * For a `same_line_edit`, the line and each patch's version of it (D49).
+ */
+same_line?: SameLineDetail | null }
+export type DetectedPaths = { game_exe_path: string | null; save_dir_path: string | null; workspace_mods_dir: string | null; library_dir_path: string; is_steam: boolean; game_version: string | null }
+export type DiagnosticRunPreview = { globals: WatchSuggestion[]; hooks: WatchSuggestion[] }
+/**
+ * A diagnostic test run of the active profile (Phase E D91).
+ */
+export type DiagnosticRunRequest = { 
+/**
+ * Global names whose changes are noted while the game loads.
+ */
+globals: string[]; 
+/**
+ * Functions (`name` or `Table.name`) whose callers are counted.
+ */
+hooks: string[]; method?: LaunchMethod | null }
+/**
+ * What a diagnostic test run found.
+ */
+export type DiagnosticRunResult = { run_id: string; started_at: string; 
+/**
+ * The game has not closed yet (or the launcher did not see it close).
+ */
+running: boolean; outcome: RunOutcome; 
+/**
+ * The game wrote a report for this run.
+ */
+reported: boolean; watched: Diagnostics; globals_trace: GlobalChange[]; hook_calls: HookCalls[] }
 export type DiagnosticSeverity = "error" | "warning" | "info"
+/**
+ * What a diagnostic test run watches (D89, D90).
+ */
+export type Diagnostics = { 
+/**
+ * Global names whose changes the probes record.
+ */
+globals?: string[]; 
+/**
+ * Global functions whose callers are counted.
+ */
+hooks?: string[] }
+/**
+ * A patch's text when the fix was made against its text now (D41).
+ */
+export type DriftDiff = { patch_id: string; 
+/**
+ * "fix" (the patch the fix changes) | "anchor_target" (a patch it refers to).
+ */
+role: string; before: PatchSnapshot; after: PatchSnapshot }
+/**
+ * Which end of B's lines an edge rung anchors on.
+ */
+export type Edge = "start" | "end"
+/**
+ * Whether code can go at one edge of another patch's change, and why not (§9.2). An edge
+ * inside a block the change leaves open is not offered: the code would run only when that
+ * block runs.
+ */
+export type EdgeCheck = { allowed: boolean; reason: string | null }
+/**
+ * The separate edits of an `at` patch, in lines.
+ */
+export type EditCounts = { kept: number; inserted: number; changed: number; removed: number }
+/**
+ * Why a patch that asks for edits mode runs literal.
+ */
+export type EditsRefusal = 
+/**
+ * More than one way to pair the lines (repeated lines such as `end`).
+ */
+"ambiguous" | 
+/**
+ * A new line next to a kept line opens or closes a block.
+ */
+"scope" | 
+/**
+ * A kept or new line is inside a long string or long comment.
+ */
+"long_string" | 
+/**
+ * The pattern and payload are too long to compare.
+ */
+"too_large" | 
+/**
+ * Another mod's new lines sit between lines one change or removal works on (D48). Only
+ * that site is refused, and nothing is written there.
+ */
+"split_change"
 export type ErrorKind = "not_found" | "invalid_input" | "conflict" | "game_running" | "io" | "network" | "integrity" | "cancelled" | "internal"
+/**
+ * One enabled faction that replaces a side.
+ */
+export type FactionCandidate = { faction_id: string; name: string; mod_id: string; priority: number }
+/**
+ * A side whose active faction a change would switch (D73).
+ */
+export type FactionChange = { 
+/**
+ * "allied" | "axis".
+ */
+side: string; 
+/**
+ * The faction now; None: the game's own.
+ */
+before: FactionPick | null; 
+/**
+ * The faction after the change; None: the game's own.
+ */
+after: FactionPick | null }
+/**
+ * Who a faction mod is, without checking its files: enough for a mod list.
+ */
+export type FactionHeader = { id: string; name: string; replaces: Side }
+/**
+ * The faction a mod gives a side.
+ */
+export type FactionPick = { mod_id: string; faction_id: string; name: string }
+/**
+ * A side two or more enabled factions replace, and which one runs.
+ */
+export type FactionSideChoice = { 
+/**
+ * `allied` or `axis`.
+ */
+side: string; 
+/**
+ * "Allies" or "Germans".
+ */
+label: string; 
+/**
+ * The faction the profile picked, when it picked one.
+ */
+picked: string | null; 
+/**
+ * The faction that runs now: the pick when it is loaded, else the highest priority.
+ */
+active: string | null; 
+/**
+ * Highest priority first.
+ */
+candidates: FactionCandidate[] }
+/**
+ * Patches in one file that fail because `root` does not apply: each anchors on the code of the
+ * root or of another member.
+ */
+export type FailureGroup = { target_file: string; 
+/**
+ * The root's patch id.
+ */
+root: string; root_mod: string; root_name: string; 
+/**
+ * In the order the patches run.
+ */
+members: FailureMember[]; reason: FailureReason }
+/**
+ * A patch that fails because of the group's root.
+ */
+export type FailureMember = { patch_id: string; mod_id: string; name: string }
+/**
+ * Why the root of a failure group does not apply.
+ */
+export type FailureReason = 
+/**
+ * It no longer finds its line.
+ */
+"no_match" | 
+/**
+ * The profile turned it off.
+ */
+"turned_off" | 
+/**
+ * It was skipped with its mod, or because a patch it requires did not apply.
+ */
+"skipped"
+/**
+ * A place where an anchored patch uses its own line, and why.
+ */
+export type FallbackNotice = { file: string; patch_id: string; 
+/**
+ * 1-based line of the place in the game's file, as the file shows it (0 when unknown).
+ */
+site_line: number; reason: string }
 export type FileDiff = { result: SimulatedFileResult; original_lines: string[] }
+/**
+ * What the patches do to one game file.
+ */
+export type FileStat = { target_file: string; original_lines: number; patched_lines: number; 
+/**
+ * Distinct patches with a record on this file (disabled ones included).
+ */
+patches: number; mods: string[]; broken: number; conflicts: number }
+/**
+ * How one plan fix met the loaded patches (§3.9, §7.2).
+ */
+export type FixBinding = { 
+/**
+ * The ledger fix id from `fix_of`, else the plan entry's own id.
+ */
+fix_id: string; 
+/**
+ * The `fix_of` key: "glue:<id>", "disable:<id>", ...
+ */
+key: string; status: BindingStatus; detail: string; new_id?: string | null }
+/**
+ * What a fix changes.
+ */
+export type FixChange = { kind: "disable"; patch: PatchRef } | { kind: "order"; rule: OrderRule; refs?: PatchRef[] } | { kind: "priority"; patch: PatchRef; priority: number } | { kind: "anchor"; patch: PatchRef; anchors: Rung[]; sites?: SiteKey[]; replace_author_anchors?: boolean } | 
+/**
+ * A legacy glue patch (D18).
+ */
+{ kind: "adjusted_copy"; glue: GluePatchEntry; base?: PatchRef | null; disables_base?: boolean } | 
+/**
+ * How an `at` patch runs: as separate edits or as one replacement (D46).
+ */
+{ kind: "apply_as"; patch: PatchRef; mode: ApplyAs } | 
+/**
+ * One edit of an `at` patch that does not run, so another patch's change to the same
+ * lines stays (D49). The patch runs as separate edits while the fix runs.
+ */
+{ kind: "skip_hunk"; patch: PatchRef; hunk: HunkKey } | 
+/**
+ * At the game's line `site`, on `side`, put `patch`'s block below `below`'s block, or
+ * above `above`'s (D55). It acts in every stacking mode.
+ */
+{ kind: "stack_rule"; patch: PatchRef; site: SiteKey; side: StackSide; below?: PatchRef | null; above?: PatchRef | null } | 
+/**
+ * Who wins an asset group or slot (Phase E D76, D78): a mod id, `faction:<id>` or
+ * `vanilla`. `excludes` is what that leaves out, per source, as the asset ledger worked
+ * it out when the fix was made or last refreshed.
+ */
+{ kind: "asset_choice"; key: string; winner: string; excludes?: Partial<{ [key in string]: string[] }> } | 
+/**
+ * What Tier 1 "Load X before Y" wrote (D36). Not compiled into the plan.
+ */
+{ kind: "mod_order"; move_mod_id: string; before_mod_id: string; priority?: number | null }
+/**
+ * What a draft changes, by patch id.
+ */
+export type FixChangeDraft = { kind: "disable"; patch_id: string } | { kind: "order"; rule: OrderRule } | { kind: "priority"; patch_id: string; priority: number } | 
+/**
+ * Put the patch's code next to another patch's code (a rung each in `anchors`).
+ */
+{ kind: "anchor"; patch_id: string; anchors: Rung[]; sites?: SiteKey[] } | 
+/**
+ * Run an `at` patch as separate edits (or as one replacement again), D46.
+ */
+{ kind: "apply_as"; patch_id: string; mode: ApplyAs } | 
+/**
+ * Skip one edit of an `at` patch so another patch's change to the same lines stays
+ * (D49): edit `ordinal` of `patch_id` (from 0), keeping `keep_patch_id`'s change.
+ */
+{ kind: "skip_hunk"; patch_id: string; ordinal: number; keep_patch_id?: string | null } | 
+/**
+ * At the game's line `site` (a shared stack's `site`), on `side`, put `patch_id`'s block
+ * below `below_patch_id`'s block or above `above_patch_id`'s (D55). One of the two.
+ */
+{ kind: "stack_rule"; patch_id: string; site: SiteKey; side: StackSide; below_patch_id?: string | null; above_patch_id?: string | null } | 
+/**
+ * Run the adjusted copy `glue_id` as its base mod at the base's place (`Base`, "Run it
+ * like <mod>"), or as `qm_glue` after every mod patch (`Legacy`), D58. It changes the
+ * copy's fix in place.
+ */
+{ kind: "adjusted_copy_run_as"; glue_id: string; run_as: RunAs } | 
+/**
+ * Give the asset group or slot `key` (from the asset ledger) to `winner`: a mod id,
+ * `faction:<id>`, or `vanilla` for the game's own files (Phase E D76).
+ */
+{ kind: "asset_choice"; key: string; winner: string }
+/**
+ * A fix to make. The backend finds the patches and pins their fingerprints.
+ */
+export type FixDraft = { change: FixChangeDraft; 
+/**
+ * Empty: a label is made from the change.
+ */
+label?: string; source: FixSource; conflict_id?: string | null; option_key?: string | null; approved?: ApprovedImpact | null }
+export type FixEvent = { at: string; what: FixEventKind; detail?: string }
+export type FixEventKind = "created" | "pinned" | "rebound" | "accepted" | "paused" | "resumed"
+export type FixSource = "resolver" | "order_view" | "patch_toggle" | "migrated" | "suggestion" | "auto_follow" | "compat_export"
+/**
+ * How a fix is doing, worked out on every read (§7.2).
+ */
+export type FixStatus = { state: "active" } | { state: "rebound"; from: string; to: string } | { state: "followed" } | { state: "fell_back"; sites: number; reason: string } | { state: "waiting"; mods: string[] } | { state: "needs_review"; reasons: string[] } | { state: "suspended"; reason: string } | { state: "paused" }
+/**
+ * A fix whose status a change would change.
+ */
+export type FixStatusChange = { fix_id: string; before: FixStatus | null; after: FixStatus | null }
+/**
+ * A fix the launcher suggests (§9.3). Apply makes `drafts` and undoes `removes`.
+ */
+export type FixSuggestion = { key: string; 
+/**
+ * "stale" | "follow" | "combined" | "rebind" | "retire".
+ */
+kind: string; label: string; drafts: FixDraft[]; 
+/**
+ * Ids of fixes the suggestion removes.
+ */
+removes: string[]; 
+/**
+ * The preview showed no new conflict, broken file or moved code.
+ */
+safe: boolean; 
+/**
+ * The fix it is about. A "rebind" suggestion has no drafts: the user reviews this fix.
+ */
+fix_id?: string | null }
+/**
+ * One fix in the Fixes view.
+ */
+export type FixView = { id: string; label: string; 
+/**
+ * "disable" | "order" | "priority" | "anchor" | "adjusted_copy" | "mod_order" |
+ * "apply_as".
+ */
+kind: string; status: FixStatus; status_text: string; target_file: string | null; patch: PatchLabel | null; related: PatchLabel[]; source: FixSource; provenance: Provenance; paused: boolean; fallback_text: string | null; drift: DriftDiff[] | null; can_export: boolean; export_blocked_reason: string | null; 
+/**
+ * A read-only row of a profile that is not migrated yet (D38); change it with the
+ * command that made it.
+ */
+legacy: boolean; 
+/**
+ * The patches the fix could mean now that several match it (Ambiguous, §7.2); the
+ * user picks one with `fix_rebind`.
+ */
+candidates?: PatchLabel[]; 
+/**
+ * An adjusted copy's glue id, for `glue_patch_remove` on a legacy row (D38).
+ */
+glue_id?: string | null; 
+/**
+ * For a running adjusted copy that runs as `qm_glue` after every mod patch: the mod it
+ * can run as instead, at its base's place ("Run it like <mod>", D58).
+ */
+run_like_mod?: string | null; 
+/**
+ * A running copy that "Run it like <mod>" switched to its base mod: it can go back to
+ * running after every mod patch ("Run it last again", D58).
+ */
+can_run_last?: boolean; 
+/**
+ * The game files the fix's patches target that changed since it was made or accepted
+ * (D74); the fix then needs review.
+ */
+game_drift?: GameFileDrift[] }
+/**
+ * Everything the Fixes view shows.
+ */
+export type FixesView = { 
+/**
+ * The profile these fixes belong to; the UI drops an answer for another profile.
+ */
+profile_id: string; fixes: FixView[]; suggestions: FixSuggestion[]; 
+/**
+ * The suggestions are being made in the background; an `Invalidated { Fixes }` event
+ * follows once they are ready.
+ */
+suggestions_pending: boolean; 
+/**
+ * Why there are no suggestions, when they could not be made (D70).
+ */
+suggestions_note: string | null; stacking: StackMode; stacking_acknowledged: boolean; plan_error: string | null; load_errors: LoadError[]; 
+/**
+ * The staged load-order.json could not be read, so this view uses the profile's own mod
+ * order; says why.
+ */
+plan_note: string | null; 
+/**
+ * Ledger entries this version cannot read; they are kept as they are.
+ */
+unreadable_fixes: number; journal: JournalView[]; 
+/**
+ * False: the rows are the legacy fields, read-only (D38).
+ */
+migrated: boolean; migration_error: string | null }
+/**
+ * The game's own file in a slot.
+ */
+export type GameFile = { path: string; width?: number | null; height?: number | null }
+/**
+ * A game file whose hash differs from a fix's stamp.
+ */
+export type GameFileDrift = { 
+/**
+ * The game's path, as the stamp keys it.
+ */
+file: string; 
+/**
+ * The SHA-256 when the fix was made or accepted.
+ */
+before: string; 
+/**
+ * The SHA-256 now; None when the game no longer has the file.
+ */
+after: string | null }
 export type GameInfo = { version: string; exe_sha256: string; lua_file_count: number }
 export type GameStage = { stage: "idle" } | { stage: "deploying" } | { stage: "waiting_for_steam" } | { stage: "running"; pid: number } | { stage: "cleaning_up" } | { stage: "failed"; reason: string }
 export type GameStatus = { stage: GameStage; profile_id: string | null; is_modded: boolean }
 export type GameUpdateDetected = { previous_sha256: string; current_sha256: string }
-export type GluePatchEntry = { id: string; name: string; replaces_patch_id: string | null; priority: number; patch: Patch }
+/**
+ * One change of a watched global in a diagnostic test run, with the line that made it.
+ */
+export type GlobalChange = { name: string; 
+/**
+ * The patch that owns the line that made the change; empty for the game's own code.
+ */
+patch_id?: string; 
+/**
+ * That patch's mod; empty for the game's own code.
+ */
+mod_id?: string; 
+/**
+ * The chunk the line is in, as Lua names it (`@main.lua`).
+ */
+source?: string; 
+/**
+ * The line in the file the game loaded (patched).
+ */
+line?: number; 
+/**
+ * The Lua type of the new value (`nil` when it was removed).
+ */
+value_type: string; 
+/**
+ * Tells two values of one type apart (`function: 0x...`); the value itself for scalars.
+ */
+identity?: string; 
+/**
+ * The order the changes were seen in, from 1.
+ */
+seq?: number }
+export type GluePatchEntry = { id: string; name: string; replaces_patch_id: string | null; priority: number; patch: Patch; 
+/**
+ * The mod of the replaced patch. A `Legacy` copy runs as `qm_glue` (D18); a `Base`
+ * copy runs as this mod (D58).
+ */
+base_mod_id?: string | null; 
+/**
+ * Where the copy runs and as which mod (D58). Absent means `Legacy`.
+ */
+run_as?: RunAs | null; 
+/**
+ * The copy's pattern lines match only their own text: `*` and `?` are not wildcards
+ * (D59). Old copies keep wildcards.
+ */
+exact?: boolean }
+export type GroupClaimant = { source: string; 
+/**
+ * How many slots of the group it has a file for.
+ */
+files: number }
+export type GroupKind = 
+/**
+ * A numbered set in one folder.
+ */
+"set" | 
+/**
+ * Everything else in one folder.
+ */
+"folder"
 export type HealthLogLine = { level: string; line: string; file: string }
 /**
  * `Mods/qm/patch-report.json` as written by winmm.dll.
  */
-export type HealthPatchReport = { qm_version: string; timestamp: string; profile_id: string | null; total_patches_applied: number; total_warnings: number; total_failures: number; records: PatchExecutionRecord[] }
-export type HealthReport = { dll_present: boolean; is_game_dir_modded: boolean; source_dll_ready: boolean; dll_sha256: string | null; source_dll_sha256: string | null; dll_matches_build: boolean; game_running_pid: number | null; game_update_detected: GameUpdateDetected | null; overwrite_files: string[]; steam_cloud_warning: string | null; 
+export type HealthPatchReport = { qm_version: string; timestamp: string; profile_id: string | null; total_patches_applied: number; total_warnings: number; total_failures: number; 
+/**
+ * Records whose match touched QuarterMaster's own lines, refused ones included (D42).
+ */
+builtin_matches: number; records: PatchExecutionRecord[]; 
+/**
+ * The game could not use load-order.json and loaded no mods (D16).
+ */
+plan_error: string | null; 
+/**
+ * Plan entries the game skipped (D17).
+ */
+plan_warnings: string[]; 
+/**
+ * Mods the game skipped because they failed to load, with their requirers (D15).
+ */
+load_errors: LoadError[]; 
+/**
+ * Plan fixes that did not apply as written, such as a waiting adjusted copy (D19).
+ */
+fix_bindings: FixBinding[]; 
+/**
+ * The game could not use launch-config.json, loaded no mods and used its default save
+ * identity (D65).
+ */
+launch_config_error: string | null }
+export type HealthReport = { dll_present: boolean; is_game_dir_modded: boolean; source_dll_ready: boolean; dll_sha256: string | null; source_dll_sha256: string | null; dll_matches_build: boolean; 
+/**
+ * The game folder `winmm.dll` hash is a known QuarterMaster build (`false` when absent).
+ */
+dll_is_known: boolean; game_running_pid: number | null; game_update_detected: GameUpdateDetected | null; overwrite_files: string[]; steam_cloud_warning: string | null; 
 /**
  * `None` when `patch-report.json` is missing or unreadable.
  */
-patch_report: HealthPatchReport | null; recent_logs: HealthLogLine[] }
+patch_report: HealthPatchReport | null; 
+/**
+ * Why `patch-report.json` could not be read or parsed; None when it is fine or missing.
+ */
+patch_report_error: string | null; recent_logs: HealthLogLine[]; 
+/**
+ * The active profile's newest run log entry (D67, D72); it outlives the game folder's
+ * report. None when the profile has no run yet.
+ */
+last_run: RunEntry | null; 
+/**
+ * A test run's plan (a trial or a run without mods) is still staged for the active
+ * profile (D68). Its own plan is staged again once the game is not running.
+ */
+test_plan: StagedTestPlan | null }
+export type HookCaller = { 
+/**
+ * The chunk name as Lua reports it.
+ */
+source: string; line: number; calls?: number; 
+/**
+ * The patch that owns the line, when it is patched code.
+ */
+patch_id?: string | null; 
+/**
+ * That patch's mod.
+ */
+mod_id?: string | null }
+/**
+ * The distinct places that called one watched hook.
+ */
+export type HookCalls = { name: string; total?: number; 
+/**
+ * No function of that name existed after love.load, so nothing was counted.
+ */
+missing: boolean; callers?: HookCaller[] }
+/**
+ * One edit of an `at` patch, named so a profile fix or a compat mod can skip it (D49).
+ */
+export type HunkKey = { 
+/**
+ * The patch's content when the key was made; with other content nothing is skipped.
+ */
+fp: PatchFingerprintLite; 
+/**
+ * The edit's pattern lines, trimmed and joined by `\n` (empty for an insert).
+ */
+vanilla: string; 
+/**
+ * The edit's place among the patch's edits, from 0 (kept lines do not count).
+ */
+ordinal: number; 
+/**
+ * The patch whose change to these lines stays ("mod:patch" or a patch id). Its new lines
+ * stand in for the skipped lines when the patch looks for its place. Absent: any other
+ * patch's lines.
+ */
+keep?: string | null }
 export type ImportRequest = { path: string; allow_unmanaged: boolean; selected_mod_ids: string[] | null; conflict_policy: ConflictPolicy | null }
+/**
+ * A patch that anchors on another patch's code: `patch_id` uses a line `uses_patch_id` wrote.
+ */
+export type InferredEdge = { target_file: string; patch_id: string; mod_id: string; uses_patch_id: string; uses_mod_id: string }
 export type InsertPosition = "at" | "before" | "after"
 export type IntegrityVerifyResult = { is_pristine: boolean; modified: string[]; missing: string[]; untracked: string[] }
+/**
+ * A rung that is never used, with why. The patch still loads and uses its own line.
+ */
+export type InvalidRung = { patch_id: string; rung: number; 
+/**
+ * "not_required" | "at_patch" | "edge_with_pattern" | "edge_without_within" |
+ * "no_target" | "mod_wildcard" | "position_at" | "module_patch" | "not_pattern" |
+ * "malformed" | "needs_capture" | "regex_position".
+ */
+reason: string; 
+/**
+ * The same in plain words.
+ */
+detail: string; source: string }
 export type JobId = number
 export type JobInfo = { id: JobId; kind: JobKind; progress: number; label: string; cancelling: boolean }
-export type JobKind = "warm_mods" | "warm_vanilla" | "simulation" | "updates_refresh" | "catalog_refresh" | "catalog_install" | "mod_import" | "launcher_update_download" | "diagnostic_bundle"
+export type JobKind = "warm_mods" | "warm_vanilla" | "simulation" | "updates_refresh" | "catalog_refresh" | "catalog_install" | "mod_import" | "mod_update_install" | "launcher_update_download" | "diagnostic_bundle" | 
+/**
+ * Copies the workspace mods folder into the library on request.
+ */
+"workspace_sync" | 
+/**
+ * Writes a profile as a `.qmpack`.
+ */
+"modpack_export" | 
+/**
+ * Installs a `.qmpack`'s bundled mods and creates its profile.
+ */
+"modpack_import" | 
+/**
+ * Makes the Fixes view's suggestions (§9.3) after a simulation.
+ */
+"fix_suggestions"
+/**
+ * A fix an undo brings back and the newer running fix it clashes with.
+ */
+export type JournalClash = { restored_fix_id: string; restored_label: string; newer_fix_id: string; newer_label: string; 
+/**
+ * What both hold: the restored fix's kind ("order", "priority", ...).
+ */
+slot: string; 
+/**
+ * The patch the restored fix is about; empty when it has none.
+ */
+patch_id: string }
+/**
+ * A batch operation that can be undone as one step.
+ */
+export type JournalEntry = { at: string; 
+/**
+ * "migrated" | "compat_export".
+ */
+op: string; label: string; 
+/**
+ * The fixes the operation took out. One of a kind this version does not know
+ * round-trips as it is.
+ */
+removed?: ProfileFix[]; 
+/**
+ * Ids of the fixes the operation added.
+ */
+added?: string[]; mods_enabled?: string[] }
+/**
+ * How an undo with clashes goes on (D71).
+ */
+export type JournalUndoChoice = 
+/**
+ * Pause the newer clashing fixes and bring the old ones back running.
+ */
+"pause_newer" | 
+/**
+ * Bring the clashing old fixes back paused; the newer ones keep running.
+ */
+"restore_paused"
+/**
+ * What undoing a batch step would do (D71). Nothing is saved.
+ */
+export type JournalUndoPreview = { 
+/**
+ * "migrated" | "compat_export".
+ */
+op: string; label: string; 
+/**
+ * Labels of the fixes the undo brings back.
+ */
+restores: string[]; 
+/**
+ * Names of the mods the undo turns off.
+ */
+turns_off_mods: string[]; 
+/**
+ * Fixes that would come back next to a newer running fix holding the same thing. When
+ * there are any, the undo needs a choice.
+ */
+clashes: JournalClash[]; 
+/**
+ * The undo that keeps every newer fix running: with clashes, the clashing fixes come back
+ * paused (`RestorePaused`). None while the simulation is not ready.
+ */
+impact_keep: PreviewImpact | null; 
+/**
+ * With clashes: the newer fixes paused and the old ones back running (`PauseNewer`).
+ * None without clashes, or while the simulation is not ready.
+ */
+impact_pause: PreviewImpact | null }
+/**
+ * One batch operation that can be undone.
+ */
+export type JournalView = { index: number; at: string; 
+/**
+ * "migrated" | "compat_export".
+ */
+op: string; label: string; removed: number; added: number }
+export type KeybindDef = { id: string; name: string; category?: string; default: string; secondary?: string | null; modifiers?: string[]; tab?: string | null; description?: string | null; on_trigger?: string | null }
 export type LaunchMethod = "steam_url" | "direct_exe" | "vanilla"
 /**
  * `Default` clears the profile's launch method override.
  */
-export type LaunchMethodChoice = "default" | "steam_url" | "direct_exe" | "vanilla"
-export type LaunchRequest = { profile_id: string; method: LaunchMethod | null }
+export type LaunchMethodChoice = "default" | "steam_url" | "direct_exe"
+export type LaunchRequest = { profile_id: string; method: LaunchMethod | null; 
+/**
+ * Start the game with no mods for this run (the pre-launch dialog's "Launch without
+ * mods" after a plan error, D16). The DLL still runs with its built-in edits, and the
+ * profile and its save slot stay active.
+ */
+without_mods?: boolean }
 export type LauncherUpdateInfo = { current_version: string; latest_version: string; update_available: boolean; opt_in_prereleases: boolean; signature_verification: string; rollback_available: boolean }
+/**
+ * A plain-text note on a group or a slot. `code` is stable; `text` is for the user.
+ */
+export type LedgerNote = { code: string; text: string }
+/**
+ * What a save holds from mods that are not in a profile, from the save's stamp.
+ */
+export type LeftoverFields = { 
+/**
+ * Absent mods with at least one field in the save, sorted.
+ */
+mods: string[]; 
+/**
+ * Every field of an absent mod that is in the save, sorted.
+ */
+fields: string[]; 
+/**
+ * The fields Clean up may remove: in the save, and every mod the stamp lists for the
+ * field is absent and it lists exactly one (D86). Sorted.
+ */
+cleanable: string[]; 
+/**
+ * Leftover field -> the mods the stamp lists for it.
+ */
+owners?: Partial<{ [key in string]: string[] }> }
+/**
+ * What the line rules change in one profile, from the older rules to the newer ones.
+ */
+export type LineRulesDiff = { 
+/**
+ * Files whose game text differs.
+ */
+files: string[]; 
+/**
+ * Shared lines whose order differs: `<file> line <n> <side> (<where>): <old> -> <new>`.
+ */
+stacks: string[]; 
+/**
+ * Patches whose places on another patch's code differ: `<file> <patch>: <old> -> <new>`.
+ */
+rungs: string[] }
+/**
+ * Who wrote a line of the patched file.
+ */
+export type LineSource = { 
+/**
+ * "inserted" | "kept" (written back unchanged) | "modified" (changed in place).
+ */
+kind: string; patch_id: string; mod_id: string }
+/**
+ * A mod that could not be loaded. It is skipped, together with every enabled mod that
+ * requires it, directly or through another skipped mod.
+ */
+export type LoadError = { 
+/**
+ * The mod's id; empty when the Mods folder itself could not be read.
+ */
+mod_id: string; 
+/**
+ * The mod's folder or zip name (the Mods folder path for a Mods folder error).
+ */
+folder: string; message: string; 
+/**
+ * Ids of the enabled mods skipped because they require this one.
+ */
+skipped_dependents?: string[] }
 export type LoadOrderResolution = { ordered_mods: ResolvedModOrderEntry[]; diagnostics: SolverDiagnostic[]; has_cycles: boolean; cycle_paths: string[][]; rule_hierarchy: string }
 export type LoadOrderUpdate = { mod_priorities: Partial<{ [key in string]: number }>; user_load_after: Partial<{ [key in string]: string[] }>; locked_mods: string[]; separators: ProfileSeparator[] }
 export type Loadable<T> = { status: "loading" } | { status: "ready"; data: T }
 export type LogSource = "runtime" | "runtime_errors" | "launcher"
-export type ModConfigSchema = { mod_id: string | null; name: string; options: ConfigOptionDef[] }
-export type ModDetail = { summary: ModSummary; manifest: ModManifest; readme_md: string | null; changelog_md: string | null; config_schema: ModConfigSchema | null; saved_config: Partial<{ [key in string]: ConfigValue }>; security_report: SecurityScanReport; integrity: IntegrityVerifyResult }
+export type ModConfigSchema = { mod_id: string | null; name: string; options: ConfigOptionDef[]; modes: ConfigModeDef[]; pages: ConfigPageDef[]; keybinds: KeybindDef[] }
+export type ModDetail = { summary: ModSummary; manifest: ModManifest; readme_md: string | null; changelog_md: string | null; config_schema: ModConfigSchema | null; saved_config: Partial<{ [key in string]: ConfigValue }>; security_report: SecurityScanReport; integrity: IntegrityVerifyResult; 
+/**
+ * The files the autoloader picks up from `assets/`, in path order (empty for most mods).
+ */
+asset_files: AssetFile[] }
+/**
+ * How a library folder is loaded: through its patch files, as a faction (`faction.toml` and no
+ * patch files), as an `assets/` folder only (the autoloader), or neither.
+ */
+export type ModKind = "managed" | "unmanaged" | "assets" | "faction"
 /**
  * Standardized `mod.json` v1 manifest with full backwards-compatibility for existing mods.
  */
@@ -602,12 +2272,41 @@ load_priority?: number; game_version?: string | null; entry_patch?: string;
 /**
  * SMAPI-style update keys, e.g. `["GitHub:Gamiseus/MnB-Mods#GCore.zip", "Nexus:1234"]`.
  */
-update_keys?: string[]; homepage?: string | null; github?: string | null; nexus?: string | null; relationships?: ModRelationships }
+update_keys?: string[]; homepage?: string | null; github?: string | null; nexus?: string | null; relationships?: ModRelationships; 
+/**
+ * The oldest QuarterMaster this mod runs on: a version (that version or newer) or a range
+ * such as `">=1.2 <2"`. A QuarterMaster that does not meet it skips the mod (D61).
+ */
+min_qm?: string | null; 
+/**
+ * QuarterMaster features this mod needs (`qm_core::QM_FEATURES`). A QuarterMaster without
+ * one of them skips the mod (D61).
+ */
+qm_features?: string[]; 
+/**
+ * Launcher check findings this mod's author checked and silences, as
+ * `"<check>:<name>"` or `"<check>:*"`, e.g. `"redefined_global:loadModSettings"` (D69).
+ * Not the qm.toml `[[overrides]]` entries.
+ */
+overrides?: string[]; 
+/**
+ * Save content this mod adds to the game, so a save still loads when the mod is off
+ * (Phase E D87).
+ */
+save_content?: SaveContentDecl | null }
 /**
  * One patch of a mod as seen by the cached simulation.
  */
-export type ModPatchStatus = { patch_id: string; name: string | null; target_file: string; state: PatchState; conflicts: DetectedConflict[] }
-export type ModProfile = { id: string; name: string; description?: string; created_at: string; updated_at: string; enabled_mods: string[]; separators?: ProfileSeparator[]; mod_priorities?: Partial<{ [key in string]: number }>; user_load_after?: Partial<{ [key in string]: string[] }>; patch_priorities?: Partial<{ [key in string]: number }>; disabled_patches?: string[]; glue_patches?: GluePatchEntry[]; linked_save_profile_id?: string; launch_method?: LaunchMethod | null; disable_console?: boolean; custom_launch_args?: string[]; 
+export type ModPatchStatus = { patch_id: string; name: string | null; target_file: string; state: PatchState; conflicts: DetectedConflict[]; 
+/**
+ * The compatibility mods that changed this patch, as the engine bound them.
+ */
+changed_by?: string[] }
+export type ModProfile = { id: string; name: string; description?: string; created_at: string; updated_at: string; enabled_mods: string[]; separators?: ProfileSeparator[]; mod_priorities?: Partial<{ [key in string]: number }>; user_load_after?: Partial<{ [key in string]: string[] }>; patch_priorities?: Partial<{ [key in string]: number }>; disabled_patches?: string[]; glue_patches?: GluePatchEntry[]; 
+/**
+ * Profile patch order rules, written to `load-order.json` for the engine.
+ */
+patch_order?: OrderRule[]; linked_save_profile_id?: string; launch_method?: LaunchMethod | null; disable_console?: boolean; custom_launch_args?: string[]; 
 /**
  * Optional LÖVE `t.identity` override if the user wants complete Steam Cloud isolation.
  */
@@ -627,7 +2326,49 @@ favorites?: string[];
 /**
  * User notes attached to individual mods (`mod_id -> note`).
  */
-mod_notes?: Partial<{ [key in string]: string }> }
+mod_notes?: Partial<{ [key in string]: string }>; 
+/**
+ * How code from several mods at one line is ordered. `None`: a profile from before
+ * stacking that has not seen the stacking notice; it keeps the older order (D3).
+ */
+stacking?: StackMode | null; 
+/**
+ * One-time notices the user has seen in this profile (`stacking_v1`, `stacking_v2`,
+ * `fixes_import_v1`).
+ */
+notices_seen?: string[]; 
+/**
+ * The Phase D line rules (D50, D51). `None`: a profile from before them, which keeps the
+ * older rules until the user answers the `stacking_v2` notice. New profiles: `Some(true)`.
+ */
+line_rules_v2?: boolean | null; 
+/**
+ * Side (`allied`, `axis`) -> the faction picked for it (D82). Set only when two enabled
+ * factions replace one side; without it the mod priority decides, as before.
+ */
+faction_picks?: Partial<{ [key in string]: string }>; 
+/**
+ * The fix ledger (§3.11). Entries of a kind this version does not know round-trip as
+ * they are.
+ */
+fixes?: ProfileFix[]; 
+/**
+ * 0: the legacy fields are not migrated to the ledger yet (D38).
+ */
+fixes_version?: number; 
+/**
+ * D11; used only if safe follows are ever applied automatically.
+ */
+auto_follow?: boolean; 
+/**
+ * Batch operations that can be undone as one step, newest last (at most 50). Entries
+ * this version cannot read (a fix kind it does not know) round-trip as they are.
+ */
+fix_journal?: JournalEntry[]; 
+/**
+ * Why the last migration to the ledger stopped (D38).
+ */
+migration_error?: string | null }
 /**
  * Rich dependency and ordering relationships (Fabric / Factorio style).
  */
@@ -660,31 +2401,387 @@ load_before?: string[];
  * Virtual capability IDs satisfied by this mod.
  */
 provides?: string[] }
-export type ModSummary = { id: string; name: string; version: string; authors: string[]; category: string | null; enabled: boolean; patch_count: number; installed_versions: string[]; is_workspace_linked: boolean; has_config: boolean; load_priority: number }
-export type ModUpdateInfo = { mod_id: string; name: string; installed_version: string; latest_version: string; update_available: boolean; update_key: string; pinned_source_url: string | null; source_changed_warning: boolean; auto_update: boolean; changelog: string }
+export type ModSummary = { id: string; name: string; version: string; authors: string[]; category: string | null; enabled: boolean; patch_count: number; installed_versions: string[]; is_workspace_linked: boolean; has_config: boolean; load_priority: number; kind: ModKind; 
+/**
+ * Set for a faction mod: who it is and which side it replaces.
+ */
+faction: FactionHeader | null }
+export type ModUpdateInfo = { mod_id: string; name: string; installed_version: string; latest_version: string; update_available: boolean; update_key: string; pinned_source_url: string | null; source_changed_warning: boolean; auto_update: boolean; changelog: string; 
+/**
+ * Release asset to install, from the last real GitHub check (`None` when unknown).
+ */
+download_url: string | null }
+export type ModpackPreview = { name: string; description: string; mods: ModpackPreviewMod[] }
+export type ModpackPreviewMod = { id: string; name: string; version: string; 
+/**
+ * This exact version is already installed.
+ */
+installed: boolean; 
+/**
+ * The pack carries the mod's files.
+ */
+bundled: boolean }
 export type ModulePatch = { source: string; before?: string | null; name: string; load_now?: boolean; id: string | null; priority: number | null; on_failure?: OnFailurePolicy }
 export type NewProfile = { name: string; id: string | null; clone_from: string | null; linked_save_profile_id: string | null; description: string | null }
+/**
+ * The trial to launch next, or the one running or waiting for an answer.
+ */
+export type NextTrial = { step: number; left_out: number[]; 
+/**
+ * What it leaves out, as the user reads it.
+ */
+label: string; changes: TrialChanges }
 export type OnFailurePolicy = "warn" | "skip_patch" | "skip_mod" | "abort"
+/**
+ * A profile rule: `patch` runs before every patch in `before` and after every patch in `after`.
+ */
+export type OrderRule = { patch: string; before?: string[]; after?: string[] }
+/**
+ * What became of one compatibility mod's `[[overrides]]` entry (§3.10, §8.1). An entry can
+ * give several reports: one for the changes that apply and one for each set of changes a
+ * stronger layer replaced.
+ */
+export type OverrideReport = { 
+/**
+ * The compatibility mod's id.
+ */
+from_mod: string; 
+/**
+ * The patch the entry names, as written.
+ */
+target: string; 
+/**
+ * The changes this report is about: "disable", "priority", "order" and "anchors",
+ * joined with ", ".
+ */
+action: string; 
+/**
+ * "applied" | "rejected_not_required" | "target_missing" | "suspended_drift" |
+ * "superseded" | "superseded_by_profile" | "waiting" | "invalid".
+ */
+status: string; 
+/**
+ * The same in plain words.
+ */
+detail: string }
 export type Patch = { pattern: PatternPatch } | { regex: RegexPatch } | { copy: CopyPatch } | { module: ModulePatch }
+export type PatchChange = { patch_id: string; mod_id: string; target_file: string; 
+/**
+ * `None`: the patch has no record on this file (before or after).
+ */
+before: PatchOutcomeStatus | null; after: PatchOutcomeStatus | null; before_matches: number; after_matches: number }
+/**
+ * Everything the patch inspector shows about one patch (plan 2d Task 1).
+ */
+export type PatchDetail = { patch_id: string; name: string | null; mod_id: string; 
+/**
+ * The patch file it came from, relative to the profile's `Mods` folder.
+ */
+source_file: string; 
+/**
+ * Effective priority after mod and profile overrides.
+ */
+priority: number; 
+/**
+ * The full definition: type, target, position, pattern or regex, payload, times, on_failure.
+ */
+definition: Patch; positions: PatchFilePosition[]; 
+/**
+ * The author's `before` / `after` lists.
+ */
+declared_before: string[]; declared_after: string[]; 
+/**
+ * The active profile's order rules that name this patch.
+ */
+profile_rules: OrderRule[]; requires: string[]; 
+/**
+ * Ids of the patches whose `requires` name this one.
+ */
+required_by: string[]; disabled: boolean; 
+/**
+ * For a glue patch, the patch it replaces.
+ */
+replaces_patch_id: string | null; 
+/**
+ * For a glue patch, its `base_mod_id`: a copy of it records the same mod (D59).
+ */
+base_mod_id?: string | null; 
+/**
+ * For an `at` pattern patch, how it runs: as one replacement or as separate edits (§6.6).
+ */
+runs_as?: RunsAsVerdict | null }
 /**
  * Telemetry record for a single patch execution on a target file.
  */
-export type PatchExecutionRecord = { patch_id: string; patch_name: string; mod_id: string; source_file: string; target_file: string; patch_type: string; priority: number; matched_count: number; expected_count: number | null; on_failure: OnFailurePolicy; status: PatchOutcomeStatus; warnings: string[]; regions: PatchRegion[] }
+export type PatchExecutionRecord = { patch_id: string; patch_name: string; mod_id: string; source_file: string; target_file: string; patch_type: string; priority: number; matched_count: number; expected_count: number | null; on_failure: OnFailurePolicy; status: PatchOutcomeStatus; warnings: string[]; regions: PatchRegion[]; 
+/**
+ * Sites where stacking put this patch's code away from today's slot (§5.3).
+ */
+stack_moves?: StackMove[]; 
+/**
+ * How the patch's anchors resolved, site by site (only for a patch with rungs).
+ */
+anchoring?: AnchorReport | null; 
+/**
+ * The profile fixes that changed this patch.
+ */
+fix_ids?: string[]; 
+/**
+ * The compatibility mods that changed this patch.
+ */
+changed_by?: string[]; 
+/**
+ * Why a rung of this patch is suspended, when one is.
+ */
+suspended?: string | null }
+/**
+ * Where a patch sits among the patches that touch one file, in application order.
+ */
+export type PatchFilePosition = { target_file: string; 
+/**
+ * 0-based position in that file's order.
+ */
+index: number; 
+/**
+ * How many patches touch that file.
+ */
+count: number }
+/**
+ * Content hashes of a patch, plus where it sits in its mod.
+ */
+export type PatchFingerprint = { v?: number; anchor: string; payload: string; 
+/**
+ * Mod-relative toml path, '/' and lowercase.
+ */
+source: string; 
+/**
+ * 1-based among the mod's patches with this primary target.
+ */
+ordinal: number; mod_version?: string | null }
+/**
+ * A compat override's fingerprint (§3.10): the content hashes are required; `source` and
+ * `ordinal` only narrow re-binding.
+ */
+export type PatchFingerprintLite = { anchor: string; payload: string; source?: string | null; ordinal?: number | null }
+/**
+ * A patch as the Fixes view names it.
+ */
+export type PatchLabel = { patch_id: string; mod_id: string; name: string | null; mod_name: string | null }
 export type PatchOutcomeStatus = "applied" | "zero_matches" | "count_mismatch" | "skipped_by_policy" | "skipped_disabled" | "aborted"
+/**
+ * A patch named by id, with its fingerprint when known.
+ */
+export type PatchRef = { id: string; mod_id: string; fp?: PatchFingerprint | null }
 export type PatchRegion = { start_line: number; end_line: number }
-export type PatchState = "applied" | "broken" | "disabled" | "skipped"
+/**
+ * What the game's patch-report.json said about the run, copied before the junction goes.
+ */
+export type PatchReportSummary = { qm_version: string; timestamp: string; profile_id: string | null; run_id: string | null; clean_exit: boolean; total_patches_applied: number; total_warnings: number; total_failures: number; builtin_matches: number; plan_error: string | null; plan_warnings: string[]; load_errors: LoadError[]; fix_bindings: FixBinding[]; launch_config_error: string | null; dll_degraded: string | null; 
+/**
+ * A diagnostic test run's trace of the watched globals (Phase E D89); else empty.
+ */
+globals_trace?: GlobalChange[]; 
+/**
+ * A diagnostic test run's count of who called the watched functions (D90).
+ */
+hook_calls?: HookCalls[] }
+/**
+ * The text of a patch for drift diffs (D41). Kept in profile.json only, never in
+ * load-order.json.
+ */
+export type PatchSnapshot = { 
+/**
+ * "pattern" | "regex" | "copy" | "module".
+ */
+kind: string; 
+/**
+ * Normalized, before `[vars]`.
+ */
+pattern: string; 
+/**
+ * Normalized, with the mod folder put back as `{{qm_hack:patch_dir}}`.
+ */
+payload: string; position: InsertPosition | null; times: number | null; 
+/**
+ * A field was over 64 KiB and was cut.
+ */
+truncated?: boolean; mod_version: string | null; taken_at: string }
+export type PatchState = "applied" | "broken" | "disabled" | "skipped" | 
+/**
+ * A module replaces the patch's file, so the game never runs it (G1).
+ */
+"not_run"
 export type PatternPatch = { pattern: string; position: InsertPosition; target: Target; payload: string; match_indent?: boolean; times?: number | null; 
 /**
  * We keep this field around for legacy compat. It doesn't do anything (and never has).
  */
-overwrite?: boolean; id: string | null; name: string | null; description?: string | null; requires?: string[]; priority: number | null; before?: string[]; after?: string[]; on_failure?: OnFailurePolicy }
+overwrite?: boolean; id: string | null; name: string | null; description?: string | null; requires?: string[]; priority: number | null; 
+/**
+ * Patches this one must run before. Each entry is a patch id (`hud_overlay`, or a full id
+ * like `gcore:main_lua:1`), `mod_id:patch_id`, or `mod_id:*` for every patch of that mod.
+ * Honoured by `patch::order`; a profile rule in `load-order.json` can override it.
+ */
+before?: string[]; 
+/**
+ * Patches this one must run after, in the same forms as `before`.
+ */
+after?: string[]; on_failure?: OnFailurePolicy; 
+/**
+ * Rungs: places on another patch's code this patch goes to first (Phase C §3.6). A bad
+ * entry is skipped and reported, and so is a value that is not a list; the patch still
+ * loads and falls back to `pattern`.
+ */
+anchors?: Rung[]; 
+/**
+ * Which of the patch's own places the rungs are for (none: all of them). A bad entry, or
+ * a value that is not a list, is skipped.
+ */
+sites?: SiteKey[]; 
+/**
+ * `"first"` or `"last"`: where this patch's block goes among the code other patches add
+ * at its line (D57). A bad value is ignored with a warning.
+ */
+stack?: StackHint | null; 
+/**
+ * `"edits"` runs an `at` patch as separate edits next to the lines it keeps (D46). Absent
+ * or `"literal"`: one replacement. A profile fix or a compat mod can change it.
+ */
+apply_as?: ApplyAs | null }
+/**
+ * A what-if change set for `simulation_preview`; nothing in it is saved.
+ */
+export type PreviewChanges = { disable?: string[]; enable?: string[]; 
+/**
+ * Each replaces the profile's rule for the same patch, as `patch_order_set` would.
+ */
+order_rules?: OrderRule[]; glue_patches?: GluePatchEntry[]; 
+/**
+ * The stacking mode to preview, as `stacking_set` would set it.
+ */
+stacking?: StackMode | null; 
+/**
+ * Fixes to add, as `fix_create` would add them. An unmigrated profile is migrated in
+ * memory first (D38).
+ */
+add_fixes?: FixDraft[]; 
+/**
+ * Ids of fixes to undo, each alone as `fix_suggestion_apply` undoes them (later fixes on
+ * the same patch stay). Done before `add_fixes`.
+ */
+remove_fixes?: string[]; 
+/**
+ * The file whose patched result to return.
+ */
+focus_file?: string | null }
+/**
+ * What a previewed change does beyond the conflict it targets.
+ */
+export type PreviewImpact = { 
+/**
+ * Game files whose patched text would change.
+ */
+files_changed: string[]; 
+/**
+ * Patches whose outcome or match count would change.
+ */
+patch_changes: PatchChange[]; 
+/**
+ * Files that compile now and would not after the change.
+ */
+compile_errors_new: string[]; 
+/**
+ * Files that do not compile now and still would not.
+ */
+compile_errors_existing: string[]; 
+/**
+ * Files that do not compile now and would after the change.
+ */
+compile_errors_fixed: string[]; 
+/**
+ * Ids of new placement warnings (code moved, wrapped or commented out by another mod).
+ */
+placement_new: string[]; 
+/**
+ * The change would stop a file from compiling; the UI does not offer Apply.
+ */
+breaks_file: boolean; 
+/**
+ * Shared lines whose code would run in a different order (§5.5).
+ */
+stack_changes?: StackChange[]; 
+/**
+ * Order rules that run a mod's patch before a mod it depends on (D39).
+ */
+relation_warnings?: RelationWarning[]; 
+/**
+ * Places where a patch would use its own line instead of the one a fix puts it on.
+ */
+fallbacks_new?: FallbackNotice[]; 
+/**
+ * Places that use their own line now and would not after the change.
+ */
+fallbacks_fixed?: FallbackNotice[]; 
+/**
+ * Fixes whose status would change (a fix the change adds or removes has no status on
+ * that side).
+ */
+fix_status_changes?: FixStatusChange[]; 
+/**
+ * Sides whose active faction would change (D73): a new faction resets that side's
+ * unlocks in the save.
+ */
+faction_changes?: FactionChange[] }
+export type PreviewResult = { file: SimulatedFileResult | null; conflicts: DetectedConflict[]; 
+/**
+ * Ids of current conflicts the changes would remove. Empty when the changes would stop a
+ * file from compiling: such a change resolves nothing.
+ */
+resolved: string[]; 
+/**
+ * Ids of conflicts the changes would add.
+ */
+new_conflicts: string[]; 
+/**
+ * Everything else the changes would do.
+ */
+impact: PreviewImpact }
 export type ProfileDiff = { profile_a_id: string; profile_b_id: string; only_in_a: string[]; only_in_b: string[]; priority_diffs: ([string, number, number])[]; setting_diffs: ([string, string, string, string])[] }
+/**
+ * One fix in the profile's ledger.
+ */
+export type ProfileFix = { 
+/**
+ * "fx_" and 12 hex chars.
+ */
+id: string; label: string; change: FixChange; provenance: Provenance; paused?: boolean; undo?: UndoRecord; 
+/**
+ * The text of A and of every patch the fix names, when it was created or accepted (D41),
+ * keyed by patch id. Kept in profile.json only, never in load-order.json.
+ */
+snapshots?: Partial<{ [key in string]: PatchSnapshot }>; 
+/**
+ * The SHA-256 of each game file the fix's patches target, keyed by the game's path, when
+ * it was created or accepted (D74). In profile.json only. Empty for fixes from before.
+ */
+vanilla_hashes?: Partial<{ [key in string]: string }> }
 export type ProfileSeparator = { id: string; title: string; color: string; insert_before_mod_id: string | null; collapsed?: boolean }
 /**
  * Fields left `None` are unchanged.
  */
-export type ProfileSettingsPatch = { launch_method: LaunchMethodChoice | null; custom_launch_args: string[] | null; disable_console: boolean | null; linked_save_profile_id: string | null }
-export type ProfileSummary = { id: string; name: string; description: string; enabled_count: number; is_active: boolean; linked_save_profile_id: string; updated_at: string }
+export type ProfileSettingsPatch = { launch_method: LaunchMethodChoice | null; custom_launch_args: string[] | null; linked_save_profile_id: string | null }
+export type ProfileSummary = { id: string; name: string; description: string; enabled_count: number; is_active: boolean; linked_save_profile_id: string; updated_at: string; 
+/**
+ * The built-in Vanilla profile: no mods, no edits.
+ */
+is_builtin: boolean }
+/**
+ * Where a fix came from.
+ */
+export type Provenance = { created_at: string; source: FixSource; conflict_id?: string | null; conflict_kind?: string | null; option_key?: string | null; 
+/**
+ * `(mod id, version)` of the mods the fix names.
+ */
+mods?: ([string, string | null])[]; approved?: ApprovedImpact | null; history?: FixEvent[] }
 export type QmError = { kind: ErrorKind; message: string; details: string | null }
 export type QmEvent = { type: "game_status_changed"; status: GameStatus } | { type: "job_progress"; id: JobId; kind: JobKind; progress: number; label: string } | { type: "job_finished"; id: JobId; kind: JobKind; error: QmError | null; output: string | null } | { type: "invalidated"; scope: Scope } | { type: "log_line"; source: LogSource; line: string } | { type: "recovered"; summary: string }
 /**
@@ -692,21 +2789,314 @@ export type QmEvent = { type: "game_status_changed"; status: GameStatus } | { ty
  * adding a Tauri dependency to `qm-service`. Serializes exactly like `QmEvent`.
  */
 export type QmEventPayload = QmEvent
-export type RegexPatch = { target: Target; pattern: string; position: InsertPosition; root_capture: string | null; payload: string; line_prepend?: string; times?: number | null; verbose?: boolean; id: string | null; name: string | null; description?: string | null; requires?: string[]; priority: number | null; before?: string[]; after?: string[]; on_failure?: OnFailurePolicy }
+export type RegexPatch = { target: Target; pattern: string; position: InsertPosition; root_capture: string | null; payload: string; line_prepend?: string; times?: number | null; verbose?: boolean; id: string | null; name: string | null; description?: string | null; requires?: string[]; priority: number | null; 
+/**
+ * Patches this one must run before. Each entry is a patch id (`hud_overlay`, or a full id
+ * like `gcore:main_lua:1`), `mod_id:patch_id`, or `mod_id:*` for every patch of that mod.
+ * Honoured by `patch::order`; a profile rule in `load-order.json` can override it.
+ */
+before?: string[]; 
+/**
+ * Patches this one must run after, in the same forms as `before`.
+ */
+after?: string[]; on_failure?: OnFailurePolicy; 
+/**
+ * Rungs: places on another patch's code this patch searches first (D52). A bad entry is
+ * skipped and reported, and so is a value that is not a list; the patch still loads and
+ * falls back to its own matches.
+ */
+anchors?: Rung[]; 
+/**
+ * Which of the patch's own matches the rungs are for (none: all of them). A bad entry,
+ * or a value that is not a list, is skipped.
+ */
+sites?: SiteKey[]; 
+/**
+ * `"first"` or `"last"`, as on a pattern patch (D57).
+ */
+stack?: StackHint | null }
+/**
+ * One region option. `draft` is none for "Pick a line inside ...", which opens the picker.
+ */
+export type RegionOption = { key: string; label: string; 
+/**
+ * The class of the loss it answers: "split" | "reemitted" | "rewritten_1to1" |
+ * "replaced_by_block" | "deleted".
+ */
+kind: string; draft: FixDraft | null; 
+/**
+ * False: greyed, with the reason.
+ */
+placement_ok: boolean; placement_reason: string | null; suggested: boolean; note: string | null; 
+/**
+ * The line as the game has it and as the other patch wrote it, side by side.
+ */
+old_text: string | null; new_text: string | null }
+/**
+ * Where a patch's code can go when another patch took its line (§9.2).
+ */
+export type RegionOptions = { target_file: string; patch_id: string; 
+/**
+ * The patch that took the line, and how.
+ */
+consumer: ConsumerInfo | null; 
+/**
+ * The patch replaces its lines (`at`): it gets no options of its own (D6).
+ */
+a_is_at: boolean; 
+/**
+ * "Move to another line" makes an adjusted copy for this patch (`at` and regex, D25).
+ */
+move_by_copy: boolean; 
+/**
+ * The patch whose places `sites` lists.
+ */
+b_patch_id: string | null; b_mod_id: string | null; 
+/**
+ * Suggested first. Each was previewed; one that fails says why in `placement_reason`.
+ */
+options: RegionOption[]; sites: RegionSite[]; 
+/**
+ * The patch's own places in the game's file, for a move of one of them (D25).
+ */
+a_sites: ASite[] }
+/**
+ * One place of another patch's change, for `anchor_candidates` in region mode.
+ */
+export type RegionRef = { patch_id: string; 
+/**
+ * The patch's site index, as `RegionSite.site` gives it.
+ */
+site: number }
+/**
+ * One place of the other patch's change.
+ */
+export type RegionSite = { site: number; 
+/**
+ * 1-based, as the patched file shows it.
+ */
+first_line: number; last_line: number; 
+/**
+ * The function the place starts in ("" at the top level).
+ */
+function: string; 
+/**
+ * Every line from the first to the last; lines the other patch did not write have no
+ * `matches_in_region`.
+ */
+lines: AnchorCandidate[]; edge_start: EdgeCheck; edge_end: EdgeCheck }
 export type ReinforcementCardSummary = { id: number; tier: number; card_type: string; sub_type: string; weapon_name: string; amount: number; cost: number }
+/**
+ * An order rule that runs `mod_id`'s patch before a patch of `depends_on`, which `mod_id`
+ * requires or loads after (D39). It warns; it does not block.
+ */
+export type RelationWarning = { 
+/**
+ * The rule's patch.
+ */
+rule: string; mod_id: string; depends_on: string; text: string }
 export type ResolvedModOrderEntry = { mod_id: string; name: string; version: string; effective_priority: number; order_index: number; 
 /**
  * Human-readable "Why is this mod at position #N?" explanation strings.
  */
 reasons: string[] }
-export type RevealKind = "logs" | "library" | "game_dir" | "profile_dir" | "save_dir" | "data_dir"
+export type RevealKind = "logs" | "library" | "game_dir" | "profile_dir" | "save_dir" | "data_dir" | 
+/**
+ * `<data>/cache/diagnostics`, where bug report bundles are written.
+ */
+"diagnostics"
+/**
+ * A ribbon's name and description, from the game's `localisation.lua` (`ribName_<N>`, `ribDesc_<N>`).
+ */
+export type RibbonInfo = { id: number; name: string; description: string }
+/**
+ * How an adjusted copy runs (D58).
+ */
+export type RunAs = 
+/**
+ * As `qm_glue`, after every mod patch (D18).
+ */
+"legacy" | 
+/**
+ * As its base mod, at the replaced patch's place in the order.
+ */
+"base"
+/**
+ * One launch of a profile.
+ */
+export type RunEntry = { run_id: string; started_at: string; 
+/**
+ * None while the run is open.
+ */
+ended_at: string | null; exit_code: number | null; 
+/**
+ * `PatchTable::stamp` of the staged plan, as hex. Equal within one launcher build means
+ * the same patches and plan.
+ */
+plan_stamp: string | null; 
+/**
+ * The staged mods in load order: id, version.
+ */
+mods: ([string, string])[]; 
+/**
+ * Ledger fixes that were not paused.
+ */
+active_fixes: string[]; report: PatchReportSummary | null; 
+/**
+ * Ids of the crash reports of this run.
+ */
+crashes: string[]; outcome: RunOutcome; 
+/**
+ * The first crash's error, the load problem, or why the outcome is unknown.
+ */
+message: string | null; trial: TrialInfo | null }
+/**
+ * How a run ended.
+ */
+export type RunOutcome = 
+/**
+ * The game quit through love.quit (the footer's clean-exit mark).
+ */
+"clean" | 
+/**
+ * A Lua error reached QuarterMaster's crash handler.
+ */
+"lua_error" | 
+/**
+ * The game could not use the plan or launch settings, or mods failed to load.
+ */
+"load_error" | 
+/**
+ * The process ended with a non-zero exit code and no clean-exit mark.
+ */
+"native_crash" | 
+/**
+ * Exit code 0 without the clean-exit mark (closed from outside love.quit).
+ */
+"closed" | 
+/**
+ * Not known: no exit code and no mark, or the run is still open. Also any outcome a
+ * newer launcher wrote.
+ */
+"unknown"
+/**
+ * One rung of a patch's anchor ladder.
+ */
+export type Rung = { 
+/**
+ * B: "mod_id:patch_id" (no mod:*).
+ */
+within?: string | null; 
+/**
+ * Needs `within`, excludes `pattern`.
+ */
+edge?: Edge | null; 
+/**
+ * Inside B if `within`, else the whole current file (a Text rung).
+ */
+pattern?: string | null; 
+/**
+ * Trimmed equality, no wildcards.
+ */
+exact?: boolean; 
+/**
+ * 1-based among the matches inside one B site; None means it must be unique.
+ */
+nth?: number | null; 
+/**
+ * Before or after only; default A's position.
+ */
+position?: InsertPosition | null; 
+/**
+ * Which of B's places to use (B's site index, 0-based), for a move to another place
+ * and for an A with no place of its own (D9).
+ */
+b_site?: number | null; 
+/**
+ * Edge rungs: short hash of B's boundary line.
+ */
+check?: string | null; b_fp?: PatchFingerprint | null }
+/**
+ * How one `at` pattern patch runs (D46, §6.6). The separate edits are worked out for every
+ * `at` patch, whatever it asks for, so the launcher can offer them.
+ */
+export type RunsAsVerdict = { patch_id: string; mod_id: string; 
+/**
+ * What it asks for: a profile fix, a compat mod or its author.
+ */
+asks: ApplyAs; 
+/**
+ * What it runs as: edits only when it asks for them and its lines pair one way.
+ */
+runs_as: ApplyAs; 
+/**
+ * Its separate edits, counted in lines, when its lines pair one way.
+ */
+edits?: EditCounts | null; 
+/**
+ * Why it cannot run as separate edits.
+ */
+refused?: EditsRefusal | null; 
+/**
+ * "Runs as 3 insertions" or "Runs as one replacement (the lines are ambiguous)".
+ */
+text: string }
+/**
+ * The line two patches both change (D49, §6.5), for the side-by-side view.
+ */
+export type SameLineDetail = { 
+/**
+ * 1-based, as the game's file numbers it.
+ */
+line: number; 
+/**
+ * The line as the game has it, trimmed.
+ */
+vanilla: string; 
+/**
+ * What patch A writes in its place, trimmed ("" when it removes the line). None when A
+ * replaces its lines as one block, so no one line of it stands for this one.
+ */
+a_text: string | null; b_text: string | null }
 export type SaveBackupEntry = { id: string; timestamp: string; label: string; path: string; size_bytes: number }
+/**
+ * What Clean up did.
+ */
+export type SaveCleanup = { 
+/**
+ * The fields taken out of the save, in file order.
+ */
+removed: string[]; 
+/**
+ * The backup made before the save was changed.
+ */
+backup_id: string }
 /**
  * Diff between two `SaveSummary` snapshots (e.g., comparing two save profiles or a save vs its backup).
  */
 export type SaveComparison = { ao_a: string; ao_b: string; day_a: number; day_b: number; day_delta: number; tp_a: number; tp_b: number; tp_delta: number; rank_a: number; rank_b: number; rank_delta: number; experience_a: number; experience_b: number; experience_delta: number; campaign_kills_a: number; campaign_kills_b: number; campaign_kills_delta: number; campaign_casualties_a: number; campaign_casualties_b: number; campaign_casualties_delta: number; classic_max_wave_a: number; classic_max_wave_b: number; classic_max_wave_delta: number; classic_kills_delta: number; soldiers_only_in_a: string[]; soldiers_only_in_b: string[]; added_soldiers: string[]; lost_soldiers: string[]; promoted_soldiers: string[]; added_mods: string[]; removed_mods: string[] }
 export type SaveCompatibilityReport = { is_safe: boolean; missing_mods_from_save: ([string, string])[]; is_tainting_vanilla_save: boolean; warning_message: string | null }
-export type SaveProfile = { id: string; name: string; is_vanilla_clean?: boolean; created_at: string; last_played_at: string | null; active_mods_fingerprint?: Partial<{ [key in string]: string }>; backups?: SaveBackupEntry[] }
+/**
+ * `save_content` in mod.json: what the mod adds that a save can hold (Phase E D87).
+ */
+export type SaveContentDecl = { 
+/**
+ * The mod's weapon tag -> the game weapon a saved one becomes while the mod is off.
+ */
+weapons: Partial<{ [key in string]: string }> }
+export type SaveProfile = { id: string; name: string; 
+/**
+ * Legacy name of `locked_vanilla`; kept in step for older readers.
+ */
+is_vanilla_clean?: boolean; tags?: SaveTags; 
+/**
+ * Locked as vanilla: no launch with mods may use it.
+ */
+locked_vanilla?: boolean; 
+/**
+ * The built-in Vanilla slot.
+ */
+builtin?: boolean; created_at: string; last_played_at: string | null; active_mods_fingerprint?: Partial<{ [key in string]: string }>; backups?: SaveBackupEntry[] }
 /**
  * Embedded `_qm_meta` mod fingerprint stamped into `saveMNB3.lua` / `saveMNB2.lua` on save.
  */
@@ -714,14 +3104,49 @@ export type SaveQmMeta = { profile_id: string | null; profile_name: string | nul
 /**
  * Map of `mod_id -> version` active when the save was written.
  */
-mods: Partial<{ [key in string]: string }> }
-export type SaveSlotSummary = { profile: SaveProfile; is_active: boolean }
+mods: Partial<{ [key in string]: string }>; 
+/**
+ * `mod_id -> save fields` that mod owned when the save was stamped (Phase E D85). Empty
+ * for a stamp from before Phase E.
+ */
+fields?: Partial<{ [key in string]: string[] }> }
+export type SaveSlotSummary = { profile: SaveProfile; is_active: boolean; 
+/**
+ * Set when the sidecar and the save file disagree about mods; the stricter answer wins.
+ */
+tamper_note: string | null; 
+/**
+ * Values in the save from mods no profile on this slot loads (Phase E D86), from the
+ * save's stamp. None when there are none or the save has no stamp.
+ */
+leftover?: LeftoverFields | null }
 /**
  * High-level defensive summary of a Mud and Blood save file (`saveMNB3.lua` or `saveMNB2.lua`).
  * Every field is optional/defaulted so partial or modded saves never fail to render.
  */
-export type SaveSummary = { file_name: string; area_of_operations: string; german_commander: string; day: number; rank: number; experience: number; tactical_points: number; total_tp_spent: number; command_points: number; campaign_kills: number; campaign_casualties: number; win_streak: number; missions_completed: number; campaign_rank: number; campaign_experience: number; classic_rank: number; classic_experience: number; classic_total_kills: number; classic_total_casualties: number; rank_title: string; campaign_rank_title: string; trench_rank_title: string; classic_max_wave: number; classic_current_wave: number; trench_rank: number; trench_xp: number; trench_axis_kills: number; trench_total_casualties: number; trench_escalation: number; free_planes: number; trench_sectors: string[]; reinforcement_cards: ReinforcementCardSummary[]; deployed_squad: SoldierSummary[]; reserve_soldiers: SoldierSummary[]; fallen_soldiers_count: number; ribbons_count: number; unlocked_classes: string[]; class_unlock_trees: Partial<{ [key in string]: string[] }>; active_battle_conditions: string[]; map_buildings_count: number; map_placeables_count: number; map_depth_px: number; fight_intensity_record: number; mod_options: Partial<{ [key in string]: number }>; qm_meta: SaveQmMeta | null; unknown_mod_keys: string[] }
-export type Scope = "mods" | "profiles" | "load_order" | "saves" | "crashes" | "health" | "settings" | "updates" | "catalog"
+export type SaveSummary = { file_name: string; area_of_operations: string; german_commander: string; day: number; rank: number; experience: number; tactical_points: number; total_tp_spent: number; command_points: number; campaign_kills: number; campaign_casualties: number; win_streak: number; missions_completed: number; campaign_rank: number; campaign_experience: number; classic_rank: number; classic_experience: number; classic_total_kills: number; classic_total_casualties: number; rank_title: string; campaign_rank_title: string; trench_rank_title: string; classic_max_wave: number; classic_current_wave: number; trench_rank: number; trench_xp: number; trench_axis_kills: number; trench_total_casualties: number; trench_escalation: number; free_planes: number; trench_sectors: string[]; reinforcement_cards: ReinforcementCardSummary[]; deployed_squad: SoldierSummary[]; reserve_soldiers: SoldierSummary[]; fallen_soldiers_count: number; ribbons_count: number; 
+/**
+ * Ribbon ids from `ribs`, in the order they were earned (`sprites/rib<N>.png`).
+ */
+ribbons: number[]; unlocked_classes: string[]; class_unlock_trees: Partial<{ [key in string]: string[] }>; active_battle_conditions: string[]; map_buildings_count: number; map_placeables_count: number; map_depth_px: number; fight_intensity_record: number; mod_options: Partial<{ [key in string]: number }>; qm_meta: SaveQmMeta | null; unknown_mod_keys: string[] }
+/**
+ * Sticky facts about a save slot (docs/specs/save-tags.md): once set, nothing in the launcher
+ * clears them, so removing mods cannot launder a modded save.
+ */
+export type SaveTags = { 
+/**
+ * Launched with mods at least once, or the save carries a `_qm_meta` stamp.
+ */
+modded?: boolean; 
+/**
+ * Changed by the save editor (reserved; nothing sets it yet).
+ */
+edited?: boolean }
+export type Scope = "mods" | "profiles" | "load_order" | "saves" | "crashes" | "health" | "settings" | "updates" | "catalog" | 
+/**
+ * The Fixes view's suggestions are ready (the fixes themselves change with `Profiles`).
+ */
+"fixes"
 export type SecurityCapability = 
 /**
  * `os.execute`, `io.popen`, `os.remove`, `os.rename`
@@ -746,26 +3171,462 @@ export type SecurityCapability =
 export type SecurityFinding = { capability: SecurityCapability; severity: string; file: string; line: number; pattern: string; snippet: string }
 export type SecurityScanReport = { capabilities: SecurityCapability[]; findings: SecurityFinding[]; has_high_risk: boolean }
 /**
- * Fields left `None` are unchanged. `github_token: Some("")` clears the token.
+ * Fields left `None` are unchanged.
  */
-export type SettingsPatch = { game_exe_path: string | null; save_dir_path: string | null; workspace_mods_dir: string | null; theme: string | null; default_launch_method: LaunchMethod | null; opt_in_prereleases: boolean | null; auto_backup_saves: boolean | null; max_save_backups: number | null; disable_console_on_launch: boolean | null; github_token: string | null }
+export type SettingsPatch = { game_exe_path: string | null; save_dir_path: string | null; workspace_mods_dir: string | null; theme: string | null; default_launch_method: LaunchMethod | null; opt_in_prereleases: boolean | null; auto_backup_saves: boolean | null; max_save_backups: number | null; disable_console_on_launch: boolean | null; debug_mode: boolean | null; dev_commands: boolean | null; auto_check_updates: boolean | null; auto_install_updates: boolean | null; 
+/**
+ * `Some(true)` unsets the workspace mods folder (`workspace_mods_dir` is ignored then).
+ */
+clear_workspace_mods_dir: boolean | null; color_vision: string | null; high_contrast: boolean | null; text_scale: number | null }
 /**
  * `LauncherSettings` without the token itself.
  */
-export type SettingsView = { game_exe_path: string | null; save_dir_path: string | null; workspace_mods_dir: string | null; theme: string; default_launch_method: LaunchMethod; opt_in_prereleases: boolean; auto_backup_saves: boolean; max_save_backups: number; disable_console_on_launch: boolean; first_run_completed: boolean; active_profile_id: string; active_save_profile_id: string; portable_mode: boolean; github_token_set: boolean; auto_update_mods: Partial<{ [key in string]: boolean }>; last_known_exe_sha256: string | null }
+export type SettingsView = { game_exe_path: string | null; save_dir_path: string | null; workspace_mods_dir: string | null; theme: string; default_launch_method: LaunchMethod; opt_in_prereleases: boolean; auto_backup_saves: boolean; max_save_backups: number; disable_console_on_launch: boolean; debug_mode: boolean; dev_commands: boolean; first_run_completed: boolean; active_profile_id: string; active_save_profile_id: string; portable_mode: boolean; auto_update_mods: Partial<{ [key in string]: boolean }>; last_known_exe_sha256: string | null; auto_check_updates: boolean; auto_install_updates: boolean; color_vision: string; high_contrast: boolean; text_scale: number }
+/**
+ * One line with code from two or more patches on one side, top to bottom.
+ */
+export type SharedStack = { target_file: string; 
+/**
+ * 1-based line of the shared line, as the file shows it.
+ */
+file_line: number; anchor_text: string; side: StackSide; 
+/**
+ * Where the line is, for example "in love.load".
+ */
+site_label: string; mode: StackMode; 
+/**
+ * In the order the game runs them.
+ */
+blocks: StackBlock[]; 
+/**
+ * Patch ids in the older order (newest first after a line, last before it).
+ */
+legacy: string[]; 
+/**
+ * `blocks` are not in the older order.
+ */
+moved: boolean; 
+/**
+ * The game's line, as a stack rule names it (D55). Its context is empty when the line is
+ * another patch's code: no rule can name it.
+ */
+site: SiteKey; 
+/**
+ * Unique per file, line and side, and the same across runs while the line is the same.
+ */
+stack_key: string }
 /**
  * Declarative visibility rule (`showIf = { id = "event_select", value = "Halloween" }`)
  * or inferred from a local helper function in `config.lua`.
  */
 export type ShowIfRule = { option_id: string; equals: ConfigValue[] }
-export type SimulatedFileResult = { target_file: string; mods_touching: string[]; records: PatchExecutionRecord[]; attributed_lines: AttributedCodeLine[]; original_line_count: number; patched_line_count: number }
-export type SimulationOverview = { total_patches: number; applied_patches: number; broken_anchors: number; conflicts: DetectedConflict[]; files: string[] }
-export type SoldierSummary = { id: number; name: string; age: number; rank: number; rank_title: string; level: number; xp: number; kills: number; hth_kills: number; shots: number; hits: number; spots: number; revive: number; mediced: number; skill: number; health: number; max_health: number; morale: number; max_morale: number; speed: number; detect_range: number; mine_detect_range: number; worth: number; state: string; specialization: string; weapon_tag: string; weapon_action: string; weapon_ammo: number; weapon_max_ammo: number; weapon_damage: number; weapon_range: number; weapon_rof: number; weapon_recoil: number; weapon_jam: number; equipment: string[]; awards_count: number; perks_count: number; combat_time: number }
+export type Side = "allied" | "axis"
+export type SimulatedFileResult = { target_file: string; mods_touching: string[]; records: PatchExecutionRecord[]; attributed_lines: AttributedCodeLine[]; original_line_count: number; patched_line_count: number; 
+/**
+ * Lines with code from two or more patches on one side (§5.5).
+ */
+stacks?: SharedStack[] }
+export type SimulationOverview = { total_patches: number; applied_patches: number; broken_anchors: number; conflicts: DetectedConflict[]; files: string[]; 
+/**
+ * One summary per touched file, in `files` order (the Patches tab's file list).
+ */
+file_stats: FileStat[]; 
+/**
+ * Whether patched files were compiled with the game's Lua.
+ */
+compile_check: CompileCheck; 
+/**
+ * load-order.json could not be used, so the game would load no mods (D16). Blocks launch.
+ */
+plan_error: string | null; 
+/**
+ * Plan entries that were skipped (D17).
+ */
+plan_warnings: string[]; 
+/**
+ * Mods that fail to load, each skipped with the mods that require it (D15). Blocks launch.
+ */
+load_errors: LoadError[]; 
+/**
+ * Plan fixes that do not apply as written, such as an adjusted copy waiting for its mod
+ * (D19). Does not block launch.
+ */
+fix_bindings: FixBinding[]; 
+/**
+ * Order rules a stronger rule replaced or ignored (§3.9).
+ */
+overridden_rules?: string[]; 
+/**
+ * Names in order rules that match no loaded patch.
+ */
+unknown_ids?: string[]; 
+/**
+ * Rungs suspended to break an order cycle; their patches use their own lines.
+ */
+suspended_rungs?: SuspendedRung[]; 
+/**
+ * Rungs that are never used, with why.
+ */
+invalid_rungs?: InvalidRung[]; 
+/**
+ * What became of each compatibility mod's overrides (§8.1).
+ */
+overrides?: OverrideReport[]; 
+/**
+ * What the newer line rules would change in the active profile, when it has not chosen
+ * yet and they change something (the `stacking_v2` notice, D51).
+ */
+line_rules_change?: LineRulesDiff | null; 
+/**
+ * Patches that fail because code they anchor on did not apply, by root (G10).
+ */
+failure_groups?: FailureGroup[]; 
+/**
+ * Patches that anchor on another patch's code (the Order view's dashed edges, G10).
+ */
+inferred_edges?: InferredEdge[] }
+/**
+ * Picks one of A's vanilla sites by its context hash. `ordinal` (1-based, among A's
+ * matches in the unpatched file) picks among sites with the same context.
+ */
+export type SiteKey = { context: string; ordinal?: number | null }
+/**
+ * One of the patch's own places, and where its code went.
+ */
+export type SiteResolution = { 
+/**
+ * Index among the patch's matches in the unpatched file (for a lost site, of the site key).
+ */
+site: number; 
+/**
+ * 1-based line in the unpatched file, in the file's own numbering (QuarterMaster's added
+ * lines are not counted). The DLL and the simulation write the same value.
+ */
+vanilla_line: number | null; 
+/**
+ * The rung that placed the code, or none when the patch used its own line.
+ */
+rung: number | null; 
+/**
+ * The patch the code went next to (`mod:patch`), or "text" for a text rung.
+ */
+anchored_on: string | null; 
+/**
+ * Why the rungs did not apply, when they did not.
+ */
+fallback: string | null; 
+/**
+ * The rung found its text although the other patch changed.
+ */
+followed: boolean; 
+/**
+ * The other patch changed since the fix was made.
+ */
+b_drift: boolean; 
+/**
+ * A chosen place that is no longer in the file.
+ */
+lost: boolean }
+export type SoldierSummary = { id: number; name: string; age: number; rank: number; rank_title: string; level: number; xp: number; kills: number; hth_kills: number; shots: number; hits: number; spots: number; revive: number; mediced: number; skill: number; health: number; max_health: number; morale: number; max_morale: number; speed: number; detect_range: number; mine_detect_range: number; worth: number; state: string; specialization: string; weapon_tag: string; weapon_action: string; weapon_ammo: number; weapon_max_ammo: number; weapon_damage: number; weapon_range: number; weapon_rof: number; weapon_recoil: number; weapon_jam: number; equipment: string[]; awards_count: number; 
+/**
+ * Icon ids of the soldier's awards (`sprites/award<N>.png`).
+ */
+award_icons: number[]; perks_count: number; combat_time: number }
 export type SolverDiagnostic = { severity: DiagnosticSeverity; mod_id: string; kind: string; message: string; related_mod_id: string | null }
+export type SpriteKind = "ribbon" | "award"
+/**
+ * One patch's code in a shared stack, with every line nested inside it.
+ */
+export type StackBlock = { patch_id: string; patch_name: string; mod_id: string; 
+/**
+ * 1-based, as the file shows it.
+ */
+first_line: number; last_line: number; 
+/**
+ * Why stacking put it here, when not in the older slot.
+ */
+reason?: StackReason | null; 
+/**
+ * Why the block cannot be moved here, when it cannot.
+ */
+locked_reason?: string | null; 
+/**
+ * The user's stack rule that placed or holds the block here (D55).
+ */
+rule_fix_id?: string | null }
+/**
+ * A shared line whose code would run in a different order.
+ */
+export type StackChange = { file: string; 
+/**
+ * 1-based, as the file shows it after the change.
+ */
+line: number; side: StackSide; anchor_text: string; 
+/**
+ * Top to bottom, now and after the change.
+ */
+before: StackBlock[]; after: StackBlock[] }
+/**
+ * An author's `stack` key (D57): the block goes to the top (`first`, its code runs first) or
+ * the bottom (`last`) of the code at its line, as far as the dependency guard allows.
+ */
+export type StackHint = "first" | "last"
+/**
+ * How patches that share an anchor line are stacked.
+ */
+export type StackMode = "legacy" | "dependencies" | "load_order"
+/**
+ * One site where a patch's code was not put in the legacy slot of a shared line, or was
+ * kept there by the guard (§5.3). Slots count the items on that side, top to bottom.
+ */
+export type StackMove = { site: number; 
+/**
+ * 1-based, in the text the patch was applied to.
+ */
+anchor_line: number; side: StackSide; legacy_slot: number; slot: number; reason: StackReason; 
+/**
+ * The patch whose code is right above this one, if any.
+ */
+below?: string | null; 
+/**
+ * The patch whose code is right below this one, if any.
+ */
+above?: string | null; 
+/**
+ * Stack rules a stronger rule beat here (D56), in plain words.
+ */
+overridden?: string[] }
+/**
+ * Why a stack slot differs from the legacy one. Ids are mod ids.
+ */
+export type StackReason = 
+/**
+ * Below the code of a mod this one depends on.
+ */
+{ kind: "below_dependency"; of: string } | 
+/**
+ * Above the code of a mod that depends on this one.
+ */
+{ kind: "above_dependent"; of: string } | { kind: "load_order" } | 
+/**
+ * A dependency sits below a dependent, so no slot fits both; the dependency wins.
+ */
+{ kind: "unsatisfiable"; below: string; above: string } | 
+/**
+ * Kept in the legacy slot: the move would cross this patch's next match.
+ */
+{ kind: "guard_clamped" } | 
+/**
+ * Placed by the user's stack rule (D55).
+ */
+{ kind: "user_rule"; fix_id: string } | 
+/**
+ * Placed by a compatibility mod's stack rule (D55).
+ */
+{ kind: "compat_rule"; mod_id: string } | 
+/**
+ * Placed by an author's `stack` key (D57): this block's own, or the hint of mod `of`'s
+ * block next to it.
+ */
+{ kind: "author_hint"; hint: StackHint; of: string }
+/**
+ * `StackSide` in the bindings (the faction `Side` has the plain name).
+ */
+export type StackSide = "before" | "after"
+/**
+ * A test plan staged in place of the profile's own (D68). Kept in `TEST_PLAN_FILE` until the
+ * profile's own plan is staged again.
+ */
+export type StagedTestPlan = { 
+/**
+ * What the test leaves out, as the user reads it; None for a run without mods.
+ */
+label: string | null; staged_at: string }
 export type StartupStatus = { done: boolean; recovered: string | null; attached_pid: number | null }
+/**
+ * What a trial leaves out for a suspect.
+ */
+export type SuspectKind = "fix" | "patch" | "mod"
+/**
+ * A rung whose order edge had to be dropped to break a cycle: the patch uses its own line.
+ */
+export type SuspendedRung = { patch_id: string; rung: number; reason: string; 
+/**
+ * "author", "profile:<fix id>" or "compat:<mod id>".
+ */
+source: string }
 export type SwitchPreview = { added_mods: string[]; removed_mods: string[]; diff: ProfileDiff; save_compatibility: SaveCompatibilityReport }
 export type Target = string | string[]
-export type UpdatesReport = { checked_at: string; github_token_configured: boolean; rate_limit_mode: string; launcher: LauncherUpdateInfo; mods: ModUpdateInfo[] }
+/**
+ * What a trial run leaves out (D68). It changes a copy of the profile in memory; the profile
+ * file is never written.
+ */
+export type TrialChanges = { 
+/**
+ * Ledger fix ids to pause.
+ */
+pause_fixes: string[]; 
+/**
+ * Patch ids to turn off.
+ */
+disable_patches: string[]; 
+/**
+ * Mod ids to turn off.
+ */
+disable_mods: string[] }
+/**
+ * Set for a safe-launch trial run (D68).
+ */
+export type TrialInfo = { 
+/**
+ * The bisect this trial belongs to; None for a single suspect test.
+ */
+bisect_id: string | null; 
+/**
+ * 1 for the first trial.
+ */
+step: number; 
+/**
+ * What the trial left out, as the user reads it ("the adjusted copy 'X'").
+ */
+label: string; pause_fixes: string[]; disable_patches: string[]; disable_mods: string[]; 
+/**
+ * The save slot the trial ran on and the backup made just before it.
+ */
+save_slot_id: string | null; save_backup_id: string | null; 
+/**
+ * The search this trial belongs to has ended (found, not found, stopped or replaced).
+ */
+search_ended?: boolean; 
+/**
+ * Set for a diagnostic test run (Phase E D91): what the game watches. Such a run
+ * leaves nothing out.
+ */
+diagnostics?: Diagnostics | null }
+/**
+ * A trial run of the active profile (D68): one launch with `changes` applied to a copy of
+ * the profile. The profile file is never written.
+ */
+export type TrialRequest = { changes: TrialChanges; 
+/**
+ * What the trial leaves out, as the user reads it.
+ */
+label: string; method?: LaunchMethod | null; 
+/**
+ * The bisect this trial belongs to; none for a single suspect test.
+ */
+bisect_id?: string | null; 
+/**
+ * 1 for the first trial (the default).
+ */
+step?: number | null }
+/**
+ * What one trial showed.
+ */
+export type TrialResult = 
+/**
+ * The problem came back without the left-out candidates.
+ */
+"crashed" | 
+/**
+ * The game ran without problems without them.
+ */
+"fine" | 
+/**
+ * Could not tell.
+ */
+"unknown"
+/**
+ * What a crash report blames, as a trial run can leave it out (D68 step 1).
+ */
+export type TrialSuspect = { kind: SuspectKind; 
+/**
+ * The fix, patch or mod id.
+ */
+id: string; 
+/**
+ * As the user reads it: `the fix "<label>"`, `the patch "<name>" of <mod>` or the mod name.
+ */
+label: string; 
+/**
+ * The fix label, patch name or mod name alone.
+ */
+name: string; changes: TrialChanges }
+/**
+ * What undoing a fix would do.
+ */
+export type UndoPreview = { impact: PreviewImpact; 
+/**
+ * Later fixes on the same patch that are undone with it.
+ */
+also_undoes: string[]; 
+/**
+ * Things the user changed since, that undo leaves as they are; the user confirms first.
+ */
+asks: string[] }
+/**
+ * How undo reverses a fix (§7.5).
+ */
+export type UndoRecord = "remove" | 
+/**
+ * Put back the order rule this fix replaced.
+ */
+{ restore_order: OrderRule | null } | 
+/**
+ * Put back the priority this fix replaced.
+ */
+{ restore_priority: number | null } | 
+/**
+ * Remove the copy, keep the disable the user had made before it (if it is still there).
+ */
+"keep_disable" | 
+/**
+ * Put back the Anchor fix this fix replaced on the same patch.
+ */
+{ restore_anchor: { label: string; anchors: Rung[]; sites?: SiteKey[]; replace_author_anchors?: boolean } } | 
+/**
+ * D36: restore `mod_priorities[move]` to `prev_priority` if it still equals the fix's
+ * priority, and remove the `user_load_after` pair if this fix added it and it is still
+ * there. Anything else changed: ask first.
+ */
+{ restore_mod_order: { prev_priority: number | null; added_load_after: boolean } } | 
+/**
+ * Put back the ApplyAs fix this fix replaced on the same patch.
+ */
+{ restore_apply_as: { label: string; mode: ApplyAs } } | 
+/**
+ * Put back the AssetChoice fix this fix replaced on the same group or slot.
+ */
+{ restore_asset_choice: { label: string; winner: string; excludes?: Partial<{ [key in string]: string[] }> } } | 
+/**
+ * Put back the SkipHunk fix this fix replaced (the same edit, or the other patch's
+ * choice on the same lines).
+ */
+{ restore_hunk: { label: string; patch: PatchRef; hunk: HunkKey; 
+/**
+ * The other SkipHunk fixes this fix replaced, each a `RestoreHunk` (the same edit
+ * and the other patch's choice can both go). Undo puts every one back.
+ */
+also?: UndoRecord[] } } | 
+/**
+ * Put back the StackRule fix this fix replaced on the same line and side: on the same
+ * patch, or on `patch`, the other block, when that rule named this patch.
+ */
+{ restore_stack: { label: string; below?: PatchRef | null; above?: PatchRef | null; patch?: PatchRef | null; 
+/**
+ * The other StackRule fixes this fix replaced, each a `RestoreStack` (the same-slot
+ * rule and the other block's rule can both go). Undo puts every one back.
+ */
+also?: UndoRecord[] } }
+export type UpdatesReport = { checked_at: string; 
+/**
+ * `normal`, or `busy` when github.com answered 429 and some mods were not checked.
+ */
+rate_limit_mode: string; launcher: LauncherUpdateInfo; mods: ModUpdateInfo[] }
+/**
+ * A name a diagnostic test run would watch, and the code checks that flagged it.
+ */
+export type WatchSuggestion = { name: string; checks: string[] }
 
 /** tauri-specta globals **/
 

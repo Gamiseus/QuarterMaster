@@ -1,5 +1,6 @@
 <script lang="ts">
   import { call } from "../../lib/api";
+  import { loadOrder } from "../../lib/stores/loadorder.svelte";
   import { commands, type SwitchPreview } from "../../lib/bindings";
   import { Button, Dialog, StencilHeading } from "../../components/ui";
   import { app } from "../../lib/stores/app.svelte";
@@ -49,8 +50,9 @@
     if (!profileId || switching) return;
     switching = true;
     try {
-      await call(commands.profileActivate(profileId));
-      prelaunch.vanilla = false;
+      // The new profile's resolution must land before Launch can pass the error gate again.
+      const id = profileId;
+      await loadOrder.whileChanging(() => call(commands.profileActivate(id)));
     } catch {
       // Routed to the banner or a toast by call().
     } finally {

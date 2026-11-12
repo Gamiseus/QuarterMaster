@@ -3,7 +3,8 @@
   import { IconGrip, IconLock, IconUnlock } from "../../components/icons";
   import { Badge, Checkbox, IconButton, Tooltip } from "../../components/ui";
   import type { ModSummary } from "../../lib/bindings";
-  import type { ModStatus } from "../../lib/modlist/status";
+  import { maxRowBadges, rowBadges, type ModStatus } from "../../lib/modlist/status";
+  import { app } from "../../lib/stores/app.svelte";
 
   interface Props {
     mod: ModSummary;
@@ -42,12 +43,15 @@
   const movedText = $derived(
     movedReasons && movedReasons.length > 0 ? movedReasons.join("; ") : "Moved by the load order solver.",
   );
-  const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+  const badges = $derived(status ? rowBadges(status, enabled, mod.kind, mod.faction) : []);
+  const max = $derived(maxRowBadges(app.settings?.text_scale ?? 1));
+  const shown = $derived(badges.slice(0, max));
+  const folded = $derived(badges.slice(max));
 </script>
 
 <div
   role="row"
-  class={["row", { selected, dimmed: !enabled, locked }]}
+  class={["row", { selected, dimmed: !enabled, locked, "one-badge": max === 1 }]}
   tabindex={tab}
   aria-selected={selected}
   aria-label={mod.name}
@@ -73,7 +77,8 @@
   <div role="gridcell" class="cell pos">{enabled && position !== null ? position : ""}</div>
   <div role="gridcell" class="cell name">
     <span class="title">{mod.name}</span>
-    {#if mod.category}
+    <!-- At large text sizes the name needs the room; the detail panel still shows the category. -->
+    {#if mod.category && max > 1}
       <Badge>{mod.category}</Badge>
     {/if}
     {#if movedReasons}
@@ -86,26 +91,21 @@
       </Tooltip>
     {/if}
   </div>
-  <div role="gridcell" class="cell version">{mod.version}</div>
+  <!-- Asset-only mods have no real version (the library files them under a placeholder). -->
+  <div role="gridcell" class="cell version">{mod.kind === "assets" ? "" : mod.version}</div>
   <div role="gridcell" class="cell status">
-    {#if status}
-      {#if !enabled}
-        <!-- Nothing of a disabled mod is applied: no health claim either way. -->
-        <Badge>{plural(status.patches, "patch", "patches")}</Badge>
-      {:else}
-        {#if status.broken > 0}
-          <Badge tone="danger">{status.broken} broken</Badge>
-        {/if}
-        {#if status.conflicts > 0}
-          <Badge tone="warn">{plural(status.conflicts, "conflict", "conflicts")}</Badge>
-        {/if}
-        {#if status.broken === 0 && status.conflicts === 0}
-          <Badge tone="ok">{plural(status.patches, "patch", "patches")}</Badge>
-        {/if}
-      {/if}
-      {#if status.updateAvailable}
-        <Badge tone="accent">Update</Badge>
-      {/if}
+    {#each shown as b (b.text)}
+      <Badge tone={b.tone}>{b.text}</Badge>
+    {/each}
+    {#if folded.length > 0}
+      {@const more = folded.map((b) => b.text).join(", ")}
+      <Tooltip text={more}>
+        {#snippet children({ props })}
+          <button {...props} type="button" class="more" tabindex={tab} aria-label={`Also: ${more}`}>
+            <Badge>+{folded.length}</Badge>
+          </button>
+        {/snippet}
+      </Tooltip>
     {/if}
   </div>
   <div role="gridcell" class="cell lock">
@@ -125,7 +125,9 @@
     display: grid;
     grid-template-columns:
       var(--qm-space-5) var(--qm-space-5) var(--qm-space-6) minmax(0, 1fr)
-      calc(var(--qm-space-6) * 2) calc(var(--qm-space-6) * 4) var(--qm-row-h);
+      7ch var(--qm-status-col) var(--qm-row-h);
+    /* Two badges with icons, in badge-text units so the column grows with the text size. */
+    --qm-status-col: calc(var(--qm-text-11) * 15);
     align-items: center;
     gap: var(--qm-space-2);
     min-height: var(--qm-row-h);
@@ -180,11 +182,27 @@
     font-size: var(--qm-text-12);
   }
 
+  /* One badge plus "+N". */
+  .row.one-badge {
+    --qm-status-col: calc(var(--qm-text-11) * 10);
+  }
+
+  /* The name keeps its room; the category tag shrinks and clips rather than overlapping the version. */
   .name {
     gap: var(--qm-space-2);
+    overflow: hidden;
+  }
+
+  .name > :global(.badge) {
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .title {
+    flex: 0 1 auto;
+    min-width: 4ch;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -195,7 +213,8 @@
     color: var(--qm-text-muted);
   }
 
-  .moved {
+  .moved,
+  .more {
     display: inline-flex;
     padding: 0;
     border: 0;

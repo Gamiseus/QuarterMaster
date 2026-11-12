@@ -1,6 +1,6 @@
 [package]
 name = "qm-core"
-version = "1.0.0"
+version = "1.2.0"
 edition = "2021"
 description = "Core runtime patch engine and mod loader for QuarterMaster (QM) in Mud and Blood"
 authors = ["QuarterMaster Team"]
@@ -24,18 +24,13 @@ serde_ignored = "0.1.10"
 itertools = "0.13.0"
 crop = "0.4.2"
 anyhow = "1.0.100"
-zip = "6.0.0"
-jiff = "0.2.35"
+zip = { workspace = true }
+jiff = { workspace = true }
 dunce = "1.0.5"
 specta = { workspace = true, optional = true }
 
 [dev-dependencies]
-criterion = { version = "0.7", default-features = false }
 tempfile = "3"
-
-[[bench]]
-name = "patches"
-harness = false
 
 [features]
 specta = ["dep:specta"]

@@ -2,6 +2,8 @@
   import { Badge, Skeleton, StencilHeading } from "../../../components/ui";
   import type { DiagnosticSeverity, ModManifest } from "../../../lib/bindings";
   import { loadOrder } from "../../../lib/stores/loadorder.svelte";
+  import { patches } from "../../../lib/stores/patches.svelte";
+  import { openPatchOrder } from "../mods-view.svelte";
 
   interface Props {
     modId: string;
@@ -18,6 +20,10 @@
   };
   const SEVERITY: Record<DiagnosticSeverity, string> = { error: "Error", warning: "Warning", info: "Info" };
 
+  const patchEntry = $derived(patches.get(modId));
+  const touched = $derived(
+    patchEntry.status === "ready" ? [...new Set(patchEntry.data.map((p) => p.target_file).filter((f) => f !== ""))].sort() : [],
+  );
   const resolution = $derived(loadOrder.resolution.status === "ready" ? loadOrder.resolution.data : null);
   const entry = $derived(resolution?.ordered_mods.find((m) => m.mod_id === modId) ?? null);
   const diagnostics = $derived(
@@ -74,6 +80,18 @@
     {/if}
   </section>
 
+  {#if touched.length > 0}
+    <section>
+      <StencilHeading level={3}>Patch order</StencilHeading>
+      <p class="qm-muted">Where this mod's patches run in each file it changes.</p>
+      <ul class="list">
+        {#each touched as f (f)}
+          <li><button type="button" class="file-link" onclick={() => openPatchOrder(f)}>{f}</button></li>
+        {/each}
+      </ul>
+    </section>
+  {/if}
+
   {#if diagnostics.length > 0}
     <section>
       <StencilHeading level={3}>Diagnostics</StencilHeading>
@@ -90,6 +108,22 @@
 </div>
 
 <style>
+  .file-link {
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--qm-accent-text);
+    font-family: var(--qm-font-mono);
+    font-size: var(--qm-text-12);
+    text-decoration: underline;
+    cursor: pointer;
+  }
+
+  .file-link:focus-visible {
+    outline: none;
+    box-shadow: var(--qm-focus-ring);
+  }
+
   .load-order {
     display: flex;
     flex-direction: column;

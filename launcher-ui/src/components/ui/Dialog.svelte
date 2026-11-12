@@ -13,6 +13,10 @@
     corners?: boolean;
     /** "first" focuses the first control in the body on open; "content" focuses the dialog itself. Never Close. */
     initialFocus?: "first" | "content";
+    /** "lg" widens the dialog to --qm-dialog-lg (clamped to the viewport). */
+    size?: "md" | "lg";
+    /** False keeps the dialog open: Escape, an outside click and Close do nothing (e.g. while a confirm runs). */
+    dismissible?: boolean;
     children?: Snippet;
   }
 
@@ -23,6 +27,8 @@
     footer,
     corners = true,
     initialFocus = "first",
+    size = "md",
+    dismissible = true,
     children,
   }: Props = $props();
 
@@ -62,33 +68,50 @@
     }
   }
 
-  /** Open focus goes to the first usable control in the body (or the dialog itself); never to Close, whose tooltip would pop up. */
+  /** While not dismissible, Escape and an outside click do nothing. */
+  function holdOpen(e: Event) {
+    if (!dismissible) e.preventDefault();
+  }
+
+  /** Open focus goes to a usable `[data-autofocus]` control anywhere in the dialog, else the first usable control in
+   * the body (or the dialog itself); never to Close, whose tooltip would pop up. */
   function onOpenAutoFocus(e: Event) {
     e.preventDefault();
+    const marked = [...(content?.querySelectorAll<HTMLElement>("[data-autofocus]") ?? [])].find(usable);
     const first =
-      initialFocus === "first"
+      marked ??
+      (initialFocus === "first"
         ? [...(body?.querySelectorAll<HTMLElement>(FOCUSABLE) ?? [])].find(usable)
-        : undefined;
+        : undefined);
     (first ?? content)?.focus();
     // A control that refused focus must not leave it outside the dialog.
     if (content && !content.contains(document.activeElement)) content.focus();
   }
 </script>
 
-<Dialog.Root bind:open>
+<Dialog.Root
+  bind:open={() => open, (v) => {
+    if (v || dismissible) open = v;
+  }}
+>
   <Dialog.Portal>
     <Dialog.Overlay class="qm-dialog-overlay" />
-    <Dialog.Content class={["qm-dialog", { "qm-corners": corners }]} tabindex={-1} bind:ref={content} {onOpenAutoFocus} {onkeydown}>
+    <Dialog.Content class={["qm-dialog", `qm-dialog-${size}`, { "qm-corners": corners }]} tabindex={-1} bind:ref={content}
+      onEscapeKeydown={holdOpen}
+      onInteractOutside={holdOpen}
+      {onOpenAutoFocus}
+      {onkeydown}
+    >
       <header class="head">
-        <Dialog.Title class="title">{title}</Dialog.Title>
+        <Dialog.Title class="qm-dialog-title">{title}</Dialog.Title>
         <Dialog.Close>
           {#snippet child({ props })}
-            <IconButton icon={IconClose} label="Close" {...props} />
+            <IconButton icon={IconClose} label="Close" {...props} disabled={!dismissible} />
           {/snippet}
         </Dialog.Close>
       </header>
       {#if description}
-        <Dialog.Description class="description">{description}</Dialog.Description>
+        <Dialog.Description class="qm-dialog-description">{description}</Dialog.Description>
       {/if}
       {#if children}
         <div class="body" bind:this={body}>{@render children()}</div>
@@ -127,6 +150,10 @@
     color: var(--qm-text);
   }
 
+  :global(.qm-dialog.qm-dialog-lg) {
+    width: min(var(--qm-dialog-lg), calc(100vw - var(--qm-space-6)));
+  }
+
   :global(.qm-dialog:focus-visible) {
     box-shadow: none;
   }
@@ -138,7 +165,7 @@
     gap: var(--qm-space-3);
   }
 
-  :global(.qm-dialog .title) {
+  :global(.qm-dialog-title) {
     margin: 0;
     font-family: var(--qm-font-stencil);
     font-size: var(--qm-text-16);
@@ -147,7 +174,7 @@
     text-transform: uppercase;
   }
 
-  :global(.qm-dialog .description) {
+  :global(.qm-dialog-description) {
     margin: 0;
     color: var(--qm-text-muted);
     font-size: var(--qm-text-13);

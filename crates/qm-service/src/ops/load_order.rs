@@ -1,14 +1,19 @@
 //! Load order, simulation and conflict operations, plus the `WarmVanilla` and `Simulation` jobs.
 use crate::cache::{Loadable, VanillaFiles};
-use crate::dto::{FileDiff, LoadOrderUpdate, SimulationOverview};
+use crate::dto::{FileDiff, FileStat, LoadOrderUpdate, PatchState, SimulationOverview};
 use crate::error::{ErrorKind, OrKind, QmError, QmResult};
 use crate::events::Scope;
 use crate::jobs::{JobCtx, JobId, JobKind};
 use crate::service::Service;
+use qm_core::compile::LuaCompiler;
+use qm_core::patch::edits::ApplyAs;
+use qm_core::patch::plan::{FpMode, RawLoad};
 use qm_core::patch::table::PatchTable;
+use qm_manager::conflict::{ResolutionCheck, ResolutionImpact};
+use qm_manager::fixes::{self, FixSource, Provenance};
 use qm_manager::{
-    resolve_load_order, simulate_and_analyze_patches, ConflictResolutionSuggestion,
-    LoadOrderResolution, ModProfile, SimulationReport,
+    resolve_load_order, simulate_and_analyze_patches_with, ConflictResolutionSuggestion,
+    LoadOrderResolution, ModProfile, SimulationOptions, SimulationReport,
 };
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -33,10 +38,53 @@ impl Service {
             applied_patches: to_u32(r.applied_patches),
             broken_anchors: to_u32(r.broken_anchors),
             conflicts: r.conflicts.clone(),
+            compile_check: r.compile_check.clone(),
+            plan_error: r.plan_error.clone(),
+            plan_warnings: r.plan_warnings.clone(),
+            load_errors: r.load_errors.clone(),
+            fix_bindings: r.fix_bindings.clone(),
+            overridden_rules: r.overridden_rules.clone(),
+            unknown_ids: r.unknown_ids.clone(),
+            suspended_rungs: r.suspended_rungs.clone(),
+            invalid_rungs: r.invalid_rungs.clone(),
+            overrides: r.overrides.clone(),
+            line_rules_change: self.line_rules_change(),
+            failure_groups: r.failure_groups.clone(),
+            inferred_edges: r.inferred_edges.clone(),
             files: r
                 .files_touched
                 .iter()
                 .map(|f| f.target_file.clone())
+                .collect(),
+            file_stats: r
+                .files_touched
+                .iter()
+                .map(|f| FileStat {
+                    target_file: f.target_file.clone(),
+                    original_lines: to_u32(f.original_line_count),
+                    patched_lines: to_u32(f.patched_line_count),
+                    patches: to_u32(
+                        f.records
+                            .iter()
+                            .map(|x| x.patch_id.as_str())
+                            .collect::<std::collections::BTreeSet<_>>()
+                            .len(),
+                    ),
+                    mods: f.mods_touching.clone(),
+                    broken: to_u32(
+                        f.records
+                            .iter()
+                            .filter(|x| crate::ops::patches::state_of(x) == PatchState::Broken)
+                            .count(),
+                    ),
+                    // Info notes (`multi_match`) are not conflicts.
+                    conflicts: to_u32(
+                        r.conflicts
+                            .iter()
+                            .filter(|c| c.target_file == f.target_file && c.severity != "info")
+                            .count(),
+                    ),
+                })
                 .collect(),
         })
     }
@@ -86,19 +134,15 @@ impl Service {
 
     pub fn patch_set_enabled(&self, patch_id: &str, enabled: bool) -> QmResult<()> {
         self.ensure_not_running()?;
-        let mut p = self.active_profile()?;
+        let (mut p, raw) = self.writable_profile()?;
         // A patch can be listed by its record id or its `<mod>:<name>` id; treat both as one.
-        let aliases = self.patch_aliases(patch_id);
-        if enabled {
-            p.disabled_patches.retain(|x| !aliases.contains(x));
-        } else if !p.disabled_patches.iter().any(|x| aliases.contains(x)) {
-            p.disabled_patches.push(patch_id.to_string());
-        }
+        let table = self.inner.caches.patch_table.get();
+        self.set_patch_enabled_in(&mut p, raw.as_deref(), table.as_deref(), patch_id, enabled);
         self.commit_active_profile(p).map(|_| ())
     }
 
     /// `patch_id` plus the other id form of every simulated record it names.
-    fn patch_aliases(&self, patch_id: &str) -> Vec<String> {
+    pub(crate) fn patch_aliases(&self, patch_id: &str) -> Vec<String> {
         let mut out = vec![patch_id.to_string()];
         let Some(report) = self.inner.caches.simulation.get() else {
             return out;
@@ -144,7 +188,30 @@ impl Service {
             }
         }
         self.ensure_not_running()?;
-        let mut p = self.active_profile()?;
+        // Edits-mode and skipped-edit fixes live only in the fix ledger, so a profile whose
+        // fixes could not be imported is refused with why.
+        let ledger_only = matches!(
+            suggestion,
+            ConflictResolutionSuggestion::ApplyAs { .. }
+                | ConflictResolutionSuggestion::SkipHunk { .. }
+        );
+        let (mut p, raw) = if ledger_only {
+            self.ledger_profile()?
+        } else {
+            self.writable_profile()?
+        };
+        let not_imported = || {
+            QmError::new(
+                ErrorKind::InvalidInput,
+                format!("{}.", super::fixes::MSG_IMPORT),
+            )
+        };
+        // Every conflict-driven fix records its conflict, so "Resolved by" finds it.
+        let mut provenance = Provenance::new(FixSource::Resolver);
+        if let Some((id, kind)) = self.conflict_of(&suggestion) {
+            provenance.conflict_id = Some(id);
+            provenance.conflict_kind = Some(kind);
+        }
         match suggestion {
             ConflictResolutionSuggestion::SwapModOrder {
                 move_mod_id,
@@ -152,16 +219,40 @@ impl Service {
                 suggested_priority,
                 ..
             } => {
-                p.mod_priorities
-                    .insert(move_mod_id.clone(), suggested_priority);
-                let after = p.user_load_after.entry(before_mod_id).or_default();
-                if !after.contains(&move_mod_id) {
-                    after.push(move_mod_id);
+                let (graph, _) = self.enabled_graph(&p);
+                if graph.depends_on(&move_mod_id, &before_mod_id) {
+                    let names = self.mod_names();
+                    let name = |m: &str| {
+                        names
+                            .get(&m.to_lowercase())
+                            .cloned()
+                            .unwrap_or_else(|| m.to_string())
+                    };
+                    return Err(QmError::new(
+                        ErrorKind::InvalidInput,
+                        format!(
+                            "{} needs {} to load first, so it cannot load before it.",
+                            name(&move_mod_id),
+                            name(&before_mod_id)
+                        ),
+                    ));
                 }
+                fixes::op_mod_order(
+                    &mut p,
+                    raw.as_deref(),
+                    &move_mod_id,
+                    &before_mod_id,
+                    suggested_priority,
+                    provenance,
+                );
             }
             ConflictResolutionSuggestion::GenerateGluePatch { glue_patch, .. } => {
-                p.glue_patches.retain(|g| g.id != glue_patch.id);
-                p.glue_patches.push(glue_patch);
+                fixes::op_glue_add(&mut p, raw.as_deref(), glue_patch, false, provenance);
+                // A copy is checked against the simulation first (D63).
+                let check = self.check_profile_change(&p)?;
+                if let Some(why) = check.refusal() {
+                    return Err(QmError::new(ErrorKind::Conflict, why));
+                }
             }
             ConflictResolutionSuggestion::SelectWinner {
                 patch_a_id,
@@ -173,12 +264,66 @@ impl Service {
                 } else {
                     patch_a_id
                 };
-                if !p.disabled_patches.contains(&loser) {
-                    p.disabled_patches.push(loser);
+                let aliases = std::collections::HashSet::from([loser.clone()]);
+                fixes::op_disable(&mut p, raw.as_deref(), &loser, &aliases, provenance);
+            }
+            ConflictResolutionSuggestion::ApplyAs { patch_id, .. } => {
+                // As the resolver's ApplyAs draft (D46).
+                let table = self.inner.caches.patch_table.get();
+                super::fixes::check_apply_as_draft(table.as_deref(), &patch_id)?;
+                fixes::op_apply_as_set(
+                    &mut p,
+                    raw.as_deref(),
+                    &patch_id,
+                    ApplyAs::Edits,
+                    None,
+                    provenance,
+                )
+                .ok_or_else(not_imported)?;
+                // Checked against the simulation first, as a copy is (D63).
+                let check = self.check_profile_change(&p)?;
+                if let Some(why) = check.refusal() {
+                    return Err(QmError::new(ErrorKind::Conflict, why));
+                }
+            }
+            ConflictResolutionSuggestion::SkipHunk {
+                patch_id,
+                ordinal,
+                keep_patch_id,
+                ..
+            } => {
+                let raw = raw.as_deref().ok_or_else(|| {
+                    QmError::new(ErrorKind::Conflict, "The profile's mods could not be read.")
+                })?;
+                let hunk = fixes::hunk_key(raw, &patch_id, ordinal, Some(keep_patch_id))
+                    .map_err(|e| QmError::new(ErrorKind::InvalidInput, e))?;
+                fixes::op_hunk_skip(&mut p, Some(raw), &patch_id, hunk, None, provenance)
+                    .ok_or_else(not_imported)?;
+                // Checked against the simulation first, as a copy is (D63).
+                let check = self.check_profile_change(&p)?;
+                if let Some(why) = check.refusal() {
+                    return Err(QmError::new(ErrorKind::Conflict, why));
                 }
             }
         }
         self.commit_active_profile(p).map(|_| ())
+    }
+
+    /// `changed` (the active profile with a resolution in it) through the preview, as
+    /// `qm_manager::conflict::check_resolution` judges it: it may not break a file or add a
+    /// conflict (D63). Fails when the simulation is not ready.
+    fn check_profile_change(&self, changed: &ModProfile) -> QmResult<ResolutionCheck> {
+        // A UI preview started meanwhile must not cancel this check.
+        let r = self.preview_check(&|_, _, _, _| Ok((changed.clone(), Vec::new())))?;
+        Ok(ResolutionCheck {
+            impact: ResolutionImpact {
+                files_changed: r.impact.files_changed,
+                resolved: r.resolved,
+                compile_errors_new: r.impact.compile_errors_new,
+            },
+            breaks_file: r.impact.breaks_file,
+            new_conflicts: r.new_conflicts,
+        })
     }
 
     /// Request the `WarmVanilla` job: extract and load the vanilla Lua files, then simulate.
@@ -204,10 +349,22 @@ impl Service {
                     .paths()
                     .load_vanilla_lua_files(Some(exe))
                     .or_kind(ErrorKind::Io)?;
+                // The archive lists every asset; without one, only what the sources name.
+                let listing = qm_manager::vanilla_assets::VanillaAssetListing::load_or_build(&info);
+                let sources = files.values().map(String::as_str);
+                let assets = match &listing {
+                    Some(l) => qm_core::patch::loader::VanillaAssetIndex::from_archive_paths(
+                        l.paths(),
+                        sources,
+                    ),
+                    None => qm_core::patch::loader::VanillaAssetIndex::from_lua_sources(sources),
+                };
                 Ok(VanillaFiles {
                     game_version,
                     info: Some(info),
                     files,
+                    assets: Some(Arc::new(assets)),
+                    listing: listing.map(Arc::new),
                 })
             })(),
         };
@@ -223,6 +380,8 @@ impl Service {
             self.inner.caches.vanilla.set(Arc::new(vanilla));
             // Any simulation computed before this point used other vanilla files.
             self.inner.caches.simulation.clear();
+            self.inner.caches.patch_table.clear();
+            self.inner.caches.raw_load.clear();
             g.sim = g.sim.wrapping_add(1);
             true
         });
@@ -242,38 +401,111 @@ impl Service {
     /// One `Simulation` pass; emits `Invalidated { LoadOrder }` once the report is cached.
     pub(crate) fn simulation_pass(&self, ctx: &JobCtx) -> QmResult<Option<String>> {
         let gen = self.generations().sim;
+        let writes = self.profile_writes();
+        // Test seam (`testing::on_next_simulation_pass`).
+        let hook = self
+            .inner
+            .on_simulation_pass
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take();
+        if let Some(hook) = hook {
+            hook();
+        }
         let Some(vanilla) = self.inner.caches.vanilla.get() else {
             // WarmVanilla requests a simulation once it has stored the files.
             return Ok(None);
         };
         ctx.progress(0.1, "Simulating patches");
-        let (report, err) = self.simulate(&vanilla);
+        let (report, table, raw, err) = self.simulate(&vanilla);
+        let line_rules = self.line_rules_pass(&table, &vanilla);
+        let report = Arc::new(report);
         let stored = self.with_gens(|g| {
             if g.sim != gen {
                 return false;
             }
-            self.inner.caches.simulation.set(Arc::new(report));
+            self.inner.caches.simulation.set(report.clone());
+            self.inner
+                .caches
+                .line_rules
+                .set((report.clone(), line_rules.clone()));
+            self.inner.caches.patch_table.set(Arc::new(table));
+            match raw {
+                Some(raw) => self.inner.caches.raw_load.set(Arc::new(raw)),
+                None => self.inner.caches.raw_load.clear(),
+            }
             true
         });
         if stored {
             self.notify(Scope::LoadOrder);
+            // The game files and the mod load are both there now (D74).
+            self.stamp_pending_fixes(gen, writes);
+            self.refresh_asset_choices(gen, writes);
         }
         // Not stored: inputs changed mid-pass and a newer pass is already requested.
         err.map_or(Ok(None), Err)
     }
 
-    /// Report for the active profile. Patch load errors yield an empty report plus the error.
-    fn simulate(&self, vanilla: &VanillaFiles) -> (SimulationReport, Option<QmError>) {
-        let active = self.paths().load_settings().active_profile_id;
-        let mods_dir = self.paths().profiles_dir.join(active).join("Mods");
+    /// The line rules comparison (D51) for the active profile, once per simulation: only when
+    /// the profile has no answer and the rules can change its output (never in the pre-launch
+    /// or Fixes read paths).
+    fn line_rules_pass(
+        &self,
+        table: &PatchTable,
+        vanilla: &VanillaFiles,
+    ) -> Option<Arc<qm_manager::line_rules::LineRulesDiff>> {
+        let answer = self.active_profile().ok()?.line_rules_v2;
+        if !qm_manager::line_rules::needs_comparison(answer, table) {
+            return None;
+        }
+        self.inner
+            .caches
+            .line_rules_passes
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let launch = qm_core::handshake::LaunchConfig::default();
+        Some(Arc::new(qm_manager::line_rules::compare(
+            table,
+            &vanilla.files,
+            &launch,
+        )))
+    }
+
+    /// What the line rules would change in the active profile (D51), when the cached
+    /// simulation compared them and the game output differs.
+    pub(crate) fn line_rules_change(&self) -> Option<qm_manager::line_rules::LineRulesDiff> {
+        let report = self.inner.caches.simulation.get()?;
+        let (of, diff) = self.inner.caches.line_rules.get()?;
+        if !Arc::ptr_eq(&report, &of) {
+            return None;
+        }
+        diff.filter(|d| d.changes_output()).map(|d| (*d).clone())
+    }
+
+    /// Report for the active profile. Like the game, a mod that fails to load is skipped with
+    /// its requirers and a bad plan loads no mods; both are in the report (D15, D16). Only an
+    /// unreadable Mods folder yields an empty report plus the error.
+    #[allow(clippy::type_complexity)]
+    fn simulate(
+        &self,
+        vanilla: &VanillaFiles,
+    ) -> (
+        SimulationReport,
+        PatchTable,
+        Option<RawLoad>,
+        Option<QmError>,
+    ) {
+        let mods_dir = self.staged_mods_dir();
         if !mods_dir.is_dir() {
             // Never staged: nothing to simulate.
-            return (empty_report(), None);
+            return (empty_report(), PatchTable::default(), None, None);
         }
-        match PatchTable::load(&mods_dir) {
-            Ok(table) => (simulate_and_analyze_patches(&table, &vanilla.files), None),
+        // Every fingerprint is checked, so drift shows; the patches are the DLL's.
+        match PatchTable::load_with_raw_fp(&mods_dir, FpMode::All) {
+            Ok((table, raw)) => (self.simulate_table(&table, vanilla), table, raw, None),
             Err(e) => (
                 empty_report(),
+                PatchTable::default(),
+                None,
                 Some(
                     QmError::new(
                         ErrorKind::InvalidInput,
@@ -283,6 +515,62 @@ impl Service {
                 ),
             ),
         }
+    }
+
+    /// The active profile's staged `Mods` folder.
+    pub(crate) fn staged_mods_dir(&self) -> std::path::PathBuf {
+        let active = self.paths().load_settings().active_profile_id;
+        self.paths().profiles_dir.join(active).join("Mods")
+    }
+
+    /// Runs the simulation on `table`, with the compile check when the game's Lua is available.
+    pub(crate) fn simulate_table(
+        &self,
+        table: &PatchTable,
+        vanilla: &VanillaFiles,
+    ) -> SimulationReport {
+        let lua = self.lua_compiler();
+        let mut report = simulate_and_analyze_patches_with(
+            table,
+            &vanilla.files,
+            SimulationOptions {
+                compiler: lua.as_ref().ok().map(|c| c.as_ref()),
+                // The staged launch-config.json, read once per run.
+                launch: None,
+            },
+        );
+        if let Err(why) = lua {
+            report.compile_check.note = Some(why);
+        }
+        report
+    }
+
+    /// The game's `lua51.dll`, loaded once per path, or why the compile check cannot run.
+    pub(crate) fn lua_compiler(&self) -> Result<Arc<LuaCompiler>, String> {
+        let dir = self
+            .paths()
+            .load_settings()
+            .game_exe_path
+            .and_then(|p| p.parent().map(|d| d.to_path_buf()))
+            .ok_or("The game folder is not set, so patched files were not compiled.")?;
+        let dll = LuaCompiler::find(&dir)
+            .ok_or("The game's lua51.dll was not found, so patched files were not compiled.")?;
+        let mut slot = self
+            .inner
+            .caches
+            .lua
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        if let Some((p, c)) = slot.as_ref() {
+            if *p == dll {
+                return c.clone();
+            }
+        }
+        let loaded = LuaCompiler::load(&dll)
+            .map(Arc::new)
+            .map_err(|e| format!("Patched files were not compiled: {e}."));
+        *slot = Some((dll, loaded.clone()));
+        loaded
     }
 
     fn resolve_for(&self, p: &ModProfile) -> LoadOrderResolution {
@@ -312,6 +600,8 @@ fn empty_vanilla() -> VanillaFiles {
         game_version: String::new(),
         info: None,
         files: HashMap::new(),
+        assets: None,
+        listing: None,
     }
 }
 
@@ -323,6 +613,24 @@ fn empty_report() -> SimulationReport {
         total_patches: 0,
         applied_patches: 0,
         broken_anchors: 0,
+        order_diagnostics: Vec::new(),
+        traces: Default::default(),
+        compile_check: Default::default(),
+        plan_error: None,
+        plan_warnings: Vec::new(),
+        load_errors: Vec::new(),
+        fix_bindings: Vec::new(),
+        overridden_rules: Vec::new(),
+        unknown_ids: Vec::new(),
+        suspended_rungs: Vec::new(),
+        invalid_rungs: Vec::new(),
+        overrides: Vec::new(),
+        losses: Vec::new(),
+        kept_anchors: Vec::new(),
+        runs_as: Vec::new(),
+        failure_groups: Vec::new(),
+        inferred_edges: Vec::new(),
+        save_fields: Default::default(),
     }
 }
 

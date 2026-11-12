@@ -21,9 +21,108 @@ pub struct ResolvedModOrderEntry {
 pub struct SolverDiagnostic {
     pub severity: DiagnosticSeverity,
     pub mod_id: String,
-    pub kind: String, // "missing_dependency" | "version_mismatch" | "conflict" | "game_version" | "cycle" | "recommendation"
+    pub kind: String, // "missing_dependency" | "version_mismatch" | "conflict" | "game_version" | "cycle" | "recommendation" | "patch_cycle" | "qm_gate" | "qm_gate_requirer"
     pub message: String,
     pub related_mod_id: Option<String>,
+}
+
+/// One `patch_cycle` warning per order cycle the engine broke (`qm_core::patch::order`).
+/// `cycle` holds patch names (`mod_id:patch_id`) in order: each was meant to run before the next.
+pub fn patch_cycle_diagnostics(cycles: &[Vec<String>]) -> Vec<SolverDiagnostic> {
+    let mod_of = |name: &str| name.split(':').next().unwrap_or(name).to_string();
+    cycles
+        .iter()
+        .filter(|c| !c.is_empty())
+        .map(|c| SolverDiagnostic {
+            severity: DiagnosticSeverity::Warning,
+            mod_id: mod_of(&c[0]),
+            kind: "patch_cycle".to_string(),
+            message: format!(
+                "These patches each have to run before the next, which cannot all hold: {} (and back to the first). One of these order rules was ignored.",
+                c.join(", then ")
+            ),
+            related_mod_id: c.get(1).map(|n| mod_of(n)),
+        })
+        .collect()
+}
+
+/// D61: an error for every enabled mod whose mod.json `min_qm` or `qm_features` this
+/// QuarterMaster cannot meet (`qm_core::features`), and one for every enabled mod that
+/// requires such a mod, directly or through another skipped mod (by id or `provides`, case
+/// insensitive, unless a mod still loaded offers it). The DLL's loader skips the same mods.
+pub fn gate_diagnostics(
+    enabled: &[ModManifest],
+    qm_version: &str,
+    features: &[&str],
+) -> Vec<SolverDiagnostic> {
+    let keys = |m: &ModManifest| -> Vec<String> {
+        std::iter::once(&m.id)
+            .chain(&m.relationships.provides)
+            .map(|k| k.to_lowercase())
+            .collect()
+    };
+    let mut out = Vec::new();
+    let mut skipped = vec![false; enabled.len()];
+    // Lost key -> the gated mod it traces back to.
+    let mut lost: HashMap<String, &ModManifest> = HashMap::new();
+    for (m, skip) in enabled.iter().zip(skipped.iter_mut()) {
+        let Some(why) = qm_core::features::gate_error_with(m, qm_version, features) else {
+            continue;
+        };
+        *skip = true;
+        for k in keys(m) {
+            lost.entry(k).or_insert(m);
+        }
+        out.push(SolverDiagnostic {
+            severity: DiagnosticSeverity::Error,
+            mod_id: m.id.clone(),
+            kind: "qm_gate".to_string(),
+            message: format!("'{}' {why}. The game skips it.", m.name),
+            related_mod_id: None,
+        });
+    }
+    loop {
+        let available: HashSet<String> = enabled
+            .iter()
+            .zip(&skipped)
+            .filter(|(_, s)| !**s)
+            .flat_map(|(m, _)| keys(m))
+            .collect();
+        let mut changed = false;
+        for (m, skip) in enabled.iter().zip(skipped.iter_mut()) {
+            if *skip {
+                continue;
+            }
+            let mut requires: Vec<String> =
+                m.relationships.requires.keys().map(|k| k.to_lowercase()).collect();
+            requires.sort();
+            let Some(root) = requires
+                .iter()
+                .filter(|k| !available.contains(*k))
+                .find_map(|k| lost.get(k).copied())
+            else {
+                continue;
+            };
+            *skip = true;
+            changed = true;
+            for k in keys(m) {
+                lost.entry(k).or_insert(root);
+            }
+            out.push(SolverDiagnostic {
+                severity: DiagnosticSeverity::Error,
+                mod_id: m.id.clone(),
+                kind: "qm_gate_requirer".to_string(),
+                message: format!(
+                    "'{}' requires '{}', which this QuarterMaster cannot run, so the game skips it too.",
+                    m.name, root.name
+                ),
+                related_mod_id: Some(root.id.clone()),
+            });
+        }
+        if !changed {
+            return out;
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -123,7 +222,12 @@ pub fn resolve_load_order(
         }
     }
 
-    // 1. Validate dependencies, conflicts, and game_version
+    // 1. Validate QuarterMaster gates, dependencies, conflicts, and game_version
+    diagnostics.extend(gate_diagnostics(
+        enabled_manifests,
+        qm_core::QM_VERSION,
+        qm_core::QM_FEATURES,
+    ));
     for m in enabled_manifests {
         // Check game_version compatibility
         if let (Some(ref req_str), Some(ref actual_gv)) = (&m.game_version, &parsed_game_ver) {
@@ -443,5 +547,151 @@ mod tests {
             .reasons
             .iter()
             .any(|r| r.contains("Loads after 'gcore'")));
+    }
+
+    const GATED: &[(&str, &str)] = &[
+        ("Gated", r#"{"id":"gated","name":"Gated","version":"1.0.0","relationships":{"provides":["gated-api"]}GATES}"#),
+        ("NeedsGated", r#"{"id":"needs_gated","name":"Needs","version":"1.0.0","relationships":{"requires":{"Gated":"*"}}}"#),
+        ("NeedsApi", r#"{"id":"needs_api","name":"Api","version":"1.0.0","relationships":{"requires":{"gated-api":"*"}}}"#),
+        ("NeedsNeeds", r#"{"id":"needs_needs","name":"Deep","version":"1.0.0","relationships":{"requires":{"needs_gated":"*"}}}"#),
+        ("Other", r#"{"id":"other","name":"Other","version":"1.0.0"}"#),
+    ];
+
+    fn gated_manifests(gates: &str) -> Vec<(&'static str, String)> {
+        GATED
+            .iter()
+            .map(|(folder, json)| (*folder, json.replace("GATES", gates)))
+            .collect()
+    }
+
+    /// Mod id -> (kind, related) of every gate diagnostic.
+    fn gates_of(diags: &[SolverDiagnostic]) -> Vec<(String, String, Option<String>)> {
+        let mut v: Vec<_> = diags
+            .iter()
+            .filter(|d| d.kind.starts_with("qm_gate"))
+            .map(|d| (d.mod_id.clone(), d.kind.clone(), d.related_mod_id.clone()))
+            .collect();
+        v.sort();
+        v
+    }
+
+    fn resolve(manifests: &[ModManifest]) -> LoadOrderResolution {
+        resolve_load_order(manifests, &HashMap::new(), &HashMap::new(), Some("0.5.3b"))
+    }
+
+    #[test]
+    fn the_solver_reports_the_same_gates_as_the_loader() {
+        // A gated mod with no content (only a mod.json, a library others require) fails the
+        // same way as one with patches.
+        for (gates, contentless) in [
+            r#","qm_features":["overrides","teleport"]"#,
+            r#","min_qm":"999.0.0""#,
+            r#","min_qm":"soon""#,
+            r#","min_qm":"1.0.0","qm_features":["anchors"]"#,
+        ]
+        .into_iter()
+        .flat_map(|g| [(g, false), (g, true)])
+        {
+            let manifests = gated_manifests(gates);
+            let temp = tempfile::tempdir().unwrap();
+            for (folder, json) in &manifests {
+                let dir = temp.path().join(folder);
+                std::fs::create_dir_all(&dir).unwrap();
+                std::fs::write(dir.join("mod.json"), json).unwrap();
+                if contentless && *folder == "Gated" {
+                    continue;
+                }
+                let toml = format!(
+                    "[manifest]\nversion = \"1.0.0\"\n\n[[patches]]\n[patches.copy]\ntarget = \"{folder}.lua\"\nposition = \"append\"\npayload = \"-- x\"\n"
+                );
+                std::fs::write(dir.join("qm.toml"), toml).unwrap();
+            }
+            let raw = qm_core::patch::plan::load_raw(temp.path(), None).unwrap();
+            let mut dll: Vec<(String, String, Option<String>)> = Vec::new();
+            for e in &raw.load_errors {
+                dll.push((e.mod_id.clone(), "qm_gate".into(), None));
+                for d in &e.skipped_dependents {
+                    dll.push((d.clone(), "qm_gate_requirer".into(), Some(e.mod_id.clone())));
+                }
+            }
+            dll.sort();
+
+            let parsed: Vec<ModManifest> = manifests
+                .iter()
+                .map(|(_, j)| ModManifest::from_json_str(j).unwrap())
+                .collect();
+            let res = resolve(&parsed);
+            assert_eq!(gates_of(&res.diagnostics), dll, "{gates} {contentless}");
+
+            // The messages agree too.
+            if let Some(e) = raw.load_errors.first() {
+                let d = res.diagnostics.iter().find(|d| d.kind == "qm_gate").unwrap();
+                assert_eq!(d.severity, DiagnosticSeverity::Error);
+                assert_eq!(d.message, format!("'Gated' {}. The game skips it.", e.message));
+            }
+        }
+    }
+
+    #[test]
+    fn a_failed_gate_fails_the_mod_and_its_requirers() {
+        let manifests: Vec<ModManifest> = gated_manifests(r#","qm_features":["teleport"]"#)
+            .iter()
+            .map(|(_, j)| ModManifest::from_json_str(j).unwrap())
+            .collect();
+        let res = resolve(&manifests);
+        let g = |id: &str, kind: &str, rel: Option<&str>| {
+            (id.to_string(), kind.to_string(), rel.map(str::to_string))
+        };
+        assert_eq!(
+            gates_of(&res.diagnostics),
+            [
+                g("gated", "qm_gate", None),
+                g("needs_api", "qm_gate_requirer", Some("gated")),
+                g("needs_gated", "qm_gate_requirer", Some("gated")),
+                g("needs_needs", "qm_gate_requirer", Some("gated")),
+            ]
+        );
+        let d = res.diagnostics.iter().find(|d| d.kind == "qm_gate").unwrap();
+        assert_eq!(
+            d.message,
+            "'Gated' needs the QuarterMaster feature 'teleport', which this version does not have. The game skips it."
+        );
+    }
+
+    #[test]
+    fn an_older_feature_list_fails_a_mod_that_needs_a_newer_feature() {
+        let m = ModManifest::from_json_str(
+            r#"{"id":"c","name":"C","version":"1.0.0","qm_features":["overrides","apply_as"]}"#,
+        )
+        .unwrap();
+        let now = gate_diagnostics(std::slice::from_ref(&m), qm_core::QM_VERSION, qm_core::QM_FEATURES);
+        assert!(now.is_empty(), "{now:?}");
+        let old: Vec<&str> = qm_core::QM_FEATURES
+            .iter()
+            .copied()
+            .filter(|f| *f != "apply_as")
+            .collect();
+        let then = gate_diagnostics(&[m], qm_core::QM_VERSION, &old);
+        assert_eq!(then.len(), 1);
+        assert!(then[0].message.contains("'apply_as'"), "{}", then[0].message);
+    }
+
+    #[test]
+    fn a_requirer_with_another_provider_still_loads() {
+        let gated = ModManifest::from_json_str(
+            r#"{"id":"gated","name":"G","version":"1.0.0","qm_features":["teleport"],"relationships":{"provides":["api"]}}"#,
+        )
+        .unwrap();
+        let alt = ModManifest::from_json_str(
+            r#"{"id":"alt","name":"A","version":"1.0.0","relationships":{"provides":["api"]}}"#,
+        )
+        .unwrap();
+        let user = ModManifest::from_json_str(
+            r#"{"id":"user","name":"U","version":"1.0.0","relationships":{"requires":{"api":"*"}}}"#,
+        )
+        .unwrap();
+        let d = gate_diagnostics(&[gated, alt, user], qm_core::QM_VERSION, qm_core::QM_FEATURES);
+        assert_eq!(d.len(), 1);
+        assert_eq!(d[0].mod_id, "gated");
     }
 }

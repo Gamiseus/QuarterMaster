@@ -8,12 +8,14 @@
     /** Renders the panel body for one tab value. */
     content: Snippet<[string]>;
     class?: string;
+    /** Fill the parent's height: the active panel takes the space under the tab list. */
+    fill?: boolean;
   }
 
-  let { value = $bindable(), tabs, content, class: className = "" }: Props = $props();
+  let { value = $bindable(), tabs, content, class: className = "", fill = false }: Props = $props();
 </script>
 
-<Tabs.Root bind:value class={["qm-tabs", className]}>
+<Tabs.Root bind:value class={["qm-tabs", { "qm-tabs-fill": fill }, className]}>
   <Tabs.List class="qm-tab-list">
     {#each tabs as tab (tab.value)}
       <Tabs.Trigger class="qm-tab" value={tab.value}>{tab.label}</Tabs.Trigger>
@@ -35,7 +37,21 @@
     gap: var(--qm-space-3);
   }
 
+  :global(.qm-tabs-fill) {
+    flex: 1;
+    min-height: 0;
+  }
+
+  /* Only the active panel: bits-ui hides the others with the hidden attribute, which display would override. */
+  :global(.qm-tabs-fill > .qm-tab-panel[data-state="active"]) {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-height: 0;
+  }
+
   :global(.qm-tab-list) {
+    flex: none;
     display: flex;
     gap: var(--qm-space-1);
     border-bottom: 1px solid var(--qm-border);

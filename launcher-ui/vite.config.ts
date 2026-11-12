@@ -8,6 +8,8 @@ export default defineConfig(({ mode }) => ({
   server: {
     port: 5173,
     strictPort: true,
+    // Under Vitest only: legacy-app.test.ts reads the legacy launcher's page script as text.
+    ...(mode === "test" ? { fs: { allow: [".", "../ui"] } } : {}),
   },
   // Svelte 5 components must resolve to the browser build under Vitest; extend (never replace)
   // Vite's client defaults, or the production bundle would pick Svelte's server entry.

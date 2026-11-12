@@ -10,6 +10,8 @@
     items: { value: T; label: string }[];
     label: string;
     placeholder?: string;
+    /** Keep the label for screen readers only (a FieldRow already shows it). */
+    hideLabel?: boolean;
   }
 
   let {
@@ -17,6 +19,7 @@
     items,
     label,
     placeholder = "Select...",
+    hideLabel = false,
     disabled = false,
     class: className = "",
     ...rest
@@ -39,7 +42,7 @@
 </script>
 
 <div class={["field", className]}>
-  <span id={labelId} class="label">{label}</span>
+  <span id={labelId} class={["label", { "qm-visually-hidden": hideLabel }]}>{label}</span>
   <Select.Root type="single" value={selectedKey} {onValueChange} items={bitsItems} disabled={disabled ?? false}>
     <Select.Trigger {...rest} class="qm-select-trigger" aria-labelledby="{labelId} {valueId}">
       <span id={valueId} class={{ placeholder: selectedIndex < 0 }}>{selectedLabel}</span>
@@ -87,7 +90,7 @@
     gap: var(--qm-space-2);
     min-height: var(--qm-row-h);
     padding: var(--qm-space-1) var(--qm-space-3);
-    border: 1px solid var(--qm-border);
+    border: 1px solid var(--qm-border-strong);
     border-radius: var(--qm-radius-sm);
     background: var(--qm-canvas);
     color: var(--qm-text);
@@ -133,7 +136,7 @@
   }
 
   :global(.qm-select-item[data-selected]) {
-    color: var(--qm-accent);
+    color: var(--qm-accent-text);
   }
 
   :global(.qm-select-item[data-disabled]) {

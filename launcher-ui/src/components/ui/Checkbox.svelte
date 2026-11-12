@@ -49,10 +49,10 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 18px;
-    height: 18px;
+    width: var(--qm-control-box);
+    height: var(--qm-control-box);
     padding: 0;
-    border: 1px solid var(--qm-border);
+    border: 1px solid var(--qm-border-strong);
     border-radius: var(--qm-radius-sm);
     background: var(--qm-canvas);
     color: var(--qm-accent-contrast);

@@ -1,3 +1,12 @@
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::panic,
+        clippy::indexing_slicing
+    )
+)]
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::fmt;
@@ -126,7 +135,10 @@ impl ParsedVersion {
         }
 
         // Allow optional leading 'v' or 'V' only if followed immediately by an ASCII digit
-        let without_v = if let Some(rest) = trimmed.strip_prefix('v').or_else(|| trimmed.strip_prefix('V')) {
+        let without_v = if let Some(rest) = trimmed
+            .strip_prefix('v')
+            .or_else(|| trimmed.strip_prefix('V'))
+        {
             if !rest.starts_with(|c: char| c.is_ascii_digit()) {
                 return Err(format!("Malformed version prefix in '{raw}'"));
             }
@@ -138,7 +150,11 @@ impl ParsedVersion {
         // Split off +build metadata first
         let (core_and_pre, build_metadata) = match without_v.split_once('+') {
             Some((left, build)) => {
-                if build.is_empty() || !build.chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-') {
+                if build.is_empty()
+                    || !build
+                        .chars()
+                        .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-')
+                {
                     return Err(format!("Invalid build metadata in '{raw}'"));
                 }
                 (left, Some(build.to_string()))
@@ -158,27 +174,34 @@ impl ParsedVersion {
         };
 
         let segments: Vec<&str> = core_part.split('.').collect();
-        if segments.is_empty() || segments.len() > 3 {
-            return Err(format!(
-                "Expected 1 to 3 numeric version segments (e.g. 2, 1.0, or 1.0.0), got '{raw}'"
-            ));
-        }
+        let (major_seg, minor_seg, patch_seg) = match segments.as_slice() {
+            [major] => (*major, None, None),
+            [major, minor] => (*major, Some(*minor), None),
+            [major, minor, patch] => (*major, Some(*minor), Some(*patch)),
+            _ => {
+                return Err(format!(
+                    "Expected 1 to 3 numeric version segments (e.g. 2, 1.0, or 1.0.0), got '{raw}'"
+                ));
+            }
+        };
 
-        let major: u64 = segments[0]
+        let major: u64 = major_seg
             .parse()
             .map_err(|_| format!("Invalid major version in '{raw}'"))?;
 
-        let (minor, patch, letter_suffix) = if segments.len() == 1 {
-            (0, 0, None)
-        } else if segments.len() == 2 {
-            let (min_num, suffix) = parse_num_with_optional_letter(segments[1], raw)?;
-            (min_num, 0, suffix)
-        } else {
-            let minor: u64 = segments[1]
-                .parse()
-                .map_err(|_| format!("Invalid minor version in '{raw}'"))?;
-            let (patch_num, suffix) = parse_num_with_optional_letter(segments[2], raw)?;
-            (minor, patch_num, suffix)
+        let (minor, patch, letter_suffix) = match (minor_seg, patch_seg) {
+            (None, _) => (0, 0, None),
+            (Some(minor_seg), None) => {
+                let (min_num, suffix) = parse_num_with_optional_letter(minor_seg, raw)?;
+                (min_num, 0, suffix)
+            }
+            (Some(minor_seg), Some(patch_seg)) => {
+                let minor: u64 = minor_seg
+                    .parse()
+                    .map_err(|_| format!("Invalid minor version in '{raw}'"))?;
+                let (patch_num, suffix) = parse_num_with_optional_letter(patch_seg, raw)?;
+                (minor, patch_num, suffix)
+            }
         };
 
         let mut prerelease = Vec::new();
@@ -210,12 +233,11 @@ impl ParsedVersion {
 }
 
 fn parse_num_with_optional_letter(seg: &str, raw: &str) -> Result<(u64, Option<char>), String> {
-    if seg.is_empty() {
+    let Some(last_char) = seg.chars().last() else {
         return Err(format!("Empty version segment in '{raw}'"));
-    }
-    let last_char = seg.chars().last().unwrap();
+    };
     if last_char.is_ascii_alphabetic() {
-        let num_part = &seg[..seg.len() - 1];
+        let num_part = seg.strip_suffix(last_char).unwrap_or_default();
         if num_part.is_empty() || !num_part.chars().all(|c| c.is_ascii_digit()) {
             return Err(format!("Ambiguous version segment '{seg}' in '{raw}'"));
         }
@@ -290,7 +312,9 @@ pub fn evaluate_update(
             local_parsed,
             remote_parsed: Some(remote_parsed),
             warning,
-            skipped_reason: Some("Remote version is a prerelease and prerelease channel is disabled".to_string()),
+            skipped_reason: Some(
+                "Remote version is a prerelease and prerelease channel is disabled".to_string(),
+            ),
         };
     }
 
@@ -414,9 +438,7 @@ impl Comparator {
                 }
             }
             CompOp::Tilde => {
-                v >= &self.version
-                    && v.major == self.version.major
-                    && v.minor == self.version.minor
+                v >= &self.version && v.major == self.version.major && v.minor == self.version.minor
             }
         }
     }

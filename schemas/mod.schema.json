@@ -54,9 +54,27 @@
       "description": "Ascending load priority: lower numbers execute FIRST (e.g. 5 = Core Framework, 50 = Gameplay, 90 = Dev/Tools).",
       "type": "integer"
     },
+    "min_qm": {
+      "description": "Oldest QuarterMaster this mod runs on: a version ('1.2.0' means that version or newer) or a range ('>=1.2 <2'). An older QuarterMaster skips the mod.",
+      "type": "string"
+    },
     "name": {
       "description": "Human-readable display name of the mod.",
       "type": "string"
+    },
+    "overrides": {
+      "description": "Launcher check findings the author checked and silences, as '<check>:<name>' or '<check>:*', e.g. 'redefined_global:loadModSettings'. Not the qm.toml overrides. See the modding wiki, Part 7: https://gamiseus.github.io/wiki/",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "qm_features": {
+      "description": "QuarterMaster features this mod needs, e.g. 'overrides' or 'anchors'. A QuarterMaster without one of them skips the mod.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
     },
     "relationships": {
       "properties": {
@@ -101,6 +119,19 @@
           "additionalProperties": {
             "type": "string"
           },
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "save_content": {
+      "description": "What this mod adds that a save can hold, so the save still loads when the mod is off. See the modding wiki, Part 1, Saves and your mod: https://gamiseus.github.io/wiki/",
+      "properties": {
+        "weapons": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "The mod's weapon tag -> the game weapon (its tag, e.g. 'k98') a saved one becomes while the mod is off.",
           "type": "object"
         }
       },

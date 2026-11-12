@@ -1,5 +1,14 @@
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::panic,
+        clippy::indexing_slicing
+    )
+)]
 use serde::{Deserialize, Deserializer, Serialize};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
 
 use crate::version::{ParsedVersion, VersionReq};
@@ -112,7 +121,10 @@ impl ParsedUpdateKey {
             .or_else(|| trimmed.strip_prefix("github:"))
         {
             let (repo_part, asset) = match rest.split_once('#') {
-                Some((r, a)) => (r.trim(), Some(a.trim().to_string()).filter(|s| !s.is_empty())),
+                Some((r, a)) => (
+                    r.trim(),
+                    Some(a.trim().to_string()).filter(|s| !s.is_empty()),
+                ),
                 None => (rest.trim(), None),
             };
             if let Some((owner, repo)) = repo_part.split_once('/') {
@@ -127,22 +139,35 @@ impl ParsedUpdateKey {
             .or_else(|| trimmed.strip_prefix("nexus:"))
         {
             let parts: Vec<&str> = rest.split(':').collect();
-            if parts.len() == 2 {
-                return ParsedUpdateKey::Nexus {
-                    game_domain: parts[0].trim().to_string(),
-                    mod_id: parts[1].trim().to_string(),
-                };
-            } else if parts.len() == 1 && !parts[0].trim().is_empty() {
-                return ParsedUpdateKey::Nexus {
-                    game_domain: "mudandblood".to_string(),
-                    mod_id: parts[0].trim().to_string(),
-                };
+            match parts.as_slice() {
+                [domain, id] => {
+                    return ParsedUpdateKey::Nexus {
+                        game_domain: domain.trim().to_string(),
+                        mod_id: id.trim().to_string(),
+                    };
+                }
+                [id] if !id.trim().is_empty() => {
+                    return ParsedUpdateKey::Nexus {
+                        game_domain: "mudandblood".to_string(),
+                        mod_id: id.trim().to_string(),
+                    };
+                }
+                _ => {}
             }
         }
         ParsedUpdateKey::Custom {
             raw: trimmed.to_string(),
         }
     }
+}
+
+/// `save_content` in mod.json: what the mod adds that a save can hold (Phase E D87).
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SaveContentDecl {
+    /// The mod's weapon tag -> the game weapon a saved one becomes while the mod is off.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub weapons: BTreeMap<String, String>,
 }
 
 #[cfg_attr(feature = "specta", derive(specta::Type))]
@@ -159,11 +184,7 @@ pub struct ModManifest {
     pub name: String,
     pub version: String,
 
-    #[serde(
-        default,
-        alias = "author",
-        deserialize_with = "deserialize_authors"
-    )]
+    #[serde(default, alias = "author", deserialize_with = "deserialize_authors")]
     pub authors: Vec<String>,
 
     #[serde(default)]
@@ -201,6 +222,32 @@ pub struct ModManifest {
     #[serde(default)]
     pub relationships: ModRelationships,
 
+    /// The oldest QuarterMaster this mod runs on: a version (that version or newer) or a range
+    /// such as `">=1.2 <2"`. A QuarterMaster that does not meet it skips the mod (D61).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_qm: Option<String>,
+
+    /// QuarterMaster features this mod needs (`qm_core::QM_FEATURES`). A QuarterMaster without
+    /// one of them skips the mod (D61).
+    // `default` last: specta reads the serde list in order and takes it as optional.
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    #[cfg_attr(feature = "specta", specta(optional))]
+    pub qm_features: Vec<String>,
+
+    /// Launcher check findings this mod's author checked and silences, as
+    /// `"<check>:<name>"` or `"<check>:*"`, e.g. `"redefined_global:loadModSettings"` (D69).
+    /// Not the qm.toml `[[overrides]]` entries.
+    // `default` last: specta reads the serde list in order and takes it as optional.
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    #[cfg_attr(feature = "specta", specta(optional))]
+    pub overrides: Vec<String>,
+
+    /// Save content this mod adds to the game, so a save still loads when the mod is off
+    /// (Phase E D87).
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    #[cfg_attr(feature = "specta", specta(optional))]
+    pub save_content: Option<SaveContentDecl>,
+
     /// Legacy top-level `dependencies` field; merged into `relationships.requires` upon normalization.
     #[serde(default, skip_serializing)]
     dependencies: Option<LegacyDependencies>,
@@ -226,6 +273,10 @@ impl ModManifest {
             github: None,
             nexus: None,
             relationships: ModRelationships::default(),
+            min_qm: None,
+            qm_features: Vec::new(),
+            overrides: Vec::new(),
+            save_content: None,
             dependencies: None,
         }
     }
@@ -347,6 +398,16 @@ impl ModManifest {
                 diags.push(ManifestDiagnostic::error(format!(
                     "Invalid version range '{}' for required dependency '{}': {e}",
                     range, dep_id
+                )));
+            }
+        }
+
+        if let Some(ref min_qm) = self.min_qm {
+            let t = min_qm.trim();
+            if t.is_empty() || (ParsedVersion::parse(t).is_err() && VersionReq::parse(t).is_err()) {
+                diags.push(ManifestDiagnostic::error(format!(
+                    "Invalid `min_qm` '{}': use a version such as '1.2.0' or a range such as '>=1.2 <2'.",
+                    min_qm
                 )));
             }
         }
@@ -494,6 +555,31 @@ pub fn generate_mod_json_schema() -> serde_json::Value {
                 "description": "SMAPI-style update keys, e.g. 'GitHub:owner/repo#Asset.zip' or 'Nexus:1234'."
             },
             "homepage": { "type": "string" },
+            "min_qm": {
+                "type": "string",
+                "description": "Oldest QuarterMaster this mod runs on: a version ('1.2.0' means that version or newer) or a range ('>=1.2 <2'). An older QuarterMaster skips the mod."
+            },
+            "qm_features": {
+                "type": "array",
+                "items": { "type": "string" },
+                "description": "QuarterMaster features this mod needs, e.g. 'overrides' or 'anchors'. A QuarterMaster without one of them skips the mod."
+            },
+            "save_content": {
+                "type": "object",
+                "description": "What this mod adds that a save can hold, so the save still loads when the mod is off. See the modding wiki, Part 1, Saves and your mod: https://gamiseus.github.io/wiki/",
+                "properties": {
+                    "weapons": {
+                        "type": "object",
+                        "additionalProperties": { "type": "string" },
+                        "description": "The mod's weapon tag -> the game weapon (its tag, e.g. 'k98') a saved one becomes while the mod is off."
+                    }
+                }
+            },
+            "overrides": {
+                "type": "array",
+                "items": { "type": "string" },
+                "description": "Launcher check findings the author checked and silences, as '<check>:<name>' or '<check>:*', e.g. 'redefined_global:loadModSettings'. Not the qm.toml overrides. See the modding wiki, Part 7: https://gamiseus.github.io/wiki/"
+            },
             "relationships": {
                 "type": "object",
                 "properties": {
@@ -539,7 +625,100 @@ pub fn generate_qm_toml_schema() -> serde_json::Value {
         "title": "QuarterMaster Patch Manifest (qm.toml)",
         "description": "In-memory Lua patch definitions for QuarterMaster.",
         "type": "object",
-        "required": ["manifest", "patches"],
+        "required": ["manifest"],
+        "definitions": {
+            "rung": {
+                "type": "object",
+                "description": "A place on another patch's code (within) or in the whole file. See the modding wiki, Part 7: https://gamiseus.github.io/wiki/",
+                "properties": {
+                    "within": { "type": "string", "description": "The other patch, as \"mod_id:patch_id\"." },
+                    "edge": { "type": "string", "enum": ["start", "end"] },
+                    "pattern": { "type": "string" },
+                    "exact": { "type": "boolean", "default": false },
+                    "nth": { "type": "integer", "minimum": 1 },
+                    "position": { "type": "string", "enum": ["before", "after"] },
+                    "b_site": { "type": "integer", "minimum": 0 },
+                    "check": { "type": "string" },
+                    "b_fp": {
+                        "type": "object",
+                        "description": "The other patch's content when the rung was made.",
+                        "required": ["anchor", "payload", "source", "ordinal"],
+                        "properties": {
+                            "v": { "type": "integer" },
+                            "anchor": { "type": "string" },
+                            "payload": { "type": "string" },
+                            "source": { "type": "string" },
+                            "ordinal": { "type": "integer" },
+                            "mod_version": { "type": "string" }
+                        }
+                    }
+                }
+            },
+            "site": {
+                "type": "object",
+                "required": ["context"],
+                "properties": {
+                    "context": { "type": "string" },
+                    "ordinal": { "type": "integer", "minimum": 1 }
+                }
+            },
+            "override": {
+                "type": "object",
+                "required": ["patch"],
+                "additionalProperties": false,
+                "properties": {
+                    "patch": { "type": "string", "description": "The patch to change, as \"mod_id:patch_id\"." },
+                    "fingerprint": {
+                        "type": "object",
+                        "required": ["anchor", "payload"],
+                        "properties": {
+                            "anchor": { "type": "string" },
+                            "payload": { "type": "string" },
+                            "source": { "type": "string" },
+                            "ordinal": { "type": "integer" }
+                        }
+                    },
+                    "disable": { "type": "boolean", "default": false },
+                    "priority": { "type": "integer" },
+                    "before": { "type": "array", "items": { "type": "string" } },
+                    "after": { "type": "array", "items": { "type": "string" } },
+                    "anchors": { "type": "array", "items": { "$ref": "#/definitions/rung" } },
+                    "sites": { "type": "array", "items": { "$ref": "#/definitions/site" } },
+                    "replace_anchors": { "type": "boolean", "default": false },
+                    "apply_as": { "type": "string", "enum": ["literal", "edits"] },
+                    "skip_hunks": {
+                        "type": "array",
+                        "description": "Edits of the \"at\" patch that do not run, so another patch's change to the same lines stays. The patch then runs as separate edits.",
+                        "items": { "$ref": "#/definitions/hunk" }
+                    },
+                    "stack_below": { "type": "string", "description": "At a shared line, put this patch's block below this patch's block, as \"mod_id:patch_id\"." },
+                    "stack_above": { "type": "string", "description": "At a shared line, put this patch's block above this patch's block, as \"mod_id:patch_id\"." },
+                    "stack_site": { "$ref": "#/definitions/site", "description": "The game's line the stack rule is for. Every line where both blocks meet when absent." },
+                    "stack_side": { "type": "string", "enum": ["before", "after"], "description": "The side of that line. Both sides when absent." }
+                }
+            },
+            "hunk": {
+                "type": "object",
+                "description": "One edit of an \"at\" patch.",
+                "required": ["fp", "vanilla", "ordinal"],
+                "properties": {
+                    "fp": {
+                        "type": "object",
+                        "description": "The patch's content when the choice was made.",
+                        "required": ["anchor", "payload"],
+                        "properties": {
+                            "anchor": { "type": "string" },
+                            "payload": { "type": "string" },
+                            "source": { "type": "string" },
+                            "ordinal": { "type": "integer" }
+                        }
+                    },
+                    "vanilla": { "type": "string", "description": "The edit's pattern lines, trimmed, one per line." },
+                    "ordinal": { "type": "integer", "minimum": 0, "description": "The edit's place among the patch's edits, from 0." },
+                    "keep": { "type": "string", "description": "The patch whose change to these lines stays, as \"mod_id:patch_id\"." }
+                }
+            }
+        },
         "properties": {
             "manifest": {
                 "type": "object",
@@ -554,9 +733,52 @@ pub fn generate_qm_toml_schema() -> serde_json::Value {
                     "dump_lua": { "type": "boolean", "default": false }
                 }
             },
+            "publish": {
+                "type": "object",
+                "description": "Lists the mod on the QuarterMaster site and in the launcher's Browse tab. The game ignores this table. See the modding wiki, Part 11: https://gamiseus.github.io/wiki/",
+                "required": ["repository"],
+                "properties": {
+                    "repository": { "type": "string", "description": "The GitHub repository that publishes the mod, as \"owner/name\"." },
+                    "asset": { "type": "string", "description": "The release file to install, a .zip or .qmpack. Without it, the first one in the release." },
+                    "summary": { "type": "string", "maxLength": 140, "description": "One line for the mod list. Without it, the first line of the mod's description." },
+                    "image": { "type": "string", "description": "A picture for the mod's card: a .png, .jpg, .webp or .gif in the mod's folder, at most 1 MB." },
+                    "channel": { "type": "string", "enum": ["stable"] }
+                }
+            },
             "vars": {
                 "type": "object",
                 "additionalProperties": { "type": "string" }
+            },
+            "sprites": {
+                "type": "object",
+                "description": "The size an image is shown at, by the name of its global (e.g. top_m1), whatever the file's resolution. A replaced image takes the original's size without a rule. See the modding wiki, Part 2: https://gamiseus.github.io/wiki/",
+                "additionalProperties": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "size": {
+                            "type": "array",
+                            "items": { "type": "number", "exclusiveMinimum": 0 },
+                            "minItems": 2,
+                            "maxItems": 2,
+                            "description": "Width and height to show the image at, in the game's pixels."
+                        },
+                        "scale": {
+                            "type": "number",
+                            "exclusiveMinimum": 0,
+                            "description": "A fraction of the image's own pixel size: 0.25 shows a 400x400 file at 100x100."
+                        },
+                        "like": {
+                            "type": "string",
+                            "description": "Show the image at the size another image global is shown at."
+                        }
+                    }
+                }
+            },
+            "overrides": {
+                "type": "array",
+                "description": "Changes to other mods' patches. Every mod an entry names must be in this mod's requires.",
+                "items": { "$ref": "#/definitions/override" }
             },
             "patches": {
                 "type": "array",
@@ -591,7 +813,25 @@ pub fn generate_qm_toml_schema() -> serde_json::Value {
                                 "match_indent": { "type": "boolean", "default": false },
                                 "times": { "type": "integer", "minimum": 1 },
                                 "expect": { "type": "integer", "minimum": 1 },
-                                "on_failure": { "type": "string", "enum": ["warn", "skip_patch", "skip_mod", "abort"] }
+                                "on_failure": { "type": "string", "enum": ["warn", "skip_patch", "skip_mod", "abort"] },
+                                "anchors": { "type": "array", "items": { "$ref": "#/definitions/rung" } },
+                                "sites": { "type": "array", "items": { "$ref": "#/definitions/site" } },
+                                "apply_as": {
+                                    "type": "string",
+                                    "enum": ["literal", "edits"],
+                                    "default": "literal",
+                                    "description": "\"edits\" runs an \"at\" patch as separate edits next to the lines it keeps."
+                                },
+                                "stack": {
+                                    "type": "string",
+                                    "enum": ["first", "last"],
+                                    "description": "Where this patch's block goes among the code other patches add at its line: \"first\" on top (it runs first), \"last\" at the bottom. A mod it needs stays above it."
+                                },
+                                "requires": {
+                                    "type": "array",
+                                    "items": { "type": "string" },
+                                    "description": "Patches this patch needs, by id, \"mod_id:patch_id\" or \"mod_id:*\". One in the same file runs first; when it did not apply, this patch is skipped."
+                                }
                             }
                         },
                         "regex": {
@@ -614,7 +854,19 @@ pub fn generate_qm_toml_schema() -> serde_json::Value {
                                 "verbose": { "type": "boolean", "default": false },
                                 "times": { "type": "integer", "minimum": 1 },
                                 "expect": { "type": "integer", "minimum": 1 },
-                                "on_failure": { "type": "string", "enum": ["warn", "skip_patch", "skip_mod", "abort"] }
+                                "on_failure": { "type": "string", "enum": ["warn", "skip_patch", "skip_mod", "abort"] },
+                                "anchors": { "type": "array", "items": { "$ref": "#/definitions/rung" } },
+                                "sites": { "type": "array", "items": { "$ref": "#/definitions/site" } },
+                                "stack": {
+                                    "type": "string",
+                                    "enum": ["first", "last"],
+                                    "description": "Where this patch's block goes among the code other patches add at its line: \"first\" on top (it runs first), \"last\" at the bottom. A mod it needs stays above it."
+                                },
+                                "requires": {
+                                    "type": "array",
+                                    "items": { "type": "string" },
+                                    "description": "Patches this patch needs, by id, \"mod_id:patch_id\" or \"mod_id:*\". One in the same file runs first; when it did not apply, this patch is skipped."
+                                }
                             }
                         },
                         "copy": {
@@ -695,6 +947,70 @@ mod tests {
                 asset: Some("TacticalOverhaul.zip".to_string()),
             }
         );
+    }
+
+    #[test]
+    fn reads_feature_gates_and_leaves_them_out_when_unset() {
+        let m = ModManifest::from_json_str(
+            r#"{"id": "c", "name": "C", "version": "1.0.0", "min_qm": "1.1.0", "qm_features": ["overrides", "anchors"]}"#,
+        )
+        .unwrap();
+        assert_eq!(m.min_qm.as_deref(), Some("1.1.0"));
+        assert_eq!(m.qm_features, ["overrides", "anchors"]);
+        assert!(m
+            .validate()
+            .iter()
+            .all(|d| d.severity != DiagnosticSeverity::Error));
+        let back = serde_json::to_value(&m).unwrap();
+        assert_eq!(back["min_qm"], "1.1.0");
+        assert_eq!(
+            back["qm_features"],
+            serde_json::json!(["overrides", "anchors"])
+        );
+
+        let plain =
+            ModManifest::from_json_str(r#"{"id": "p", "name": "P", "version": "1.0.0"}"#).unwrap();
+        assert_eq!(plain.min_qm, None);
+        assert!(plain.qm_features.is_empty());
+        let v = serde_json::to_value(&plain).unwrap();
+        assert!(
+            v.get("min_qm").is_none() && v.get("qm_features").is_none(),
+            "{v}"
+        );
+
+        let silenced = ModManifest::from_json_str(
+            r#"{"id": "s", "name": "S", "version": "1.0.0", "overrides": ["dead_code:love.keypressed"]}"#,
+        )
+        .unwrap();
+        assert_eq!(silenced.overrides, ["dead_code:love.keypressed"]);
+        assert_eq!(
+            serde_json::to_value(&silenced).unwrap()["overrides"],
+            serde_json::json!(["dead_code:love.keypressed"])
+        );
+        assert!(v.get("overrides").is_none(), "{v}");
+        assert!(v.get("save_content").is_none(), "{v}");
+
+        let weapons = ModManifest::from_json_str(
+            r#"{"id": "w", "name": "W", "version": "1.0.0", "save_content": {"weapons": {"example_rifle": "k98"}}}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            weapons.save_content.as_ref().unwrap().weapons["example_rifle"],
+            "k98"
+        );
+        assert_eq!(
+            serde_json::to_value(&weapons).unwrap()["save_content"]["weapons"]["example_rifle"],
+            "k98"
+        );
+
+        let bad = ModManifest::from_json_str(
+            r#"{"id": "b", "name": "B", "version": "1.0.0", "min_qm": "soon"}"#,
+        )
+        .unwrap();
+        assert!(bad
+            .validate()
+            .iter()
+            .any(|d| d.severity == DiagnosticSeverity::Error && d.message.contains("min_qm")));
     }
 
     #[test]

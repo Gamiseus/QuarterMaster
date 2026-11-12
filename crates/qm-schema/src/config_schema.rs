@@ -33,17 +33,49 @@ impl ConfigValue {
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 /// Declarative visibility rule (`showIf = { id = "event_select", value = "Halloween" }`)
 /// or inferred from a local helper function in `config.lua`.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ShowIfRule {
     pub option_id: String,
     pub equals: Vec<ConfigValue>,
 }
 
+#[derive(Deserialize)]
+struct ShowIfHelper {
+    #[serde(alias = "id")]
+    option_id: String,
+    #[serde(default)]
+    value: Option<ConfigValue>,
+    #[serde(default)]
+    values: Option<Vec<ConfigValue>>,
+    #[serde(default)]
+    equals: Option<Vec<ConfigValue>>,
+}
+
+impl<'de> Deserialize<'de> for ShowIfRule {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let helper = ShowIfHelper::deserialize(deserializer)?;
+        let mut equals = helper.equals.or(helper.values).unwrap_or_default();
+        if let Some(val) = helper.value {
+            if !equals.contains(&val) {
+                equals.push(val);
+            }
+        }
+        Ok(ShowIfRule {
+            option_id: helper.option_id,
+            equals,
+        })
+    }
+}
+
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 /// Normalized option control type for the Launcher UI and `GMenu`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum ConfigOptionType {
+    #[default]
     Checkbox,
     Cycle,
     Slider,
@@ -56,6 +88,7 @@ pub enum ConfigOptionType {
 pub struct ConfigOptionDef {
     pub id: String,
     pub label: String,
+    #[serde(alias = "type")]
     pub option_type: ConfigOptionType,
     pub default: Option<ConfigValue>,
     pub description: Option<String>,
@@ -65,21 +98,302 @@ pub struct ConfigOptionDef {
     pub max: Option<f64>,
     pub step: Option<f64>,
     pub show_if: Option<ShowIfRule>,
+    pub button_text: Option<String>,
+    pub aliases: Vec<String>,
+    /// For a `button`: the global function the game calls on a click, by name. A dotted name
+    /// (`ExampleMod.run`) is looked up one level into that global table.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub on_click: Option<String>,
+}
+
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ConfigModeDef {
+    pub id: String,
+    pub title: String,
+    pub subtitle: Option<String>,
+    pub description: Option<String>,
+    pub icon: Option<String>,
+    pub priority: Option<i32>,
+    pub on_click: Option<String>,
+}
+
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ConfigPageDef {
+    pub id: String,
+    pub title: String,
+    pub page_type: Option<String>,
+    pub content: Option<String>,
+    pub action_label: Option<String>,
+    pub action_on_click: Option<String>,
+}
+
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct KeybindDef {
+    pub id: String,
+    pub name: String,
+    #[serde(default = "default_keybind_category")]
+    pub category: String,
+    pub default: String,
+    #[serde(default, alias = "default_secondary")]
+    pub secondary: Option<String>,
+    #[serde(default)]
+    pub modifiers: Vec<String>,
+    #[serde(default)]
+    pub tab: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub on_trigger: Option<String>,
+}
+
+fn default_keybind_category() -> String {
+    "General".to_string()
 }
 
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct ModConfigSchema {
+    #[serde(alias = "id")]
     pub mod_id: Option<String>,
     pub name: String,
     pub options: Vec<ConfigOptionDef>,
+    pub modes: Vec<ConfigModeDef>,
+    pub pages: Vec<ConfigPageDef>,
+    pub keybinds: Vec<KeybindDef>,
+}
+
+#[derive(Deserialize)]
+struct TomlOptionDef {
+    id: String,
+    label: String,
+    #[serde(default, rename = "type", alias = "option_type")]
+    option_type: ConfigOptionType,
+    #[serde(default)]
+    default: Option<ConfigValue>,
+    #[serde(default)]
+    description: Option<String>,
+    #[serde(default)]
+    options: Vec<ConfigValue>,
+    #[serde(default)]
+    labels: Vec<String>,
+    #[serde(default)]
+    min: Option<f64>,
+    #[serde(default)]
+    max: Option<f64>,
+    #[serde(default)]
+    step: Option<f64>,
+    #[serde(default)]
+    show_if: Option<ShowIfRule>,
+    #[serde(default)]
+    button_text: Option<String>,
+    #[serde(default)]
+    aliases: Vec<String>,
+    #[serde(default)]
+    on_click: Option<String>,
+}
+
+impl From<TomlOptionDef> for ConfigOptionDef {
+    fn from(t: TomlOptionDef) -> Self {
+        Self {
+            id: t.id,
+            label: t.label,
+            option_type: t.option_type,
+            default: t.default,
+            description: t.description,
+            options: t.options,
+            labels: t.labels,
+            min: t.min,
+            max: t.max,
+            step: t.step,
+            show_if: t.show_if,
+            button_text: t.button_text,
+            aliases: t.aliases,
+            on_click: t.on_click,
+        }
+    }
+}
+
+#[derive(Deserialize)]
+struct TomlPageDef {
+    id: String,
+    title: String,
+    #[serde(rename = "type", alias = "page_type", default)]
+    page_type: Option<String>,
+    #[serde(default)]
+    content: Option<String>,
+    #[serde(default)]
+    action_label: Option<String>,
+    #[serde(default)]
+    action_on_click: Option<String>,
+}
+
+impl From<TomlPageDef> for ConfigPageDef {
+    fn from(t: TomlPageDef) -> Self {
+        Self {
+            id: t.id,
+            title: t.title,
+            page_type: t.page_type,
+            content: t.content,
+            action_label: t.action_label,
+            action_on_click: t.action_on_click,
+        }
+    }
+}
+
+#[derive(Deserialize)]
+struct TomlKeybindDef {
+    id: String,
+    name: String,
+    #[serde(default)]
+    category: Option<String>,
+    default: String,
+    #[serde(default, alias = "default_secondary")]
+    secondary: Option<String>,
+    #[serde(default)]
+    modifiers: Vec<String>,
+    #[serde(default)]
+    tab: Option<String>,
+    #[serde(default)]
+    description: Option<String>,
+    #[serde(default)]
+    on_trigger: Option<String>,
+}
+
+impl From<TomlKeybindDef> for KeybindDef {
+    fn from(t: TomlKeybindDef) -> Self {
+        Self {
+            id: t.id,
+            name: t.name,
+            category: t.category.unwrap_or_else(default_keybind_category),
+            default: t.default,
+            secondary: t.secondary,
+            modifiers: t.modifiers,
+            tab: t.tab,
+            description: t.description,
+            on_trigger: t.on_trigger,
+        }
+    }
+}
+
+#[derive(Deserialize)]
+struct TomlModConfig {
+    #[serde(alias = "id", default)]
+    mod_id: Option<String>,
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    options: Vec<TomlOptionDef>,
+    #[serde(default)]
+    modes: Vec<ConfigModeDef>,
+    #[serde(default)]
+    pages: Vec<TomlPageDef>,
+    #[serde(default)]
+    keybinds: Vec<TomlKeybindDef>,
+}
+
+impl From<TomlModConfig> for ModConfigSchema {
+    fn from(t: TomlModConfig) -> Self {
+        Self {
+            mod_id: t.mod_id,
+            name: t.name.unwrap_or_else(|| "Mod".to_string()),
+            options: t.options.into_iter().map(Into::into).collect(),
+            modes: t.modes,
+            pages: t.pages.into_iter().map(Into::into).collect(),
+            keybinds: t.keybinds.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+#[derive(Deserialize)]
+struct ConfigEnvelope {
+    config: TomlModConfig,
 }
 
 impl ModConfigSchema {
     pub fn from_path(path: &Path) -> Result<Self, String> {
         let raw = std::fs::read_to_string(path)
             .map_err(|e| format!("Failed to read {}: {e}", path.display()))?;
-        Self::from_lua_str(&raw)
+        if path.extension().is_some_and(|ext| ext == "toml") {
+            Self::from_toml_str(&raw)
+        } else {
+            Self::from_lua_str(&raw)
+        }
+    }
+
+    pub fn from_toml_str(raw: &str) -> Result<Self, String> {
+        if let Ok(env) = toml::from_str::<ConfigEnvelope>(raw) {
+            return Ok(env.config.into());
+        }
+        toml::from_str::<TomlModConfig>(raw)
+            .map(Into::into)
+            .map_err(|e| format!("Failed to parse config TOML: {e}"))
+    }
+
+    pub fn from_mod_dir(dir: &Path) -> Result<Option<Self>, String> {
+        let config_toml = dir.join("config.toml");
+        if config_toml.is_file() {
+            let content = std::fs::read_to_string(&config_toml)
+                .map_err(|e| format!("Failed to read {}: {e}", config_toml.display()))?;
+            return Self::from_toml_str(&content).map(Some);
+        }
+
+        let qm_toml = dir.join("qm.toml");
+        if qm_toml.is_file() {
+            if let Ok(content) = std::fs::read_to_string(&qm_toml) {
+                if let Ok(env) = toml::from_str::<ConfigEnvelope>(&content) {
+                    return Ok(Some(env.config.into()));
+                }
+            }
+        }
+
+        let config_lua = dir.join("config.lua");
+        if config_lua.is_file() {
+            let content = std::fs::read_to_string(&config_lua)
+                .map_err(|e| format!("Failed to read {}: {e}", config_lua.display()))?;
+            return Self::from_lua_str(&content).map(Some);
+        }
+
+        // Check immediate subdirectories for versioned layouts (e.g. 1.0.0/)
+        if let Ok(entries) = std::fs::read_dir(dir) {
+            let mut subdirs = Vec::new();
+            for entry in entries.filter_map(|e| e.ok()) {
+                let p = entry.path();
+                if p.is_dir() {
+                    let name = p.file_name().and_then(|n| n.to_str()).unwrap_or_default();
+                    if !name.starts_with('.') && name != "qm" && name != "assets" {
+                        subdirs.push(p);
+                    }
+                }
+            }
+            subdirs.sort();
+            for sub in subdirs.into_iter().rev() {
+                let sub_cfg = sub.join("config.toml");
+                if sub_cfg.is_file() {
+                    let content = std::fs::read_to_string(&sub_cfg)
+                        .map_err(|e| format!("Failed to read {}: {e}", sub_cfg.display()))?;
+                    return Self::from_toml_str(&content).map(Some);
+                }
+                let sub_qm = sub.join("qm.toml");
+                if sub_qm.is_file() {
+                    if let Ok(content) = std::fs::read_to_string(&sub_qm) {
+                        if let Ok(env) = toml::from_str::<ConfigEnvelope>(&content) {
+                            return Ok(Some(env.config.into()));
+                        }
+                    }
+                }
+                let sub_lua = sub.join("config.lua");
+                if sub_lua.is_file() {
+                    let content = std::fs::read_to_string(&sub_lua)
+                        .map_err(|e| format!("Failed to read {}: {e}", sub_lua.display()))?;
+                    return Self::from_lua_str(&content).map(Some);
+                }
+            }
+        }
+
+        Ok(None)
     }
 
     /// Parses a `config.lua` file without executing Lua code.
@@ -129,6 +443,9 @@ impl ModConfigSchema {
             mod_id,
             name,
             options,
+            modes: Vec::new(),
+            pages: Vec::new(),
+            keybinds: Vec::new(),
         })
     }
 }
@@ -338,6 +655,11 @@ fn parse_option_entry(
         max,
         step,
         show_if,
+        button_text: extract_string_field(&clean, "button_text")
+            .or_else(|| extract_string_field(&clean, "buttonText")),
+        aliases: Vec::new(),
+        on_click: extract_string_field(&clean, "on_click")
+            .or_else(|| extract_string_field(&clean, "onClick")),
     })
 }
 
@@ -517,10 +839,10 @@ impl ModSettingsStore {
                             needs_reset = true;
                         }
                     }
-                    ConfigOptionType::Cycle => {
-                        if !opt.options.is_empty() && !opt.options.contains(cur) {
-                            needs_reset = true;
-                        }
+                    ConfigOptionType::Cycle
+                        if !opt.options.is_empty() && !opt.options.contains(cur) =>
+                    {
+                        needs_reset = true;
                     }
                     _ => {}
                 }
@@ -607,3 +929,7 @@ return config"#;
         assert_eq!(store, store2);
     }
 }
+
+#[cfg(test)]
+#[path = "config_schema_tests.rs"]
+mod config_schema_tests;

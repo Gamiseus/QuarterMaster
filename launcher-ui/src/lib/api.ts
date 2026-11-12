@@ -19,9 +19,12 @@ type CommandResult<T> = { status: "ok"; data: T } | { status: "error"; error: Qm
 export interface CallOptions {
   /** Re-runs the action; offered as Retry on network errors. */
   retry?: () => unknown;
+  /** Errors of these kinds are rethrown without a toast or banner, for callers that show them inline. */
+  expect?: ErrorKind[];
 }
 
 function route(err: QmCommandError, opts: CallOptions): void {
+  if (opts.expect?.includes(err.kind)) return;
   if (err.kind === "game_running") {
     game.banner = err.message;
   } else if (err.kind === "network") {

@@ -130,6 +130,6 @@
   .row.active :global(.nav-btn) {
     background: var(--qm-raised);
     border-color: var(--qm-accent);
-    color: var(--qm-accent);
+    color: var(--qm-accent-text);
   }
 </style>

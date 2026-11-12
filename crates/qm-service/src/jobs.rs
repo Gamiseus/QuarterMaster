@@ -20,8 +20,17 @@ pub enum JobKind {
     CatalogRefresh,
     CatalogInstall,
     ModImport,
+    ModUpdateInstall,
     LauncherUpdateDownload,
     DiagnosticBundle,
+    /// Copies the workspace mods folder into the library on request.
+    WorkspaceSync,
+    /// Writes a profile as a `.qmpack`.
+    ModpackExport,
+    /// Installs a `.qmpack`'s bundled mods and creates its profile.
+    ModpackImport,
+    /// Makes the Fixes view's suggestions (§9.3) after a simulation.
+    FixSuggestions,
 }
 
 impl JobKind {
@@ -33,13 +42,25 @@ impl JobKind {
                 | JobKind::Simulation
                 | JobKind::UpdatesRefresh
                 | JobKind::CatalogRefresh
+                | JobKind::FixSuggestions
         )
     }
 
+    /// Install jobs (`ModImport`, `CatalogInstall`, `ModUpdateInstall`, `WorkspaceSync`) are not cancellable:
+    /// the UI offers no cancel and they hold the install lock while changing the library.
     pub fn is_cancellable(&self) -> bool {
+        matches!(self, JobKind::LauncherUpdateDownload)
+    }
+
+    /// Jobs that change the mod library; they serialize on the service install lock.
+    pub fn is_install(&self) -> bool {
         matches!(
             self,
-            JobKind::CatalogInstall | JobKind::ModImport | JobKind::LauncherUpdateDownload
+            JobKind::ModImport
+                | JobKind::CatalogInstall
+                | JobKind::ModUpdateInstall
+                | JobKind::WorkspaceSync
+                | JobKind::ModpackImport
         )
     }
 }

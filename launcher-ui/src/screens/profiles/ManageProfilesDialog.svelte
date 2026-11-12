@@ -2,11 +2,13 @@
   import { untrack } from "svelte";
   import { call } from "../../lib/api";
   import { commands, type LaunchMethodChoice, type ModProfile } from "../../lib/bindings";
-  import { Badge, Button, Dialog, Select, StencilHeading, Switch, TextField } from "../../components/ui";
+  import { Badge, Button, Dialog, Select, StencilHeading, TextField } from "../../components/ui";
   import { app } from "../../lib/stores/app.svelte";
   import { profiles } from "../../lib/stores/profiles.svelte";
   import { saves } from "../../lib/stores/saves.svelte";
+  import { jobs } from "../../lib/stores/jobs.svelte";
   import { toasts } from "../../lib/stores/toasts.svelte";
+  import CompareProfilesDialog from "./CompareProfilesDialog.svelte";
   import ShareCodeDialog from "./ShareCodeDialog.svelte";
 
   interface Props {
@@ -16,12 +18,15 @@
   let { open = $bindable(false) }: Props = $props();
 
   const DELETE_ACTIVE_REASON = "Switch to another profile before deleting this one.";
+  const BUILTIN_REASON = "The Vanilla profile is built in and never loads mods.";
+  const VANILLA_SLOT = "vanilla";
+  /** The Select's value for "New slot on first launch" (stored as an empty slot id). */
+  const NEW_SLOT = "__new_slot__";
 
   const METHODS: { value: LaunchMethodChoice; label: string }[] = [
-    { value: "default", label: "Default" },
+    { value: "default", label: "Use default" },
     { value: "steam_url", label: "Steam" },
     { value: "direct_exe", label: "Direct" },
-    { value: "vanilla", label: "Vanilla" },
   ];
 
   let selectedId = $state<string | null>(null);
@@ -30,19 +35,28 @@
   let saveId = $state("");
   let method = $state<LaunchMethodChoice>("default");
   let args = $state("");
-  let disableConsole = $state(false);
   let cloning = $state(false);
   let cloneName = $state("");
   let confirmingDelete = $state(false);
   let busy = $state(false);
   let shareCode = $state("");
   let shareOpen = $state(false);
+  let compareOpen = $state(false);
   let loadSeq = 0;
 
   const selected = $derived(profiles.list.find((p) => p.id === selectedId) ?? null);
   const isActive = $derived(selected?.is_active ?? false);
-  const canEdit = $derived(app.startupDone && !busy && doc !== null);
-  const saveItems = $derived((saves.list ?? []).map((s) => ({ value: s.profile.id, label: s.profile.name })));
+  const builtin = $derived(selected?.is_builtin ?? false);
+  const canEdit = $derived(app.startupDone && !busy && doc !== null && !builtin);
+  // The Vanilla slot belongs to the Vanilla profile: never offered to another one. A profile can
+  // also get a fresh slot of its own, created (and named after it) when it first launches.
+  const saveItems = $derived([
+    ...(saves.list ?? [])
+      .filter((s) => builtin || s.profile.id !== VANILLA_SLOT)
+      .map((s) => ({ value: s.profile.id, label: s.profile.name })),
+    ...(builtin ? [] : [{ value: NEW_SLOT, label: "New slot on first launch" }]),
+  ]);
+  const linkedOf = (d: ModProfile) => d.linked_save_profile_id || NEW_SLOT;
 
   function parseArgs(text: string): string[] {
     return text.split(/\s+/).filter(Boolean);
@@ -52,18 +66,17 @@
     doc !== null &&
       (method !== (doc.launch_method ?? "default") ||
         parseArgs(args).join(" ") !== (doc.custom_launch_args ?? []).join(" ") ||
-        disableConsole !== (doc.disable_console ?? false) ||
-        saveId !== (doc.linked_save_profile_id ?? "")),
+        saveId !== linkedOf(doc)),
   );
   const renameDirty = $derived(doc !== null && name.trim().length > 0 && name.trim() !== doc.name);
 
   function apply(d: ModProfile) {
     doc = d;
     name = d.name;
-    saveId = d.linked_save_profile_id ?? "";
-    method = d.launch_method ?? "default";
+    saveId = linkedOf(d);
+    // A stored Vanilla method (old files only) reads as the default.
+    method = d.launch_method === "steam_url" || d.launch_method === "direct_exe" ? d.launch_method : "default";
     args = (d.custom_launch_args ?? []).join(" ");
-    disableConsole = d.disable_console ?? false;
   }
 
   function select(id: string) {
@@ -113,14 +126,14 @@
   const saveSettings = () =>
     run(async () => {
       if (!selectedId || !doc) return;
-      const relink = saveId !== (doc.linked_save_profile_id ?? "") && saveId !== "";
+      const relink = saveId !== linkedOf(doc);
       apply(
         await call(
           commands.profileUpdate(selectedId, {
             launch_method: method,
             custom_launch_args: parseArgs(args),
-            disable_console: disableConsole,
-            linked_save_profile_id: relink ? saveId : null,
+            // An empty id means "New slot on first launch".
+            linked_save_profile_id: relink ? (saveId === NEW_SLOT ? "" : saveId) : null,
           }),
         ),
       );
@@ -150,6 +163,16 @@
       select(profiles.activeSummary?.id ?? "");
     });
 
+  /** The save dialog opens on the Rust side; null means it was cancelled. */
+  const exportPack = () =>
+    run(async () => {
+      if (!selectedId || !doc) return;
+      const name = doc.name;
+      const id = await call(commands.modpackExport(selectedId));
+      if (id === null) return;
+      await jobs.track(id, { label: `Exporting ${name}`, success: (file) => (file ? `Saved the modpack as ${file}.` : "Modpack saved.") });
+    });
+
   const copyCode = () =>
     run(async () => {
       if (!selectedId) return;
@@ -172,6 +195,9 @@
         <li>
           <button type="button" class="entry" aria-pressed={p.id === selectedId} onclick={() => select(p.id)}>
             <span class="entry-name">{p.name}</span>
+            {#if p.is_builtin}
+              <Badge>Built in</Badge>
+            {/if}
             {#if p.is_active}
               <Badge tone="accent">Active</Badge>
             {/if}
@@ -182,6 +208,9 @@
 
     {#if selected && doc}
       <section class="detail" aria-label="Profile settings">
+        {#if builtin}
+          <p class="reason builtin">{BUILTIN_REASON}</p>
+        {/if}
         <StencilHeading level={3}>Name</StencilHeading>
         <div class="row">
           <TextField class="grow" label="Profile name" bind:value={name} disabled={!canEdit} />
@@ -189,11 +218,10 @@
         </div>
 
         <StencilHeading level={3}>Launch</StencilHeading>
-        <Select label="Linked save slot" items={saveItems} bind:value={saveId} disabled={!canEdit} placeholder="No save slot" />
-        <Select label="Launch method" items={METHODS} bind:value={method} disabled={!canEdit} />
+        <Select label="Save slot" items={saveItems} bind:value={saveId} disabled={!canEdit} placeholder="No save slot" />
+        <Select label="Start the game with" items={METHODS} bind:value={method} disabled={!canEdit} />
         <TextField label="Launch arguments" placeholder="-windowed -novid" bind:value={args} disabled={!canEdit} />
-        <p class="hint">Separate arguments with spaces. Quotes are not supported.</p>
-        <Switch label="Disable console" bind:checked={disableConsole} disabled={!canEdit} />
+        <p class="hint">Separate arguments with spaces. Quotes are not supported. The console is set in Settings for every profile.</p>
         <div class="row end">
           <Button variant="primary" disabled={!canEdit || !settingsDirty} onclick={saveSettings}>Save settings</Button>
         </div>
@@ -213,18 +241,20 @@
           </div>
         {:else}
           <div class="row">
-            <Button disabled={!canEdit} onclick={startClone}>Clone</Button>
+            <Button disabled={!canEdit} {...{ "aria-description": builtin ? BUILTIN_REASON : undefined }} onclick={startClone}>Clone</Button>
             <Button disabled={!app.startupDone || busy} onclick={copyCode}>Copy share code</Button>
+            <Button disabled={profiles.list.length < 2} onclick={() => (compareOpen = true)}>Compare...</Button>
+            <Button disabled={!app.startupDone || busy || builtin} onclick={exportPack}>Export as modpack...</Button>
             <Button
               variant="danger"
               disabled={!canEdit || isActive}
-              {...{ "aria-description": isActive ? DELETE_ACTIVE_REASON : undefined }}
+              {...{ "aria-description": builtin ? BUILTIN_REASON : isActive ? DELETE_ACTIVE_REASON : undefined }}
               onclick={() => (confirmingDelete = true)}
             >
               Delete
             </Button>
           </div>
-          {#if isActive}
+          {#if isActive && !builtin}
             <p class="reason">{DELETE_ACTIVE_REASON}</p>
           {/if}
         {/if}
@@ -236,6 +266,7 @@
 </Dialog>
 
 <ShareCodeDialog bind:open={shareOpen} mode="export" code={shareCode} />
+<CompareProfilesDialog bind:open={compareOpen} start={selectedId} />
 
 <style>
   .layout {

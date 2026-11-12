@@ -6,8 +6,8 @@ use std::sync::Arc;
 use qm_core::patch::table::PatchTable;
 use qm_manager::{
     decode_profile_code, lint_mod_directory, package_mod_release, register_windows_protocols,
-    resolve_load_order, scaffold_new_mod, simulate_and_analyze_patches,
-    ConflictResolutionSuggestion, LaunchMethod, QuarterMasterPaths,
+    resolve_load_order, scaffold_new_mod, simulate_and_analyze_patches_with, SimulationOptions,
+    ConflictResolutionSuggestion, DetectedConflict, LaunchMethod, QuarterMasterPaths,
 };
 use qm_schema::{compare_saves, generate_mod_json_schema, generate_qm_toml_schema};
 use qm_service::testing::NullSink;
@@ -44,10 +44,11 @@ COMMANDS:
   save compare <id_a> <id_b>          Compare two save profiles side-by-side
   lint <mod_dir>                      Lint mod.json, qm.toml, dry-run patches against vanilla, and scan security
   pack <mod_dir> [--out <dir>]        Package a mod into a release .zip and output its SHA-256 index entry
-  new <id> <name> [--template <t>]    Scaffold a new mod (templates: empty, gmenu_config, gameplay_patch)
+  new <id> <name> [--template <t>]    Scaffold a new mod (templates: empty, gmenu_config, gameplay_patch, faction_mod)
+  faction check <mod_dir> [--json]    Check a faction mod's faction.toml and files, and list what it changes
   watch [--relaunch]                  Watch MnB-Mods/ for file changes, auto-sync, validate & hot-reload
   register-protocols                  Register qm://, nxm://, and .qmpack associations in Windows Registry (HKCU)
-  schema [--out <dir>]                Write official JSON Schemas (mod.schema.json, qm.schema.json)
+  schema [--out <dir>]                Write official JSON Schemas (mod.schema.json, qm.schema.json, faction.schema.json)
 "#,
         qm_core::QM_VERSION
     );
@@ -117,6 +118,7 @@ fn main() -> ExitCode {
         "watch" => cmd_watch(&paths, rest),
         "register-protocols" => cmd_register_protocols(),
         "schema" => cmd_schema(rest),
+        "faction" => cmd_faction(rest),
         other => Err(format!(
             "Unknown command '{other}'. Run `qm --help` for usage."
         )),
@@ -321,6 +323,7 @@ fn start_launch(
     svc.game_launch(LaunchRequest {
         profile_id: profile_id.to_string(),
         method,
+        without_mods: false,
     })
     .map(|_| ())
     .map_err(|e| fmt_err(&e))
@@ -362,6 +365,19 @@ fn wait_for_game(svc: &Service) -> Result<(), String> {
             _ => std::thread::sleep(std::time::Duration::from_millis(500)),
         }
     }
+}
+
+/// Simulates `table`, compiling patched files with the game's `lua51.dll` when it is found.
+fn simulate_with_compile_check(
+    table: &PatchTable,
+    vanilla: &std::collections::HashMap<String, String>,
+    game_exe: Option<&Path>,
+) -> qm_manager::SimulationReport {
+    let lua = game_exe
+        .and_then(Path::parent)
+        .and_then(qm_core::compile::LuaCompiler::find)
+        .and_then(|p| qm_core::compile::LuaCompiler::load(&p).map_err(|e| eprintln!("{e}")).ok());
+    simulate_and_analyze_patches_with(table, vanilla, SimulationOptions { compiler: lua.as_ref(), launch: None })
 }
 
 fn cmd_validate(paths: &QuarterMasterPaths, args: &[String]) -> Result<(), String> {
@@ -407,13 +423,13 @@ fn cmd_validate(paths: &QuarterMasterPaths, args: &[String]) -> Result<(), Strin
         Some(&game_ver),
     );
 
-    let table = PatchTable::load(&target_mod_dir).map_err(|e| {
+    let table = PatchTable::load_strict(&target_mod_dir).map_err(|e| {
         format!(
             "Failed to load patches from {}: {e:#}",
             target_mod_dir.display()
         )
     })?;
-    let sim = simulate_and_analyze_patches(&table, &vanilla_files);
+    let sim = simulate_with_compile_check(&table, &vanilla_files, settings.game_exe_path.as_deref());
 
     if json_output {
         let combined = serde_json::json!({
@@ -469,37 +485,64 @@ fn cmd_validate(paths: &QuarterMasterPaths, args: &[String]) -> Result<(), Strin
         );
     }
 
-    if !sim.conflicts.is_empty() {
-        println!(
+    print!("{}", conflicts_text(&sim.conflicts));
+
+    Ok(())
+}
+
+/// The conflicts section of `test-patches`. Info notes (severity "info": `multi_match`, the
+/// semantic notes) are not conflicts: they are listed apart, and with only notes the run still
+/// reports no errors.
+fn conflicts_text(all: &[DetectedConflict]) -> String {
+    use std::fmt::Write as _;
+    let mut out = String::new();
+    let (notes, conflicts): (Vec<&DetectedConflict>, Vec<&DetectedConflict>) =
+        all.iter().partition(|c| c.severity == "info");
+    if !conflicts.is_empty() {
+        let _ = writeln!(
+            out,
             "\nDetected Conflicts & 3-Tier Resolutions ({}):",
-            sim.conflicts.len()
+            conflicts.len()
         );
-        for c in &sim.conflicts {
-            println!(
+        for c in &conflicts {
+            let _ = writeln!(
+                out,
                 "  [{}] {} — {}",
                 c.severity.to_uppercase(),
                 c.target_file,
                 c.description
             );
             for sug in &c.suggestions {
-                match sug {
+                let line = match sug {
                     ConflictResolutionSuggestion::SwapModOrder { explanation, .. } => {
-                        println!("    -> [Tier 1 Auto-Order Fix] {explanation}");
+                        format!("[Tier 1 Auto-Order Fix] {explanation}")
                     }
                     ConflictResolutionSuggestion::GenerateGluePatch { explanation, .. } => {
-                        println!("    -> [Tier 2 1-Click Glue Patch] {explanation}");
+                        format!("[Tier 2 Compatibility Patch, checked before it is applied] {explanation}")
                     }
                     ConflictResolutionSuggestion::SelectWinner { explanation, .. } => {
-                        println!("    -> [Tier 3 Winner Picker] {explanation}");
+                        format!("[Tier 3 Winner Picker] {explanation}")
                     }
-                }
+                    ConflictResolutionSuggestion::ApplyAs { explanation, .. } => {
+                        format!("[Separate Edits, in the launcher] {explanation}")
+                    }
+                    ConflictResolutionSuggestion::SkipHunk { explanation, .. } => {
+                        format!("[Keep One Change, in the launcher] {explanation}")
+                    }
+                };
+                let _ = writeln!(out, "    -> {line}");
             }
         }
     } else {
-        println!("\n✓ Zero broken anchors or errors detected!");
+        let _ = writeln!(out, "\n✓ Zero broken anchors or errors detected!");
     }
-
-    Ok(())
+    if !notes.is_empty() {
+        let _ = writeln!(out, "\nNotes ({}):", notes.len());
+        for c in &notes {
+            let _ = writeln!(out, "  [INFO] {} — {}", c.target_file, c.description);
+        }
+    }
+    out
 }
 
 fn cmd_test_patches(paths: &QuarterMasterPaths, args: &[String]) -> Result<(), String> {
@@ -534,8 +577,8 @@ fn cmd_test_patches(paths: &QuarterMasterPaths, args: &[String]) -> Result<(), S
                 .join("Mods")
         });
 
-    let table = PatchTable::load(&target_mod_dir).map_err(|e| format!("{e:#}"))?;
-    let sim = simulate_and_analyze_patches(&table, &vanilla_files);
+    let table = PatchTable::load_strict(&target_mod_dir).map_err(|e| format!("{e:#}"))?;
+    let sim = simulate_with_compile_check(&table, &vanilla_files, settings.game_exe_path.as_deref());
 
     for f in &sim.files_touched {
         if let Some(ref tf) = target_filter {
@@ -934,11 +977,107 @@ fn cmd_schema(args: &[String]) -> Result<(), String> {
 
     std::fs::write(out_dir.join("mod.schema.json"), mod_schema).map_err(|e| e.to_string())?;
     std::fs::write(out_dir.join("qm.schema.json"), qm_schema).map_err(|e| e.to_string())?;
+    std::fs::write(
+        out_dir.join("faction.schema.json"),
+        qm_schema::faction::FACTION_JSON_SCHEMA,
+    )
+    .map_err(|e| e.to_string())?;
     println!(
-        "Wrote mod.schema.json and qm.schema.json to {}",
+        "Wrote mod.schema.json, qm.schema.json and faction.schema.json to {}",
         out_dir.display()
     );
     Ok(())
+}
+
+fn cmd_faction(args: &[String]) -> Result<(), String> {
+    let usage = "Usage: qm faction check <mod_dir> [--json]";
+    if args.first().map(|s| s.as_str()) != Some("check") {
+        return Err(usage.to_string());
+    }
+    let dir = args
+        .iter()
+        .skip(1)
+        .find(|a| !a.starts_with("--"))
+        .ok_or(usage)?;
+    let json = args.iter().any(|a| a == "--json");
+    let dir = Path::new(dir);
+    if !qm_schema::faction::has_faction_file(dir) {
+        return Err(format!("No faction.toml in {}", dir.display()));
+    }
+    let report = qm_schema::faction::load_faction(dir);
+
+    if json {
+        let diags: Vec<_> = report
+            .diagnostics
+            .iter()
+            .map(|d| {
+                serde_json::json!({
+                    "severity": format!("{:?}", d.severity).to_lowercase(),
+                    "message": d.message,
+                })
+            })
+            .collect();
+        let out = serde_json::json!({
+            "ok": !report.has_errors(),
+            "diagnostics": diags,
+            "faction": report.faction,
+        });
+        println!("{}", serde_json::to_string_pretty(&out).unwrap());
+    } else {
+        for d in &report.diagnostics {
+            println!("  [{:?}] {}", d.severity, d.message);
+        }
+        match &report.faction {
+            Some(f) => {
+                println!();
+                println!("{} ({}) replaces the {}.", f.name, f.id, f.replaces.label());
+                for (tag, frames) in f.frames.iter().filter(|(_, fr)| !fr.is_empty()) {
+                    println!("  unit art for '{tag}': {} frames", frames.len());
+                }
+                let reskins = f.weapons.iter().filter(|w| w.mode == "reskin").count();
+                let new = f.weapons.len() - reskins;
+                if !f.weapons.is_empty() {
+                    println!("  weapons: {reskins} reskinned, {new} new");
+                }
+                if !f.spawn_swap.is_empty() {
+                    let swaps: Vec<String> =
+                        f.spawn_swap.iter().map(|(a, b)| format!("{a} -> {b}")).collect();
+                    println!("  swapped weapons: {}", swaps.join(", "));
+                }
+                if !f.classes.is_empty() {
+                    let names: Vec<&str> = f.classes.keys().map(|s| s.as_str()).collect();
+                    println!("  classes: {}", names.join(", "));
+                }
+                let voice_files: usize = f.voices.iter().map(|v| v.exact.len()).sum();
+                if voice_files > 0 {
+                    println!("  voice files: {voice_files}");
+                }
+                if !f.vehicles.is_empty() {
+                    let names: Vec<String> = f
+                        .vehicles
+                        .iter()
+                        .map(|v| match &v.name {
+                            Some(n) => format!("{} as {n}", v.tag),
+                            None => v.tag.clone(),
+                        })
+                        .collect();
+                    println!("  vehicles: {}", names.join(", "));
+                }
+                if !f.text.is_empty() {
+                    println!("  game strings: {}", f.text.len());
+                }
+                println!("\nPASSED");
+            }
+            None => println!(
+                "\nFAILED: fix the errors above; QuarterMaster won't load this faction until then."
+            ),
+        }
+    }
+    if report.has_errors() {
+        Err("faction check failed".to_string())
+    } else {
+        Ok(())
+    }
 }
 
 fn cmd_register_protocols() -> Result<(), String> {
@@ -984,5 +1123,57 @@ fn cmd_watch(paths: &QuarterMasterPaths, args: &[String]) -> Result<(), String> 
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn conflict(severity: &str, suggestions: Vec<ConflictResolutionSuggestion>) -> DetectedConflict {
+        DetectedConflict {
+            id: format!("{severity}-1"),
+            severity: severity.into(),
+            kind: "k".into(),
+            target_file: "main.lua".into(),
+            mod_a_id: "a".into(),
+            mod_b_id: None,
+            patch_a_id: "a:p".into(),
+            patch_b_id: None,
+            description: format!("a {severity} finding"),
+            suggestions,
+            consumer: None,
+            sites_lost: None,
+            same_line: None,
+        }
+    }
+
+    #[test]
+    fn info_notes_are_listed_apart_and_keep_the_no_errors_line() {
+        let text = conflicts_text(&[conflict("info", Vec::new()), conflict("info", Vec::new())]);
+        assert!(text.contains("Zero broken anchors or errors detected"), "{text}");
+        assert!(text.contains("Notes (2):"), "{text}");
+        assert!(!text.contains("Detected Conflicts"), "{text}");
+
+        let text = conflicts_text(&[conflict("warning", Vec::new()), conflict("info", Vec::new())]);
+        assert!(text.contains("Detected Conflicts & 3-Tier Resolutions (1):"), "{text}");
+        assert!(text.contains("[WARNING] main.lua — a warning finding"), "{text}");
+        assert!(text.contains("Notes (1):\n  [INFO] main.lua — a info finding"), "{text}");
+        assert!(!text.contains("Zero broken anchors"), "{text}");
+    }
+
+    #[test]
+    fn separate_edits_is_offered_in_the_launcher() {
+        let apply_as = ConflictResolutionSuggestion::ApplyAs {
+            patch_id: "a:p".into(),
+            mod_id: "a".into(),
+            explanation: "Run it as separate edits.".into(),
+        };
+        let text = conflicts_text(&[conflict("warning", vec![apply_as])]);
+        assert!(
+            text.contains("-> [Separate Edits, in the launcher] Run it as separate edits."),
+            "{text}"
+        );
+        assert!(!text.contains("not available yet"), "{text}");
     }
 }

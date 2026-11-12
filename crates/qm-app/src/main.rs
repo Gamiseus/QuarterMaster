@@ -720,6 +720,9 @@ fn handle_http_connection(
                 code_snippet: Vec::new(),
                 active_profile_id: Some(settings.active_profile_id.clone()),
                 active_mods: HashMap::new(),
+                run_id: None,
+                suspected_fix_ids: Vec::new(),
+                suspected_adjusted_copy: false,
             };
             let _ = fs::create_dir_all(&paths.logs_dir);
             let file_path = paths.logs_dir.join("crash-simulated.json");
@@ -1135,7 +1138,7 @@ fn build_full_state(paths: &QuarterMasterPaths) -> Result<Value, String> {
             {
                 c.report.clone()
             } else {
-                let rep = if let Ok(table) = PatchTable::load(&profile_mods_dir) {
+                let rep = if let Ok(table) = PatchTable::load_strict(&profile_mods_dir) {
                     simulate_and_analyze_patches(&table, &vanilla_files)
                 } else {
                     qm_manager::SimulationReport {
@@ -1145,6 +1148,24 @@ fn build_full_state(paths: &QuarterMasterPaths) -> Result<Value, String> {
                         total_patches: 0,
                         applied_patches: 0,
                         broken_anchors: 0,
+                        order_diagnostics: Vec::new(),
+                        traces: Default::default(),
+                        compile_check: Default::default(),
+                        plan_error: None,
+                        plan_warnings: Vec::new(),
+                        load_errors: Vec::new(),
+                        fix_bindings: Vec::new(),
+                        overridden_rules: Vec::new(),
+                        unknown_ids: Vec::new(),
+                        suspended_rungs: Vec::new(),
+                        invalid_rungs: Vec::new(),
+                        overrides: Vec::new(),
+                        losses: Vec::new(),
+                        kept_anchors: Vec::new(),
+                        runs_as: Vec::new(),
+                        failure_groups: Vec::new(),
+                        inferred_edges: Vec::new(),
+                        save_fields: Default::default(),
                     }
                 };
                 *cache = Some(CachedSimulation {
@@ -1156,7 +1177,7 @@ fn build_full_state(paths: &QuarterMasterPaths) -> Result<Value, String> {
                 rep
             }
         } else {
-            let rep = if let Ok(table) = PatchTable::load(&profile_mods_dir) {
+            let rep = if let Ok(table) = PatchTable::load_strict(&profile_mods_dir) {
                 simulate_and_analyze_patches(&table, &vanilla_files)
             } else {
                 qm_manager::SimulationReport {
@@ -1166,6 +1187,24 @@ fn build_full_state(paths: &QuarterMasterPaths) -> Result<Value, String> {
                     total_patches: 0,
                     applied_patches: 0,
                     broken_anchors: 0,
+                    order_diagnostics: Vec::new(),
+                    traces: Default::default(),
+                    compile_check: Default::default(),
+                    plan_error: None,
+                    plan_warnings: Vec::new(),
+                    load_errors: Vec::new(),
+                    fix_bindings: Vec::new(),
+                    overridden_rules: Vec::new(),
+                    unknown_ids: Vec::new(),
+                    suspended_rungs: Vec::new(),
+                    invalid_rungs: Vec::new(),
+                    overrides: Vec::new(),
+                    losses: Vec::new(),
+                    kept_anchors: Vec::new(),
+                    runs_as: Vec::new(),
+                    failure_groups: Vec::new(),
+                    inferred_edges: Vec::new(),
+                    save_fields: Default::default(),
                 }
             };
             *cache = Some(CachedSimulation {
@@ -1229,7 +1268,7 @@ fn build_file_diff(paths: &QuarterMasterPaths, target_file: &str) -> Result<Valu
         .profiles_dir
         .join(&settings.active_profile_id)
         .join("Mods");
-    let table = PatchTable::load(&profile_mods_dir).map_err(|e| format!("{e:#}"))?;
+    let table = PatchTable::load_strict(&profile_mods_dir).map_err(|e| format!("{e:#}"))?;
     let sim = simulate_and_analyze_patches(&table, &vanilla_files);
     let file_res = sim
         .files_touched
@@ -1497,49 +1536,14 @@ fn build_conflict_demo() -> Result<Value, String> {
     }))
 }
 
+/// Applies one resolver suggestion to the active profile. The change is simulated first, and
+/// one that breaks a file or adds a conflict is refused with nothing written (D63).
 fn apply_conflict_resolution(paths: &QuarterMasterPaths, v: &Value) -> Result<Value, String> {
-    let settings = paths.load_settings();
-    let mut prof = paths.get_profile(&settings.active_profile_id)?;
     let sug: ConflictResolutionSuggestion = serde_json::from_value(v["suggestion"].clone())
         .map_err(|e| format!("Invalid suggestion payload: {e}"))?;
-
-    match sug {
-        ConflictResolutionSuggestion::SwapModOrder {
-            move_mod_id,
-            before_mod_id,
-            suggested_priority,
-            ..
-        } => {
-            prof.mod_priorities
-                .insert(move_mod_id.clone(), suggested_priority);
-            prof.user_load_after
-                .entry(before_mod_id)
-                .or_default()
-                .push(move_mod_id);
-        }
-        ConflictResolutionSuggestion::GenerateGluePatch { glue_patch, .. } => {
-            prof.glue_patches.push(glue_patch);
-        }
-        ConflictResolutionSuggestion::SelectWinner {
-            patch_a_id,
-            patch_b_id,
-            ..
-        } => {
-            let winner_idx = v["winner_index"].as_u64().unwrap_or(0) as usize;
-            let loser_patch = if winner_idx == 0 {
-                patch_b_id
-            } else {
-                patch_a_id
-            };
-            if !prof.disabled_patches.contains(&loser_patch) {
-                prof.disabled_patches.push(loser_patch);
-            }
-        }
-    }
-
-    paths.save_profile(&prof)?;
-    paths.activate_profile(&prof.id)?;
-    Ok(json!({ "ok": true }))
+    let winner_idx = v["winner_index"].as_u64().unwrap_or(0) as usize;
+    let check = qm_manager::conflict::resolve_conflict(paths, &sug, winner_idx)?;
+    Ok(json!({ "ok": true, "impact": check.impact }))
 }
 
 fn update_mod_config(paths: &QuarterMasterPaths, v: &Value) -> Result<Value, String> {

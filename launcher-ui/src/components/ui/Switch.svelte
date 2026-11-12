@@ -43,10 +43,10 @@
   .field :global(.qm-switch-track) {
     display: inline-flex;
     align-items: center;
-    width: 36px;
-    height: 20px;
+    width: var(--qm-switch-w);
+    height: var(--qm-switch-h);
     padding: 2px;
-    border: 1px solid var(--qm-border);
+    border: 1px solid var(--qm-border-strong);
     border-radius: var(--qm-radius-lg);
     background: var(--qm-raised);
     transition:
@@ -65,8 +65,8 @@
 
   .field :global(.qm-switch-thumb) {
     display: block;
-    width: 14px;
-    height: 14px;
+    width: var(--qm-switch-thumb);
+    height: var(--qm-switch-thumb);
     border-radius: var(--qm-radius-lg);
     background: var(--qm-text-muted);
     transition:
@@ -75,7 +75,8 @@
   }
 
   .field :global(.qm-switch-thumb[data-state="checked"]) {
-    transform: translateX(16px);
+    /* Travel = track width less track height (the thumb sits in a square of the track height). */
+    transform: translateX(calc(var(--qm-switch-w) - var(--qm-switch-h)));
     background: var(--qm-accent-contrast);
   }
 

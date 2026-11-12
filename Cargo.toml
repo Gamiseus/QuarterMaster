@@ -9,11 +9,14 @@ members = [
     "crates/qm-cli",
     "crates/qm-app",
     "crates/qm-win",
-    "crates/minimal-minhook-reference"
+    "crates/minimal-minhook-reference",
+    "tools/qm-site-builder"
 ]
 
 [workspace.dependencies]
-specta = { version = "=2.0.0-rc.22", features = ["derive"] }
+specta = { version = "=2.0.0-rc.22", features = ["derive", "serde_json"] }
+jiff = { version = "0.2.35", default-features = false, features = ["std", "tz-system", "tzdb-bundle-platform"] }
+zip = { version = "6.0.0" }
 
 [profile.release]
 opt-level = "s"

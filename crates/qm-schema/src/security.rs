@@ -109,9 +109,14 @@ impl SecurityScanReport {
                 r"\bos\.remove\s*\(",
             ),
             (
+                SecurityCapability::ProcessExecution,
+                "os.rename",
+                r"\bos\.rename\s*\(",
+            ),
+            (
                 SecurityCapability::NativeFfi,
                 "require('ffi')",
-                r#"require\s*\(?\s*["']ffi["']"#,
+                r#"require\s*[(,]?\s*["']ffi["']"#,
             ),
             (
                 SecurityCapability::NativeFfi,
@@ -126,7 +131,7 @@ impl SecurityScanReport {
             (
                 SecurityCapability::NetworkAccess,
                 "socket / http",
-                r#"require\s*\(?\s*["'](socket|socket\.http|ssl\.https|enet)["']"#,
+                r#"require\s*[(,]?\s*["'](socket|socket\.http|ssl\.https|enet)["']"#,
             ),
             (
                 SecurityCapability::RawFilesystemIo,
@@ -334,5 +339,30 @@ local p = io.popen("dir Mods /b")
             .capabilities
             .contains(&SecurityCapability::RawFilesystemIo));
         assert_eq!(report.findings.len(), 2);
+    }
+
+    /// `pcall(require, "ffi")` asks for a module as much as `require("ffi")` does.
+    #[test]
+    fn a_module_asked_for_through_pcall_is_found() {
+        for (code, capability) in [
+            ("local ok, ffi = pcall(require, \"ffi\")", SecurityCapability::NativeFfi),
+            ("local ok, s = pcall(require, 'socket')", SecurityCapability::NetworkAccess),
+            ("local ffi = require 'ffi'", SecurityCapability::NativeFfi),
+        ] {
+            let findings = SecurityScanReport::scan_source("a.lua", code);
+            assert_eq!(findings.len(), 1, "{code}");
+            assert_eq!(findings[0].capability, capability, "{code}");
+        }
+    }
+
+    /// Every pattern the wiki's security table names for "Running programs" is found.
+    #[test]
+    fn each_program_running_call_is_found() {
+        for call in ["os.execute", "io.popen", "os.remove", "os.rename"] {
+            let findings = SecurityScanReport::scan_source("a.lua", &format!("{call}(x)\n"));
+            assert_eq!(findings.len(), 1, "{call}");
+            assert_eq!(findings[0].capability, SecurityCapability::ProcessExecution);
+            assert_eq!(findings[0].severity, "high");
+        }
     }
 }

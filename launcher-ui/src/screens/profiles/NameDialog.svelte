@@ -9,17 +9,22 @@
     submitLabel: string;
     description?: string;
     disabled?: boolean;
+    /** The field's value each time the dialog opens. */
+    initial?: string;
     onsubmit: (name: string) => void | Promise<void>;
   }
 
-  let { open = $bindable(false), title, label, submitLabel, description, disabled = false, onsubmit }: Props = $props();
+  let { open = $bindable(false), title, label, submitLabel, description, disabled = false, initial = "", onsubmit }: Props =
+    $props();
 
+  const uid = $props.id();
+  const formId = `${uid}-form`;
   let name = $state("");
   let busy = $state(false);
   const valid = $derived(name.trim().length > 0);
 
   $effect(() => {
-    if (open) untrack(() => (name = ""));
+    if (open) untrack(() => (name = initial));
   });
 
   async function submit(e: SubmitEvent) {
@@ -38,11 +43,11 @@
 </script>
 
 <Dialog bind:open {title} {description}>
-  <form id="name-form" onsubmit={submit}>
+  <form id={formId} onsubmit={submit}>
     <TextField {label} bind:value={name} />
   </form>
   {#snippet footer()}
     <Button variant="ghost" onclick={() => (open = false)}>Cancel</Button>
-    <Button variant="primary" type="submit" form="name-form" disabled={!valid || busy || disabled}>{submitLabel}</Button>
+    <Button variant="primary" type="submit" form={formId} disabled={!valid || busy || disabled}>{submitLabel}</Button>
   {/snippet}
 </Dialog>

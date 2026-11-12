@@ -1,10 +1,11 @@
 //! Mod queries and actions, plus the `WarmMods` job.
 use crate::cache::Loadable;
-use crate::dto::{ConfigResetMode, ImportRequest, ModDetail, ModSummary};
+use crate::dto::{AssetFile, ConfigResetMode, ImportRequest, ModDetail, ModSummary};
 use crate::error::{ErrorKind, OrKind, QmError, QmResult};
 use crate::events::Scope;
 use crate::jobs::{JobCtx, JobId, JobKind};
 use crate::service::Service;
+use qm_core::patch::loader::classify_asset_relative_path;
 use qm_manager::{ArchiveModCandidate, InstalledMod};
 use qm_schema::{ConfigValue, ModSettingsStore, SecurityScanReport};
 use std::collections::HashMap;
@@ -53,6 +54,13 @@ impl Service {
                     changelog_md: m.changelog_markdown.clone(),
                     config_schema: m.config_schema.clone(),
                     saved_config: HashMap::new(),
+                    asset_files: qm_core::patch::loader::discover_dir_assets(&m.install_path)
+                        .into_iter()
+                        .map(|a| AssetFile {
+                            path: a.rel_path,
+                            overrides_vanilla: None,
+                        })
+                        .collect(),
                 };
                 // Skip caching if the mod index was invalidated while this was computed.
                 self.with_gens(|g| {
@@ -68,6 +76,19 @@ impl Service {
                 detail
             }
         };
+        // Marked here, not cached: the game files may be read after the detail was.
+        let vanilla_assets = self
+            .inner
+            .caches
+            .vanilla
+            .get()
+            .and_then(|v| v.assets.clone());
+        for f in &mut detail.asset_files {
+            f.overrides_vanilla = match (&vanilla_assets, classify_asset_relative_path(&f.path)) {
+                (Some(idx), Some(a)) => Some(idx.overrides(&a)),
+                _ => None,
+            };
+        }
         // Per-profile state is small and read fresh so profile switches never serve stale values.
         detail.summary.enabled = self
             .active_profile()
@@ -132,25 +153,32 @@ impl Service {
         Ok(store.mods.get(id).cloned().unwrap_or_default())
     }
 
-    pub fn mod_import_inspect(&self, path: &Path) -> QmResult<Vec<ArchiveModCandidate>> {
+    /// The mods a zip or folder would import; `allow_unmanaged` treats a folder without a
+    /// manifest as one unmanaged mod.
+    pub fn mod_import_inspect(
+        &self,
+        path: &Path,
+        allow_unmanaged: bool,
+    ) -> QmResult<Vec<ArchiveModCandidate>> {
         if !path.exists() {
             return Err(not_found_path(path));
         }
         self.paths()
-            .inspect_archive_candidates(path, false)
+            .inspect_archive_candidates(path, allow_unmanaged)
             .or_kind(ErrorKind::InvalidInput)
     }
 
-    /// Import in a cancellable `ModImport` job; the job output is the imported mod ids.
+    /// Import in a `ModImport` job (not cancellable); the job output is the imported mod ids.
+    /// Refused while the game runs, both before spawning and again under the install lock.
     pub fn mod_import(&self, req: ImportRequest) -> QmResult<JobId> {
         if !req.path.exists() {
             return Err(not_found_path(&req.path));
         }
+        self.ensure_not_running()?;
         let svc = self.clone();
         Ok(self.jobs().spawn(JobKind::ModImport, move |ctx| {
-            if ctx.is_cancelled() {
-                return Err(QmError::new(ErrorKind::Cancelled, "Job cancelled"));
-            }
+            let _install = svc.lock_install();
+            svc.ensure_not_running()?;
             ctx.progress(0.1, "Importing");
             let summary = svc
                 .paths()
@@ -173,6 +201,61 @@ impl Service {
         }))
     }
 
+    /// Copy the workspace mods folder into the library in a `WorkspaceSync` job (not
+    /// cancellable); the job output is the synced mod ids. Refused while the game runs.
+    pub fn workspace_sync(&self) -> QmResult<JobId> {
+        let ws = self
+            .paths()
+            .load_settings()
+            .workspace_mods_dir
+            .ok_or_else(|| {
+                QmError::new(ErrorKind::NotFound, "The workspace mods folder is not set.")
+            })?;
+        if !ws.is_dir() {
+            return Err(not_found_path(&ws));
+        }
+        self.ensure_not_running()?;
+        let svc = self.clone();
+        Ok(self.jobs().spawn(JobKind::WorkspaceSync, move |ctx| {
+            let _install = svc.lock_install();
+            svc.ensure_not_running()?;
+            ctx.progress(0.1, "Syncing workspace mods");
+            let synced = svc
+                .paths()
+                .sync_workspace_mods(&ws)
+                .or_kind(ErrorKind::Io)?;
+            let ids: Vec<String> = synced.iter().map(|m| m.manifest.id.clone()).collect();
+            ctx.progress(0.9, "Updating mod index");
+            svc.after_mod_import(&ids)?;
+            Ok(Some(ids.join(", ")))
+        }))
+    }
+
+    /// Set (`Some`) or remove (`None`) one mod's automatic update choice, which wins over the
+    /// global `auto_install_updates`.
+    pub fn mod_auto_update_set(&self, mod_id: &str, enabled: Option<bool>) -> QmResult<()> {
+        if !is_plain_id(mod_id) {
+            return Err(QmError::new(
+                ErrorKind::InvalidInput,
+                format!("'{mod_id}' is not a mod id."),
+            ));
+        }
+        let paths = self.paths();
+        let mut s = paths.load_settings();
+        match enabled {
+            Some(v) => {
+                s.auto_update_mods.insert(mod_id.to_string(), v);
+            }
+            None => {
+                s.auto_update_mods.remove(mod_id);
+            }
+        }
+        paths.save_settings(&s).or_kind(ErrorKind::Io)?;
+        // Only the settings view changed; nothing derived from the game paths needs a refill.
+        self.notify(Scope::Settings);
+        Ok(())
+    }
+
     /// Mods `ids` were (re)imported: invalidate the index and restage the active profile when it
     /// uses one of them (a replaced version dir is gone).
     pub(crate) fn after_mod_import(&self, ids: &[String]) -> QmResult<()> {
@@ -182,17 +265,17 @@ impl Service {
             .is_ok_and(|p| p.enabled_mods.iter().any(|m| ids.contains(m)));
         if uses_imported && self.ensure_not_running().is_ok() {
             let active = self.paths().load_settings().active_profile_id;
-            self.paths()
-                .activate_profile(&active)
-                .or_kind(ErrorKind::Io)?;
+            self.stage_profile(&active)?;
             self.after_active_profile_change();
         }
         Ok(())
     }
 
     /// Remove every installed version and all profile references to the mod.
+    /// `Conflict` while an install job runs.
     pub fn mod_uninstall(&self, id: &str) -> QmResult<()> {
         self.ensure_not_running()?;
+        self.ensure_no_install()?;
         if !is_plain_id(id) || !self.paths().library_dir.join(id).is_dir() {
             return Err(QmError::new(
                 ErrorKind::NotFound,
@@ -206,10 +289,7 @@ impl Service {
         self.invalidate(Scope::Mods);
         let restaged = if was_enabled {
             let active = self.paths().load_settings().active_profile_id;
-            self.paths()
-                .activate_profile(&active)
-                .or_kind(ErrorKind::Io)
-                .map(|_| ())
+            self.stage_profile(&active)
         } else {
             Ok(())
         };
@@ -322,7 +402,7 @@ fn library_is_empty(dir: &Path) -> bool {
     })
 }
 
-fn is_plain_id(id: &str) -> bool {
+pub(crate) fn is_plain_id(id: &str) -> bool {
     !id.is_empty() && id != "." && id != ".." && !id.contains(['/', '\\', ':'])
 }
 

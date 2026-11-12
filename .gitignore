@@ -29,12 +29,17 @@ result*
 .DS_Store
 Thumbs.db
 desktop.ini
-/tests/__pycache__
+__pycache__/
+
+# Tests kept on our machines only (see TESTING.md). Unit tests beside the code stay tracked.
+/crates/*/tests/
+/tools/*/tests/
+/launcher-ui/tests/
+/ui/tests/
 
 # launcher-ui (Node, Vite, Playwright)
 launcher-ui/node_modules/
 launcher-ui/dist/
+launcher-ui/dist-e2e/
 launcher-ui/test-results/
 launcher-ui/playwright-report/
-/launcher-ui/tests
-/crates/qm-core/tests

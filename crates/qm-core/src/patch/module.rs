@@ -1,3 +1,13 @@
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::panic,
+        clippy::indexing_slicing
+    )
+)]
+
 use std::{
     ffi::CString,
     path::{Path, PathBuf},
@@ -5,6 +15,7 @@ use std::{
 };
 
 use super::{OnFailurePolicy, Priority};
+use crate::prepare::canonical_path;
 use crate::sys::{self, lua_err_identity_closure, lua_identity_closure, LuaState, LuaStateTrait};
 use crate::RUNTIME;
 use serde::{Deserialize, Serialize};
@@ -34,6 +45,10 @@ pub struct ModulePatch {
     #[serde(skip)]
     pub disabled: bool,
 
+    /// Profile and compat data (Phase C §3.3); never read from a patch file.
+    #[serde(skip)]
+    pub qm: crate::patch::plan::PatchExtra,
+
     // Used for display name of the source. Is the relative path.
     #[serde(skip)]
     pub display_source: String,
@@ -44,6 +59,19 @@ pub struct ModulePatch {
 }
 
 impl ModulePatch {
+    /// Whether a `load_now` module runs before chunk `file_name`: its `before` names the same
+    /// file in canonical form (D44).
+    pub fn runs_before(&self, file_name: &str) -> bool {
+        self.before
+            .as_deref()
+            .is_some_and(|b| canonical_path(b) == canonical_path(file_name))
+    }
+
+    /// The chunk name the game loads this module under: `=[qm <name> "<source>"]` (D44).
+    pub fn chunk_name(&self) -> String {
+        format!("=[qm {} \"{}\"]", self.name, self.display_source)
+    }
+
     /// Apply a module patch by loading the input file(s) into memory and injecting them into
     /// the global `package.preload` table.
     ///
@@ -56,16 +84,22 @@ impl ModulePatch {
         state: *mut LuaState,
         path: &Path,
     ) -> Result<bool, String> {
-        // Stop if we're not at the correct insertion point.
-        if self.load_now && self.before.as_ref().unwrap() != file_name {
+        // Stop if we're not at the correct insertion point (canonical paths, D44).
+        if self.load_now && !self.runs_before(file_name) {
             return Ok(false);
         }
 
         let source = self.content.as_bytes();
         let source_len = source.len();
 
-        let name = format!("=[qm {} \"{}\"]", &self.name, &self.display_source);
-        let name_cstr = CString::new(name).unwrap();
+        // The loader rejects a NUL in the name or source; these errors are a backstop.
+        let name_cstr = CString::new(self.chunk_name())
+            .map_err(|_| format!("Module {:?} has a NUL in its name or source", self.name))?;
+        let module_cstr = CString::new(self.name.clone())
+            .map_err(|_| format!("Module {:?} has a NUL in its name", self.name))?;
+        let Some(qm) = RUNTIME.get() else {
+            return Err("Internal QuarterMaster error: Failed to acquire the QM runtime".to_owned());
+        };
 
         // Push the global package.preload table onto the top of the stack, saving its index.
         let stack_top = sys::lua_gettop(state);
@@ -76,8 +110,6 @@ impl ModulePatch {
         let field_index = sys::lua_gettop(state);
 
         // Load the buffer and execute it via lua_pcall, pushing the result to the top of the stack.
-        let qm = &RUNTIME.get().unwrap();
-
         let return_code = qm.apply_buffer_patches(
             state,
             source.as_ptr(),
@@ -95,7 +127,6 @@ impl ModulePatch {
             let err = state.to_string(-1);
             log::error!("Error: {err}");
             state.push_closure(lua_err_identity_closure, 1);
-            let module_cstr = CString::new(self.name.clone()).unwrap();
             sys::lua_setfield(state, field_index, module_cstr.into_raw() as _);
             sys::lua_settop(state, stack_top);
             if self.load_now {
@@ -119,7 +150,6 @@ impl ModulePatch {
                 let err = state.to_string(-1);
                 log::error!("Error: {err}");
                 state.push_closure(lua_err_identity_closure, 1);
-                let module_cstr = CString::new(self.name.clone()).unwrap();
                 sys::lua_setfield(state, field_index, module_cstr.into_raw() as _);
                 sys::lua_settop(state, stack_top);
                 return Err(
@@ -131,10 +161,35 @@ impl ModulePatch {
         }
 
         // Insert results onto the package.preload global table.
-        let module_cstr = CString::new(self.name.clone()).unwrap();
         sys::lua_setfield(state, field_index, module_cstr.into_raw() as _);
         // Always ensure that the lua stack is in good order
         sys::lua_settop(state, stack_top);
         Ok(true)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn module(before: &str) -> ModulePatch {
+        serde_json::from_value(serde_json::json!({
+            "source": "x.lua", "name": "m", "load_now": true, "before": before
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn load_now_matches_canonical_paths() {
+        // Output change (D44, Task 12): before Phase D a `before` key matched only the chunk
+        // name with its `@` stripped, exactly, so only "main.lua" ran the module. Every other
+        // form here, "@main.lua" and "=main.lua" among them, is a new match.
+        for before in ["main.lua", "@main.lua", "=main.lua", "./main.lua", ".\\main.lua"] {
+            for chunk in ["main.lua", "@main.lua", "@./main.lua"] {
+                assert!(module(before).runs_before(chunk), "{before} {chunk}");
+            }
+        }
+        assert!(!module("main.lua").runs_before("@x/main.lua"));
+        assert!(!module("main.lua").runs_before("@conf.lua"));
     }
 }

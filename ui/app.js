@@ -453,7 +453,7 @@ function renderAll() {
 
   // Nav counters
   document.getElementById("nav-count-mods").textContent = `${d.active_profile.enabled_mods.length}/${d.installed_mods.length}`;
-  document.getElementById("nav-count-conflicts").textContent = d.simulation.conflicts.length;
+  document.getElementById("nav-count-conflicts").textContent = splitFindings(d.simulation.conflicts).conflicts.length;
   const activeSaveEntry =
     d.save_profiles.find((s) => s.profile.id === state.selectedSaveSlotId) || d.save_profiles[0];
   document.getElementById("nav-count-squad").textContent =
@@ -1103,19 +1103,30 @@ function renderModDetailDrawer() {
 // ============================================================================
 // TAB 2: OFFLINE PATCH SIMULATION, CLICKABLE PATCH BOXES & CONFLICT RESOLVER
 // ============================================================================
+// Info notes (severity "info": multi_match, the semantic notes) are not conflicts: they are
+// counted and listed apart. Each entry keeps its index in `all`, which the resolve buttons use.
+function splitFindings(all) {
+  const conflicts = [];
+  const notes = [];
+  (all || []).forEach((c, idx) => (c.severity === "info" ? notes : conflicts).push({ c, idx }));
+  return { conflicts, notes };
+}
+
 function renderConflictsAndDiffTab() {
   const sim = state.data.simulation;
   const prof = state.data.active_profile;
 
-  const hasConflicts = sim.conflicts && sim.conflicts.length > 0;
+  const { conflicts, notes } = splitFindings(sim.conflicts);
+  const hasConflicts = conflicts.length > 0;
   const statusSummary = hasConflicts
-    ? `${sim.applied_patches}/${sim.total_patches} patches applied across ${sim.files_touched.length} files (${sim.conflicts.length} conflict${sim.conflicts.length === 1 ? "" : "s"} detected)`
+    ? `${sim.applied_patches}/${sim.total_patches} patches applied across ${sim.files_touched.length} files (${conflicts.length} conflict${conflicts.length === 1 ? "" : "s"} detected)`
     : `All ${sim.applied_patches} patches in '${escapeHtml(prof.name)}' applied without conflicts across ${sim.files_touched.length} files.`;
 
   document.getElementById("sim-summary-bar").innerHTML = `
     <div style="display: flex; align-items: center; gap: 8px;">
       <span style="font-weight: 600; color: var(--text-primary);">${statusSummary}</span>
       ${sim.broken_anchors > 0 ? `<span class="badge badge-warn">${sim.broken_anchors} Broken Anchors</span>` : ""}
+      ${notes.length > 0 ? `<span class="badge">${notes.length} Note${notes.length === 1 ? "" : "s"}</span>` : ""}
     </div>
     <div class="toolbar-row">
       ${prof.glue_patches.length > 0 ? `<span class="badge">${prof.glue_patches.length} Active Glue Patches</span>` : ""}
@@ -1124,13 +1135,25 @@ function renderConflictsAndDiffTab() {
   `;
 
   const confContainer = document.getElementById("conflicts-list-container");
-  if (!hasConflicts) {
+  if (!hasConflicts && notes.length === 0) {
     confContainer.innerHTML = "";
     confContainer.style.display = "none";
   } else {
     confContainer.style.display = "";
-    confContainer.innerHTML = sim.conflicts
-      .map((c, idx) => {
+    const noteCards = notes
+      .map(
+        ({ c }) => `
+          <div class="conflict-card">
+            <div>
+              <span class="badge">NOTE</span>
+              <strong>${escapeHtml(c.target_file)}</strong> — ${escapeHtml(c.description)}
+            </div>
+          </div>
+        `,
+      )
+      .join("");
+    confContainer.innerHTML = conflicts
+      .map(({ c, idx }) => {
         const tierBtns = (c.suggestions || [])
           .map((sug, sIdx) => {
             if (sug.tier === "swap_mod_order") {
@@ -1165,7 +1188,7 @@ function renderConflictsAndDiffTab() {
           </div>
         `;
       })
-      .join("");
+      .join("") + noteCards;
 
     confContainer.querySelectorAll(".resolve-conflict-btn").forEach((btn) => {
       btn.addEventListener("click", async () => {

@@ -33,6 +33,36 @@ pub struct InstalledMod {
     pub is_workspace_linked: bool,
     #[serde(default)]
     pub installed_versions: Vec<String>,
+    #[serde(default)]
+    pub kind: ModKind,
+}
+
+/// How a library folder is loaded: through its patch files, as a faction (`faction.toml` and no
+/// patch files), as an `assets/` folder only (the autoloader), or neither.
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ModKind {
+    #[default]
+    Managed,
+    Unmanaged,
+    Assets,
+    Faction,
+}
+
+impl ModKind {
+    /// Uses the loader's own rules for patch files and assets.
+    pub fn of_dir(mod_dir: &Path) -> Self {
+        if !qm_core::patch::loader::dir_patch_files(mod_dir).is_empty() {
+            ModKind::Managed
+        } else if qm_schema::faction::has_faction_file(mod_dir) {
+            ModKind::Faction
+        } else if has_supported_assets_dir(mod_dir) {
+            ModKind::Assets
+        } else {
+            ModKind::Unmanaged
+        }
+    }
 }
 
 #[cfg_attr(feature = "specta", derive(specta::Type))]
@@ -51,6 +81,31 @@ pub struct ImportSummary {
     pub upgraded_from_versions: Vec<(String, String)>,
     #[serde(default)]
     pub cas_deduplicated_files: usize,
+}
+
+const RESERVED_DEVICE_NAMES: [&str; 22] = [
+    "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8",
+    "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+];
+
+/// Library staging area for copy-then-swap installs (top-level dot folder, skipped by indexing).
+const STAGING_DIR: &str = ".qm-staging";
+
+fn is_reserved_device_stem(seg: &str) -> bool {
+    let stem = seg.split('.').next().unwrap_or(seg).to_ascii_uppercase();
+    RESERVED_DEVICE_NAMES.contains(&stem.as_str())
+}
+
+/// True when `s` can be used as one folder name under the library: non-empty, not `.`/`..`,
+/// no `/ \ :`, not a Windows reserved device name, no trailing dot or space.
+pub(crate) fn is_safe_segment(s: &str) -> bool {
+    !s.is_empty()
+        && s != "."
+        && s != ".."
+        && !s.contains(['/', '\\', ':'])
+        && !s.ends_with('.')
+        && !s.ends_with(' ')
+        && !is_reserved_device_stem(s)
 }
 
 /// Validates a relative path from an archive or folder against zip-slip, absolute paths,
@@ -82,13 +137,7 @@ pub fn validate_safe_relative_path(raw_path: &str) -> Result<PathBuf, String> {
                 }
                 // Windows device stem guard: Only reject files whose exact base stem matches a reserved device name
                 // (e.g. `con.lua`, `aux.json`). Files like `console.lua`, `con_utils.lua`, `aux_audio.lua` are fully permitted.
-                let stem = seg.split('.').next().unwrap_or(seg).to_ascii_uppercase();
-                let reserved = [
-                    "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6",
-                    "COM7", "COM8", "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7",
-                    "LPT8", "LPT9",
-                ];
-                if reserved.contains(&stem.as_str()) {
+                if is_reserved_device_stem(seg) {
                     return Err(format!(
                         "Rejected Windows reserved filename '{seg}' in archive"
                     ));
@@ -131,7 +180,7 @@ impl QuarterMasterPaths {
             };
             for ver_entry in ver_dirs.filter_map(|e| e.ok()) {
                 let ver_path = ver_entry.path();
-                if !ver_path.is_dir() {
+                if !ver_path.is_dir() || ver_entry.file_name().to_string_lossy().starts_with('.') {
                     continue;
                 }
                 if let Ok(installed) = inspect_mod_directory(&ver_path, false) {
@@ -175,7 +224,7 @@ impl QuarterMasterPaths {
 
     /// Retrieves a specific version of a mod from `library/<mod_id>/<version>/`, or the latest version if `None`.
     pub fn get_mod_version(&self, mod_id: &str, version: Option<&str>) -> Option<InstalledMod> {
-        if let Some(ver) = version {
+        if let Some(ver) = version.filter(|v| !v.starts_with('.')) {
             let ver_dir = self.library_dir.join(mod_id).join(ver);
             if ver_dir.is_dir() {
                 if let Ok(mut inst) = inspect_mod_directory(&ver_dir, false) {
@@ -219,6 +268,7 @@ impl QuarterMasterPaths {
             }
             if path.join("qm.toml").is_file()
                 || path.join("mod.json").is_file()
+                || qm_schema::faction::has_faction_file(&path)
                 || has_supported_assets_dir(&path)
             {
                 if let Ok(summary) = self.import_mod_from_path(&path, None, false) {
@@ -246,7 +296,7 @@ impl QuarterMasterPaths {
                 let mut mod_roots = find_mod_roots_in_tree(root);
                 if mod_roots.is_empty() {
                     if !allow_unmanaged {
-                        return Err(format!("No `qm.toml` or supported `assets/` directory found in '{fallback_name}'."));
+                        return Err(format!("No `qm.toml`, `faction.toml` or supported `assets/` directory found in '{fallback_name}'."));
                     }
                     mod_roots.push(root.to_path_buf());
                 }
@@ -259,6 +309,7 @@ impl QuarterMasterPaths {
                         .filter(|s| !s.starts_with("import-inspect-"))
                         .unwrap_or(fallback_name);
                     let manifest = load_or_synthesize_manifest(&mod_root, default_folder)?;
+                    check_manifest_segments(&manifest)?;
                     let existing = existing_mods.iter().find(|m| m.manifest.id == manifest.id);
                     candidates.push(ArchiveModCandidate {
                         already_installed_version: existing.map(|m| m.manifest.version.clone()),
@@ -390,7 +441,7 @@ impl QuarterMasterPaths {
         if mod_roots.is_empty() {
             if !allow_unmanaged {
                 return Err(format!(
-                    "No `qm.toml` or supported `assets/` directory found in '{}'. Pass `allow_unmanaged = true` to import as an unmanaged mod.",
+                    "No `qm.toml`, `faction.toml` or supported `assets/` directory found in '{}'. Pass `allow_unmanaged = true` to import as an unmanaged mod.",
                     fallback_name
                 ));
             }
@@ -412,6 +463,7 @@ impl QuarterMasterPaths {
                 .unwrap_or(fallback_name);
 
             let manifest = load_or_synthesize_manifest(&mod_root, default_folder)?;
+            check_manifest_segments(&manifest)?;
             if let Some(filter_ids) = selected_mod_ids {
                 if !filter_ids.is_empty() && !filter_ids.contains(&manifest.id) {
                     continue;
@@ -424,40 +476,38 @@ impl QuarterMasterPaths {
                     upgraded_from_versions
                         .push((manifest.id.clone(), prev.manifest.version.clone()));
                 }
-                if policy == "replace" {
-                    // Remove older version directories when "replace" is chosen
-                    let mod_parent = self.library_dir.join(&manifest.id);
-                    if mod_parent.is_dir() {
-                        let _ = fs::remove_dir_all(&mod_parent);
-                    }
-                }
             }
 
+            // Copy-then-swap: build the new version in the staging folder (same volume), and only
+            // then remove what it replaces and rename it into place. A failed copy leaves the
+            // installed versions untouched.
+            let staging = self
+                .library_dir
+                .join(STAGING_DIR)
+                .join(format!("{}-{}", manifest.id, manifest.version));
+            if staging.is_dir() {
+                let _ = fs::remove_dir_all(&staging);
+            }
             let target_dir = self.library_dir.join(&manifest.id).join(&manifest.version);
-            if target_dir.exists() {
-                let _ = fs::remove_dir_all(&target_dir);
-            }
-            copy_directory_clean(&mod_root, &target_dir)?;
-
-            // Ensure normalized mod.json is written inside the library copy
-            let mod_json_path = target_dir.join("mod.json");
-            if let Ok(json_str) = serde_json::to_string_pretty(&manifest) {
-                let _ = fs::write(&mod_json_path, json_str);
-            }
-
-            // Compute and write .qm-integrity.json
-            let now = jiff::Zoned::now().to_string();
-            let integrity = IntegrityManifest::compute_for_directory(
-                &target_dir,
-                &manifest.id,
-                &manifest.version,
-                archive_sha256.clone(),
-                source_url.clone(),
-                now,
-            )?;
-            if let Ok(int_json) = serde_json::to_string_pretty(&integrity) {
-                let _ = fs::write(target_dir.join(".qm-integrity.json"), int_json);
-            }
+            let staged = self
+                .stage_mod_copy(
+                    &mod_root,
+                    &staging,
+                    &manifest,
+                    archive_sha256.clone(),
+                    source_url.clone(),
+                )
+                .and_then(|integrity| {
+                    self.swap_into_place(&staging, &target_dir, &manifest.id, policy == "replace")?;
+                    Ok(integrity)
+                });
+            let integrity = match staged {
+                Ok(i) => i,
+                Err(e) => {
+                    remove_any(&staging);
+                    return Err(e);
+                }
+            };
 
             // Content-Addressed Storage (.cas): store/deduplicate every file by SHA-256 hash
             for (rel_path, sha) in &integrity.files {
@@ -513,6 +563,75 @@ impl QuarterMasterPaths {
             upgraded_from_versions,
             cas_deduplicated_files,
         })
+    }
+
+    /// Copy `src` into `staging` and write the normalized `mod.json` and `.qm-integrity.json`.
+    fn stage_mod_copy(
+        &self,
+        src: &Path,
+        staging: &Path,
+        manifest: &ModManifest,
+        archive_sha256: Option<String>,
+        source_url: Option<String>,
+    ) -> Result<IntegrityManifest, String> {
+        copy_directory_clean(src, staging)?;
+        let json = serde_json::to_string_pretty(manifest)
+            .map_err(|e| format!("Failed to serialize mod.json: {e}"))?;
+        fs::write(staging.join("mod.json"), json)
+            .map_err(|e| format!("Failed to write mod.json: {e}"))?;
+        let integrity = IntegrityManifest::compute_for_directory(
+            staging,
+            &manifest.id,
+            &manifest.version,
+            archive_sha256,
+            source_url,
+            jiff::Zoned::now().to_string(),
+        )?;
+        if let Ok(int_json) = serde_json::to_string_pretty(&integrity) {
+            fs::write(staging.join(".qm-integrity.json"), int_json)
+                .map_err(|e| format!("Failed to write .qm-integrity.json: {e}"))?;
+        }
+        Ok(integrity)
+    }
+
+    /// Remove what the staged copy replaces (every version for `replace_all`, else only a same
+    /// version folder), then rename `staging` to `target_dir`.
+    fn swap_into_place(
+        &self,
+        staging: &Path,
+        target_dir: &Path,
+        mod_id: &str,
+        replace_all: bool,
+    ) -> Result<(), String> {
+        let mod_parent = self.library_dir.join(mod_id);
+        if replace_all && mod_parent.is_dir() {
+            let entries = fs::read_dir(&mod_parent)
+                .map_err(|e| format!("Failed to read {}: {e}", mod_parent.display()))?;
+            for entry in entries.filter_map(|e| e.ok()) {
+                let p = entry.path();
+                if p.is_dir() {
+                    fs::remove_dir_all(&p)
+                        .map_err(|e| format!("Failed to delete {}: {e}", p.display()))?;
+                }
+            }
+        } else if target_dir.exists() {
+            fs::remove_dir_all(target_dir)
+                .map_err(|e| format!("Failed to delete {}: {e}", target_dir.display()))?;
+        }
+        fs::create_dir_all(&mod_parent)
+            .map_err(|e| format!("Failed to create {}: {e}", mod_parent.display()))?;
+        // A rename can fail on a transient handle (antivirus); fall back to a copy so the old
+        // versions are not lost with nothing in their place.
+        match fs::rename(staging, target_dir) {
+            Ok(()) => Ok(()),
+            Err(e) => copy_directory_clean(staging, target_dir).map_err(|copy_err| {
+                format!(
+                    "Failed to move {} to {}: {e} ({copy_err})",
+                    staging.display(),
+                    target_dir.display()
+                )
+            }),
+        }
     }
 
     /// Re-verifies every installed mod in `library/` against its `.qm-integrity.json` SHA-256 digests,
@@ -574,6 +693,36 @@ impl QuarterMasterPaths {
             }
         }
         Ok(())
+    }
+}
+
+/// Refuse a manifest whose id or version cannot be used as a library folder name.
+fn check_manifest_segments(manifest: &ModManifest) -> Result<(), String> {
+    if !is_safe_segment(&manifest.id) {
+        return Err(format!(
+            "Mod id '{}' is not a valid folder name.",
+            manifest.id
+        ));
+    }
+    if !is_safe_segment(&manifest.version) {
+        return Err(format!(
+            "Mod version '{}' is not a valid folder name.",
+            manifest.version
+        ));
+    }
+    Ok(())
+}
+
+/// Best-effort removal of a file or directory tree.
+fn remove_any(p: &Path) {
+    match fs::symlink_metadata(p) {
+        Ok(m) if m.is_dir() => {
+            let _ = fs::remove_dir_all(p);
+        }
+        Ok(_) => {
+            let _ = fs::remove_file(p);
+        }
+        Err(_) => {}
     }
 }
 
@@ -661,15 +810,18 @@ pub fn has_supported_assets_dir(mod_dir: &Path) -> bool {
     !qm_core::patch::loader::discover_dir_assets(mod_dir).is_empty()
 }
 
-/// Discovers all mod root directories inside `root` that contain either `qm.toml` / `quartermaster.toml`
-/// or a supported `assets/` directory.
+/// Discovers all mod root directories inside `root`: those with a `qm.toml` / `quartermaster.toml`,
+/// a `faction.toml` (a faction mod has no patch file), or a supported `assets/` directory.
 fn find_mod_roots_in_tree(root: &Path) -> Vec<PathBuf> {
     let mut mod_roots = Vec::new();
     for entry in WalkDir::new(root).into_iter().filter_map(|e| e.ok()) {
         let p = entry.path();
         if p.is_file() {
             let fname = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
-            if fname == "qm.toml" || fname == "quartermaster.toml" {
+            if fname == "qm.toml"
+                || fname == "quartermaster.toml"
+                || fname == qm_schema::faction::FACTION_FILE
+            {
                 if let Some(parent) = p.parent() {
                     if !mod_roots.contains(&parent.to_path_buf()) {
                         mod_roots.push(parent.to_path_buf());
@@ -768,12 +920,7 @@ pub fn inspect_mod_directory(
         .unwrap_or_else(|_| empty_integrity(&manifest.id, &manifest.version, mod_dir))
     };
 
-    let config_path = mod_dir.join("config.lua");
-    let config_schema = if config_path.is_file() {
-        ModConfigSchema::from_path(&config_path).ok()
-    } else {
-        None
-    };
+    let config_schema = ModConfigSchema::from_mod_dir(mod_dir).ok().flatten();
 
     let readme_markdown = ["README.md", "readme.md", "README.txt"]
         .iter()
@@ -813,6 +960,7 @@ pub fn inspect_mod_directory(
         target_files: targets_set.into_iter().collect(),
         is_workspace_linked,
         installed_versions: Vec::new(),
+        kind: ModKind::of_dir(mod_dir),
     })
 }
 
@@ -829,6 +977,15 @@ fn empty_integrity(mod_id: &str, version: &str, mod_dir: &Path) -> IntegrityMani
 }
 
 pub fn copy_directory_clean(src: &Path, dst: &Path) -> Result<(), String> {
+    copy_directory_skipping(src, dst, &|_| false)
+}
+
+/// `copy_directory_clean` without the files for which `skip(relative path)` is true.
+pub fn copy_directory_skipping(
+    src: &Path,
+    dst: &Path,
+    skip: &dyn Fn(&Path) -> bool,
+) -> Result<(), String> {
     fs::create_dir_all(dst)
         .map_err(|e| format!("Failed to create directory {}: {e}", dst.display()))?;
     for entry in WalkDir::new(src).into_iter().filter_map(|e| e.ok()) {
@@ -837,6 +994,9 @@ pub fn copy_directory_clean(src: &Path, dst: &Path) -> Result<(), String> {
             .strip_prefix(src)
             .map_err(|e| format!("Prefix error: {e}"))?;
         if rel.as_os_str().is_empty() {
+            continue;
+        }
+        if path.is_file() && skip(rel) {
             continue;
         }
         let target = dst.join(rel);
@@ -872,6 +1032,65 @@ mod tests {
         assert!(validate_safe_relative_path("mod/NUL").is_err());
         assert!(validate_safe_relative_path("mod/trailing.").is_err());
         assert!(validate_safe_relative_path("GCore/qm.toml").is_ok());
+    }
+
+    /// A source folder whose `mod.json` declares `id` and `version` verbatim.
+    fn hostile_mod(root: &Path, name: &str, id: &str, version: &str) -> PathBuf {
+        let dir = root.join("hostile").join(name);
+        fs::create_dir_all(&dir).unwrap();
+        let json = serde_json::json!({ "id": id, "name": "Hostile", "version": version });
+        fs::write(dir.join("mod.json"), json.to_string()).unwrap();
+        fs::write(dir.join("qm.toml"), "[manifest]\nversion = \"1.0.0\"\n").unwrap();
+        dir
+    }
+
+    #[test]
+    fn rejects_manifest_id_dotdot_and_separators() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let paths = QuarterMasterPaths::resolve(Some(temp.path()));
+        for (i, id) in [
+            "..", ".", "a/b", "a\\b", "c:x", "CON", "nul.txt", "x.", "x ",
+        ]
+        .iter()
+        .enumerate()
+        {
+            let src = hostile_mod(temp.path(), &format!("m{i}"), id, "1.0.0");
+            let want = format!("Mod id '{id}' is not a valid folder name.");
+            let err = paths.inspect_archive_candidates(&src, false).unwrap_err();
+            assert_eq!(err, want);
+            let err = paths.import_mod_from_path(&src, None, false).unwrap_err();
+            assert_eq!(err, want);
+        }
+        // Nothing escaped into or next to the library.
+        assert!(!temp.path().join("1.0.0").exists());
+        assert!(paths.list_installed_mods().is_empty());
+    }
+
+    #[test]
+    fn rejects_manifest_version_with_separator() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let paths = QuarterMasterPaths::resolve(Some(temp.path()));
+        for (i, v) in ["../../evil", "1.0/2", "1\\0", ".."].iter().enumerate() {
+            let src = hostile_mod(temp.path(), &format!("v{i}"), "fine", v);
+            let want = format!("Mod version '{v}' is not a valid folder name.");
+            let err = paths.inspect_archive_candidates(&src, false).unwrap_err();
+            assert_eq!(err, want);
+            let err = paths.import_mod_from_path(&src, None, false).unwrap_err();
+            assert_eq!(err, want);
+        }
+        assert!(!paths.library_dir.join("fine").exists());
+    }
+
+    #[test]
+    fn safe_segment_rules() {
+        assert!(is_safe_segment("gcore"));
+        assert!(is_safe_segment("1.2.3-beta"));
+        assert!(is_safe_segment("console"));
+        for bad in [
+            "", ".", "..", "a/b", "a\\b", "a:b", "COM1", "lpt9.x", "x.", "x ",
+        ] {
+            assert!(!is_safe_segment(bad), "{bad:?}");
+        }
     }
 
     #[test]
@@ -926,5 +1145,69 @@ mod tests {
             imported.imported_mods[0].target_files,
             vec!["main.lua".to_string()]
         );
+    }
+
+    #[test]
+    fn imports_a_faction_only_mod_without_qm_toml() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let paths = QuarterMasterPaths::resolve(Some(temp.path()));
+        let src = temp.path().join("downloads/ExampleFaction");
+        fs::create_dir_all(src.join("frames")).unwrap();
+        fs::write(
+            src.join("mod.json"),
+            r#"{"id": "example_faction", "name": "Example Faction", "version": "1.0.0"}"#,
+        )
+        .unwrap();
+        fs::write(
+            src.join("faction.toml"),
+            "schema = 1\nid = \"example\"\nname = \"Example\"\nreplaces = \"allied\"\n",
+        )
+        .unwrap();
+
+        let candidates = paths.inspect_archive_candidates(&src, false).unwrap();
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].manifest.id, "example_faction");
+
+        let imported = paths.import_mod_from_path(&src, None, false).unwrap();
+        assert_eq!(imported.imported_mods.len(), 1);
+        assert_eq!(imported.imported_mods[0].manifest.id, "example_faction");
+        assert_eq!(imported.imported_mods[0].kind, ModKind::Faction);
+    }
+
+    #[test]
+    fn test_library_loads_config_schema_from_toml() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let mod_dir = temp.path().join("test_toml_mod");
+        fs::create_dir_all(&mod_dir).unwrap();
+
+        let mod_json = r#"{
+            "id": "test_toml_mod",
+            "name": "Test TOML Mod",
+            "version": "1.0.0",
+            "author": "Tester",
+            "description": "Mod with config.toml"
+        }"#;
+        fs::write(mod_dir.join("mod.json"), mod_json).unwrap();
+
+        let config_toml = r#"
+id = "test_toml_mod"
+name = "Test TOML Mod"
+[[options]]
+id = "test_opt"
+label = "Test Option"
+type = "checkbox"
+default = true
+"#;
+        fs::write(mod_dir.join("config.toml"), config_toml).unwrap();
+
+        let installed = inspect_mod_directory(&mod_dir, false).unwrap();
+        assert_eq!(installed.manifest.id, "test_toml_mod");
+        let cfg = installed
+            .config_schema
+            .as_ref()
+            .expect("config_schema must be loaded from config.toml");
+        assert_eq!(cfg.name, "Test TOML Mod");
+        assert_eq!(cfg.options.len(), 1);
+        assert_eq!(cfg.options[0].id, "test_opt");
     }
 }

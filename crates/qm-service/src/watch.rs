@@ -69,6 +69,14 @@ impl Rules {
             if rel.len() >= 2 && eq(&rel[1], "Mods") {
                 return Classified::Ignore;
             }
+            // The run log and the test plan mark (and their temp files) feed Health, not the
+            // profile.
+            if rel.len() == 2 {
+                let name = rel[1].to_ascii_lowercase();
+                if name.starts_with("runs.json") || name.starts_with("test-plan.json") {
+                    return Classified::Invalidate(Scope::Health);
+                }
+            }
         }
         // 2. Data logs.
         if let Some(rel) = under(path, &self.logs) {

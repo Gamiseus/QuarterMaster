@@ -1,6 +1,6 @@
 <script lang="ts">
-  import { IconPlus } from "../../components/icons";
-  import { Button, TextField } from "../../components/ui";
+  import { IconMore, IconPlus } from "../../components/icons";
+  import { Button, IconButton, Menu, TextField } from "../../components/ui";
   import type { FilterChip } from "../../lib/modlist/filter";
 
   interface Props {
@@ -8,9 +8,32 @@
     chips: Set<FilterChip>;
     canMutate: boolean;
     onaddseparator: () => void;
+    onaddmod: () => void;
+    /** Mods with an installable update; the Update all button shows when above zero. */
+    updateCount?: number;
+    /** Why updates cannot be installed right now, or null. */
+    updateBlocked?: string | null;
+    onupdateall?: () => void;
+    /** Narrow: Add separator moves into a More menu; Update all and Add mod stay buttons. */
+    compact?: boolean;
   }
 
-  let { text = $bindable(""), chips = $bindable(new Set()), canMutate, onaddseparator }: Props = $props();
+  let {
+    text = $bindable(""),
+    chips = $bindable(new Set()),
+    canMutate,
+    onaddseparator,
+    onaddmod,
+    updateCount = 0,
+    updateBlocked = null,
+    onupdateall,
+    compact = false,
+  }: Props = $props();
+
+  /** The bar also goes compact when its own column is too narrow for every button (0: not measured yet). */
+  let barWidth = $state(0);
+  const COMPACT_BELOW = 640;
+  const isCompact = $derived(compact || (barWidth > 0 && barWidth < COMPACT_BELOW));
 
   const CHIPS: { value: FilterChip; label: string }[] = [
     { value: "enabled", label: "Enabled" },
@@ -24,10 +47,39 @@
     if (!next.delete(chip)) next.add(chip);
     chips = next;
   }
+
+  // Update all stays a button (updates are time-sensitive); only Add separator folds into More.
+  const moreItems = $derived([
+    {
+      label: "Add separator",
+      disabled: !canMutate,
+      disabledReason: canMutate ? undefined : "Available once startup has finished.",
+      onselect: onaddseparator,
+    },
+  ]);
 </script>
 
-<div class="bar">
-  <TextField class="search" label="Filter mods" placeholder="Name or id" bind:value={text} />
+<div class="bar" bind:clientWidth={barWidth}>
+  <div class="top">
+    <TextField class="search" label="Filter mods" placeholder="Name or id" bind:value={text} />
+    <div class="actions">
+      {#if updateCount > 0}
+        <Button disabled={updateBlocked !== null} title={updateBlocked ?? undefined} onclick={onupdateall}>
+          Update all ({updateCount})
+        </Button>
+      {/if}
+      {#if isCompact}
+        <Menu items={moreItems} align="end">
+          {#snippet trigger({ props })}
+            <IconButton icon={IconMore} label="More actions" {...props} />
+          {/snippet}
+        </Menu>
+      {:else}
+        <Button disabled={!canMutate} onclick={onaddseparator}><IconPlus />Add separator</Button>
+      {/if}
+      <Button variant="primary" disabled={!canMutate} onclick={onaddmod}><IconPlus />Add mod</Button>
+    </div>
+  </div>
   <div class="chips" role="group" aria-label="Show only">
     {#each CHIPS as chip (chip.value)}
       <button
@@ -40,25 +92,37 @@
       </button>
     {/each}
   </div>
-  <Button class="add" disabled={!canMutate} onclick={onaddseparator}><IconPlus />Add separator</Button>
 </div>
 
 <style>
   .bar {
     display: flex;
-    flex-wrap: wrap;
+    flex: none;
+    flex-direction: column;
+    gap: var(--qm-space-2);
+  }
+
+  .top {
+    display: flex;
     align-items: flex-end;
     gap: var(--qm-space-3);
   }
 
-  .bar :global(.search) {
+  .top :global(.search) {
     flex: 1;
-    min-width: calc(var(--qm-detail-w) / 2);
+    min-width: 0;
   }
 
   .chips {
     display: flex;
     gap: var(--qm-space-1);
+  }
+
+  .actions {
+    display: flex;
+    flex: none;
+    align-items: center;
+    gap: var(--qm-space-2);
   }
 
   .chip {

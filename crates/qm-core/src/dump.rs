@@ -1,3 +1,12 @@
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::panic,
+        clippy::indexing_slicing
+    )
+)]
 use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -58,6 +67,7 @@ pub struct ByteRegion {
 
 impl ByteRegion {
     /// Adjust this region based on an edit that occurred elsewhere.
+    #[deprecated(note = "regions come from the LineMap (PatchDebug::from_linemap)")]
     pub fn adjust(&mut self, edit_pos: usize, delta: isize) {
         if edit_pos <= self.start {
             self.start = self.start.saturating_add_signed(delta);
@@ -68,7 +78,8 @@ impl ByteRegion {
     }
 }
 
-/// Dirty byte-based debug entry.
+/// One patch's edits in bytes, in the order made (the journal reads them). Line regions come
+/// from the LineMap (`PatchDebug::from_linemap`).
 #[derive(Debug, Clone)]
 pub struct ByteDebugEntry {
     pub patch_source: PatchSource,
@@ -76,15 +87,6 @@ pub struct ByteDebugEntry {
     pub matched_count: usize,
     pub expected_count: Option<usize>,
     pub warnings: Option<Vec<String>>,
-}
-
-impl ByteDebugEntry {
-    /// Adjust all regions in this entry based on the edit that occurred.
-    pub fn adjust(&mut self, edit_pos: usize, delta: isize) {
-        for region in &mut self.regions {
-            region.adjust(edit_pos, delta);
-        }
-    }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -101,32 +103,35 @@ impl PatchDebug {
         }
     }
 
-    /// Convert from byte-based to line-based.
-    pub fn from_byte_entries(
+    /// Line regions from the apply's final `LineMap`: each entry gets the exact 1-based runs
+    /// of the lines its record (the `u32`) wrote that are still in the text. An entry whose
+    /// record committed nothing gets none.
+    pub fn from_linemap(
         buffer_name: &str,
-        byte_entries: Vec<ByteDebugEntry>,
-        rope: &crop::Rope,
+        lines: &crate::patch::linemap::LineMap,
+        entries: Vec<(ByteDebugEntry, u32)>,
     ) -> Self {
-        let entries = byte_entries
+        let runs = lines.record_runs();
+        let entries = entries
             .into_iter()
-            .map(|entry| PatchDebugEntry {
+            .map(|(entry, record)| PatchDebugEntry {
                 patch_source: entry.patch_source,
-                regions: entry
-                    .regions
-                    .into_iter()
-                    .map(|r| PatchRegion {
-                        start_line: rope.line_of_byte(r.start.min(rope.byte_len())) + 1,
-                        end_line: rope
-                            .line_of_byte(r.end.saturating_sub(1).min(rope.byte_len()))
-                            + 1,
+                regions: runs
+                    .get(&record)
+                    .map(|r| {
+                        r.iter()
+                            .map(|&(start_line, end_line)| PatchRegion {
+                                start_line,
+                                end_line,
+                            })
+                            .collect()
                     })
-                    .collect(),
+                    .unwrap_or_default(),
                 matched_count: entry.matched_count,
                 expected_count: entry.expected_count,
                 warnings: entry.warnings,
             })
             .collect();
-
         Self {
             buffer_name: buffer_name.to_string(),
             entries,
@@ -227,6 +232,31 @@ pub fn find_game_archive() -> Result<fs::File, String> {
     Err("Could not locate fused game archive (mnb.exe)".to_string())
 }
 
+/// Calls `f(path, text)` for every `.lua` file in the game archive that is UTF-8. `path` is
+/// the file's path in the archive with `/` separators (`includes/ai.lua`).
+pub fn for_each_game_lua(mut f: impl FnMut(&str, &str)) -> Result<(), String> {
+    let file = find_game_archive()?;
+    let mut archive =
+        ZipArchive::new(file).map_err(|e| format!("Failed to read game archive as zip: {e}"))?;
+    for i in 0..archive.len() {
+        let Ok(mut entry) = archive.by_index(i) else {
+            continue;
+        };
+        if entry.is_dir() || !entry.name().ends_with(".lua") {
+            continue;
+        }
+        let Some(rel) = entry.enclosed_name() else {
+            continue;
+        };
+        let name = rel.to_string_lossy().replace('\\', "/");
+        let mut text = String::new();
+        if entry.read_to_string(&mut text).is_ok() {
+            f(&name, &text);
+        }
+    }
+    Ok(())
+}
+
 /// Extract and dump all vanilla game files (or matching a filter) directly from the game archive.
 pub fn dump_vanilla_files(
     mod_dir: &Path,
@@ -296,10 +326,8 @@ pub fn dump_vanilla_files(
         }
 
         let mut buf = Vec::new();
-        if entry.read_to_end(&mut buf).is_ok() {
-            if fs::write(&dest_path, &buf).is_ok() {
-                count += 1;
-            }
+        if entry.read_to_end(&mut buf).is_ok() && fs::write(&dest_path, &buf).is_ok() {
+            count += 1;
         }
     }
 

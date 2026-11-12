@@ -10,7 +10,9 @@
   import { toasts } from "../../lib/stores/toasts.svelte";
   import ManageProfilesDialog from "./ManageProfilesDialog.svelte";
   import NameDialog from "./NameDialog.svelte";
+  import ModpackDialog from "./ModpackDialog.svelte";
   import ShareCodeDialog from "./ShareCodeDialog.svelte";
+  import { open as openPicker } from "@tauri-apps/plugin-dialog";
   import SwitchPreviewDialog from "./SwitchPreviewDialog.svelte";
 
   let previewOpen = $state(false);
@@ -18,18 +20,31 @@
   let manageOpen = $state(false);
   let importOpen = $state(false);
   let newOpen = $state(false);
+  let modpackPath = $state<string | null>(null);
+  let modpackOpen = $state(false);
+
+  async function pickModpack() {
+    let picked: string | null;
+    try {
+      picked = await openPicker({ filters: [{ name: "QuarterMaster modpack", extensions: ["qmpack"] }] });
+    } catch (e) {
+      toasts.error("Could not open the file picker.", e instanceof Error ? e.message : String(e));
+      return;
+    }
+    if (!picked) return;
+    modpackPath = picked;
+    modpackOpen = true;
+  }
 
   const activeName = $derived(profiles.activeSummary?.name ?? profiles.active?.name ?? null);
-  const label = $derived(prelaunch.vanilla ? `Vanilla (${activeName ?? "no profile"})` : (activeName ?? "QuarterMaster"));
+  const label = $derived(activeName ?? "QuarterMaster");
+  const vanilla = $derived(profiles.list.find((p) => p.is_builtin) ?? null);
   const notReady = "Available once startup has finished.";
 
   function choose(id: string) {
     const target = profiles.list.find((p) => p.id === id);
     if (!target) return;
-    if (target.is_active) {
-      prelaunch.vanilla = false;
-      return;
-    }
+    if (target.is_active) return;
     previewId = id;
     previewOpen = true;
   }
@@ -40,21 +55,23 @@
   }
 
   const items = $derived([
-    ...profiles.list.map((p) => ({
+    ...profiles.list.filter((p) => !p.is_builtin).map((p) => ({
       label: p.name,
       description: `${p.enabled_count} ${p.enabled_count === 1 ? "mod" : "mods"}${p.linked_save_profile_id ? `, ${saves.nameFor(p.linked_save_profile_id)}` : ""}`,
-      checked: p.is_active && !prelaunch.vanilla,
+      checked: p.is_active,
       disabled: !app.startupDone,
       disabledReason: app.startupDone ? undefined : notReady,
       onselect: () => choose(p.id),
     })),
     {
       label: "Vanilla",
-      description: "Launch the game without mods",
-      checked: prelaunch.vanilla,
+      description: "The game without mods, on its own save slot",
+      checked: vanilla?.is_active ?? false,
       separatorBefore: true,
+      disabled: !app.startupDone || vanilla === null,
+      disabledReason: app.startupDone ? undefined : notReady,
       onselect: () => {
-        prelaunch.vanilla = true;
+        if (vanilla) choose(vanilla.id);
       },
     },
     {
@@ -71,6 +88,12 @@
       onselect: () => {
         manageOpen = true;
       },
+    },
+    {
+      label: "Import modpack...",
+      disabled: !app.startupDone,
+      disabledReason: app.startupDone ? undefined : notReady,
+      onselect: () => void pickModpack(),
     },
     {
       label: "Import share code",
@@ -103,6 +126,7 @@
   onsubmit={createProfile}
 />
 <ShareCodeDialog bind:open={importOpen} mode="import" />
+<ModpackDialog bind:open={modpackOpen} path={modpackPath} />
 
 <style>
   .picker {

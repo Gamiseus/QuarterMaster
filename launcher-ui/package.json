@@ -1,7 +1,7 @@
 {
   "name": "qm-launcher-ui",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.2.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -9,7 +9,8 @@
     "build": "vite build",
     "check": "svelte-check --fail-on-warnings",
     "test": "vitest run",
-    "e2e": "playwright test"
+    "e2e": "playwright test",
+    "e2e:serve": "vite build --config vite.e2e.config.ts --mode mock && vite preview --config vite.e2e.config.ts --mode mock"
   },
   "dependencies": {
     "@fontsource/stardos-stencil": "5.3.0",

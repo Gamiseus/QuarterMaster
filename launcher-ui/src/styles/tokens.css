@@ -1,4 +1,5 @@
-/* QuarterMaster design tokens. Colors: Field Command palette (ui/styles.css). */
+/* QuarterMaster design tokens. Colors: Field Command palette (ui/styles.css), tuned for WCAG contrast
+   (tests/unit/tokens.test.ts checks every text and boundary pair in both themes). */
 :root {
   color-scheme: light dark;
 
@@ -11,15 +12,34 @@
   --qm-surface: var(--qm-panel);
   --qm-surface-raised: var(--qm-raised);
   --qm-border: light-dark(#c5cdc0, #2d3a2f);
+  /* Control boundaries (checkbox box, text field, select trigger, switch track): >= 3:1 on every surface. */
+  --qm-border-strong: light-dark(#74856a, #637f67);
   --qm-text: light-dark(#171d17, #e7ece6);
-  --qm-text-muted: light-dark(#647566, #6e8070);
+  --qm-text-muted: light-dark(#4f5c50, #a2afa3);
   --qm-accent: light-dark(#9a6f0b, #d4a742);
   --qm-accent-contrast: light-dark(#ffffff, #111612);
-  --qm-ok: light-dark(#15803d, #22c55e);
-  --qm-warn: light-dark(#b45309, #f59e0b);
-  --qm-danger: light-dark(#b91c1c, #ef4444);
-  --qm-enabled: light-dark(#2e5c38, #3d7a49);
+  /* Accent used as text (links, selected items, active nav, accent badges). */
+  --qm-accent-text: light-dark(#725208, #d4a742);
+  /* Status tones; they stay at least 20 apart (CIEDE2000) so no two read alike. */
+  --qm-ok: light-dark(#06652d, #0bc35b);
+  --qm-warn: light-dark(#814706, #f5a106);
+  --qm-danger: light-dark(#a50b22, #fb8c8f);
+  --qm-info: light-dark(#1258a1, #80b3fd);
+  --qm-enabled: light-dark(#2e5c38, #438650);
   --qm-focus-ring: 0 0 0 2px var(--qm-accent);
+
+  /* Mod colours in the patch views (Okabe-Ito based): at least 3:1 on every surface and apart in
+     every colour vision mode (tests/unit/tokens.test.ts). Mod names always go with them. */
+  --qm-attr-1: light-dark(#9a6100, #e69f00);
+  --qm-attr-2: light-dark(#1f6fa3, #56b4e9);
+  --qm-attr-3: light-dark(#007a59, #009e73);
+  --qm-attr-4: light-dark(#8a8000, #f0e442);
+  --qm-attr-5: light-dark(#1d4f9a, #3d8fd6);
+  --qm-attr-6: light-dark(#7a2806, #e8743b);
+  --qm-attr-7: light-dark(#a3467b, #cc79a7);
+  --qm-attr-8: light-dark(#454a45, #b9bfb9);
+  /* One diff line; scales with the text size. */
+  --qm-diff-row-h: calc(var(--qm-text-12) * 1.75);
 
   /* Separator row colors (same in both themes). */
   --qm-sep-1: #d4a742;
@@ -46,6 +66,30 @@
   --qm-sidebar-w: 52px;
   --qm-sidebar-w-open: 184px;
   --qm-detail-w: 360px;
+  --qm-dialog-lg: 760px;
+  --qm-log-h: 320px;
+  /* Readable line length for text-heavy content (about 75 characters at 14 px). */
+  --qm-measure: 680px;
+  /* Lists stop growing here; extra window width goes to the content beside them. */
+  --qm-list-max: 760px;
+  --qm-detail-min: 420px;
+  /* KeyValueList label column. */
+  --qm-kv-key-w: 160px;
+
+  /* Spacing roles: related items, groups of items, sections (sections also get a divider). */
+  --qm-gap-item: var(--qm-space-2);
+  --qm-gap-group: var(--qm-space-4);
+  --qm-gap-section: var(--qm-space-5);
+
+  /* Scrollbars. */
+  --qm-scrollbar-thumb: var(--qm-border-strong);
+
+  /* Control sizes. */
+  --qm-control-box: 18px;
+  --qm-switch-w: 36px;
+  --qm-switch-h: 20px;
+  --qm-switch-thumb: 14px;
+  --qm-kbd-min: 20px;
 
   --qm-font-sans: "Segoe UI Variable", "Segoe UI", sans-serif;
   --qm-font-stencil: "Stardos Stencil", var(--qm-font-sans);
@@ -60,6 +104,7 @@
   --qm-text-28: 28px;
 
   /* Stacking order: dialog < popover (menus, selects) < toast < tooltip. */
+  --qm-z-panel: 20;
   --qm-z-overlay: 40;
   --qm-z-dialog: 41;
   --qm-z-popover: 50;

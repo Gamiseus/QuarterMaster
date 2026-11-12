@@ -16,6 +16,8 @@ pub enum Scope {
     Settings,
     Updates,
     Catalog,
+    /// The Fixes view's suggestions are ready (the fixes themselves change with `Profiles`).
+    Fixes,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]

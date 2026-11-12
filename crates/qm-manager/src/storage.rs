@@ -29,7 +29,8 @@ pub struct LauncherSettings {
     pub save_dir_path: Option<PathBuf>,
     pub workspace_mods_dir: Option<PathBuf>,
     #[serde(default = "default_theme")]
-    pub theme: String, // "field_command" | "modern_slate"
+    /// "system" | "dark" | "light"; older files may hold legacy values, which the UI treats as system.
+    pub theme: String,
     #[serde(default)]
     pub default_launch_method: LaunchMethod,
     #[serde(default)]
@@ -38,8 +39,16 @@ pub struct LauncherSettings {
     pub auto_backup_saves: bool,
     #[serde(default = "default_max_backups")]
     pub max_save_backups: usize,
+    /// No longer read: the console opens only in debug mode (`debug_mode`). Kept so older
+    /// settings files and launchers still load.
     #[serde(default)]
     pub disable_console_on_launch: bool,
+    /// Start the game in the loader's debug mode: console window, full dumps, dump commands.
+    #[serde(default)]
+    pub debug_mode: bool,
+    /// Unlock the game's own developer commands (AI overlay, dev blast).
+    #[serde(default)]
+    pub dev_commands: bool,
     #[serde(default)]
     pub first_run_completed: bool,
     #[serde(default = "default_profile_id")]
@@ -48,8 +57,9 @@ pub struct LauncherSettings {
     pub active_save_profile_id: String,
     #[serde(default)]
     pub portable_mode: bool,
-    /// Optional personal GitHub token to raise API rate limits from 60/hr to 5,000/hr.
-    #[serde(default)]
+    /// Retired (plan 2c Task 11): read from older files so the legacy app still compiles, never
+    /// written back, so the next save drops it.
+    #[serde(default, skip_serializing)]
     pub github_token: Option<String>,
     /// Per-mod opt-in auto-update flags (`mod_id -> bool`).
     #[serde(default)]
@@ -57,10 +67,35 @@ pub struct LauncherSettings {
     /// Last known vanilla `mnb.exe` SHA-256 fingerprint to detect game updates across launches.
     #[serde(default)]
     pub last_known_exe_sha256: Option<String>,
+    /// Check for mod updates at startup and every few hours while the launcher is open.
+    #[serde(default = "default_true")]
+    pub auto_check_updates: bool,
+    /// Install available mod updates without asking (per-mod `auto_update_mods` entries win).
+    #[serde(default)]
+    pub auto_install_updates: bool,
+    /// "standard" | "deutan" | "protan" | "tritan" | "mono".
+    #[serde(default = "default_color_vision")]
+    pub color_vision: String,
+    #[serde(default)]
+    pub high_contrast: bool,
+    /// UI text size, 1.0 to 1.75 in 0.125 steps.
+    #[serde(default = "default_text_scale")]
+    pub text_scale: f32,
+    /// One-time launch settings migration done up to this version (0: never ran).
+    #[serde(default)]
+    pub launch_model_version: u32,
+}
+
+fn default_color_vision() -> String {
+    "standard".to_string()
+}
+
+fn default_text_scale() -> f32 {
+    1.0
 }
 
 fn default_theme() -> String {
-    "field_command".to_string()
+    "system".to_string()
 }
 
 fn default_true() -> bool {
@@ -84,13 +119,16 @@ impl Default for LauncherSettings {
         Self {
             game_exe_path: detect_game_installation(),
             save_dir_path: detect_save_directory(),
-            workspace_mods_dir: detect_workspace_mods_dir(),
+            // Never guessed: a modder's workspace is set by hand.
+            workspace_mods_dir: None,
             theme: default_theme(),
             default_launch_method: LaunchMethod::DirectExe,
             opt_in_prereleases: false,
             auto_backup_saves: true,
             max_save_backups: 15,
             disable_console_on_launch: false,
+            debug_mode: false,
+            dev_commands: false,
             first_run_completed: false,
             active_profile_id: default_profile_id(),
             active_save_profile_id: default_save_profile_id(),
@@ -98,6 +136,12 @@ impl Default for LauncherSettings {
             github_token: None,
             auto_update_mods: HashMap::new(),
             last_known_exe_sha256: None,
+            auto_check_updates: true,
+            auto_install_updates: false,
+            color_vision: default_color_vision(),
+            high_contrast: false,
+            text_scale: default_text_scale(),
+            launch_model_version: 0,
         }
     }
 }
@@ -115,6 +159,16 @@ pub struct QuarterMasterPaths {
     pub settings_file: PathBuf,
     pub journal_file: PathBuf,
     pub is_portable: bool,
+    /// Profile notices found by a read that could not report them (shared by clones).
+    #[serde(skip)]
+    pub(crate) profile_notices: std::sync::Arc<std::sync::Mutex<PendingNotices>>,
+}
+
+/// Notices waiting for the service to show them; each text is queued once per process.
+#[derive(Debug, Default)]
+pub(crate) struct PendingNotices {
+    pub(crate) pending: Vec<String>,
+    pub(crate) seen: std::collections::HashSet<String>,
 }
 
 impl QuarterMasterPaths {
@@ -160,6 +214,7 @@ impl QuarterMasterPaths {
             journal_file: root_dir.join("state-journal.json"),
             root_dir,
             is_portable,
+            profile_notices: Default::default(),
         };
 
         paths.ensure_directories();
@@ -190,9 +245,6 @@ impl QuarterMasterPaths {
                 if s.save_dir_path.is_none() {
                     s.save_dir_path = detect_save_directory();
                 }
-                if s.workspace_mods_dir.is_none() {
-                    s.workspace_mods_dir = detect_workspace_mods_dir();
-                }
                 return s;
             }
         }
@@ -201,11 +253,27 @@ impl QuarterMasterPaths {
         s
     }
 
+    /// Writes `settings.json` atomically: a unique temp file next to it, then a rename over it.
     pub fn save_settings(&self, settings: &LauncherSettings) -> Result<(), String> {
+        static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let json = serde_json::to_string_pretty(settings)
             .map_err(|e| format!("Failed to serialize settings.json: {e}"))?;
-        fs::write(&self.settings_file, json)
-            .map_err(|e| format!("Failed to write {}: {e}", self.settings_file.display()))
+        let fail = |e: std::io::Error| format!("Failed to write {}: {e}", self.settings_file.display());
+        let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let mut tmp_name = self.settings_file.file_name().unwrap_or_default().to_os_string();
+        tmp_name.push(format!(".{}-{seq}.tmp", std::process::id()));
+        let tmp = self.settings_file.with_file_name(tmp_name);
+        // Flush the temp file to disk before the rename, so a crash cannot leave an empty settings.json.
+        let written = fs::File::create(&tmp).and_then(|mut f| {
+            use std::io::Write;
+            f.write_all(json.as_bytes())?;
+            f.sync_all()
+        });
+        if let Err(e) = written.and_then(|()| fs::rename(&tmp, &self.settings_file)) {
+            let _ = fs::remove_file(&tmp);
+            return Err(fail(e));
+        }
+        Ok(())
     }
 
     /// Auto-detects all system paths (Steam game installation, save directory, mod library storage).
@@ -216,21 +284,21 @@ impl QuarterMasterPaths {
             .as_ref()
             .map(|p| p.to_string_lossy().to_lowercase().contains("steamapps"))
             .unwrap_or(false);
+        // Only a version the vanilla cache recorded; never a guess.
         let game_version = game_exe.as_ref().and_then(|_p| {
             let meta_file = self.vanilla_cache_dir.join(".vanilla-meta.json");
-            if let Ok(raw) = fs::read_to_string(&meta_file) {
-                if let Ok(val) = serde_json::from_str::<serde_json::Value>(&raw) {
-                    if let Some(v) = val.get("info").and_then(|i| i.get("game_version")).and_then(|v| v.as_str()) {
-                        return Some(v.to_string());
-                    }
-                }
-            }
-            Some("0.5.3b".to_string())
+            let raw = fs::read_to_string(&meta_file).ok()?;
+            let val = serde_json::from_str::<serde_json::Value>(&raw).ok()?;
+            val.get("info")
+                .and_then(|i| i.get("game_version"))
+                .and_then(|v| v.as_str())
+                .map(str::to_string)
         });
 
         DetectedPaths {
             game_exe_path: game_exe,
             save_dir_path: save_dir,
+            workspace_mods_dir: None,
             library_dir_path: self.library_dir.clone(),
             is_steam,
             game_version,
@@ -243,9 +311,61 @@ impl QuarterMasterPaths {
 pub struct DetectedPaths {
     pub game_exe_path: Option<PathBuf>,
     pub save_dir_path: Option<PathBuf>,
+    pub workspace_mods_dir: Option<PathBuf>,
     pub library_dir_path: PathBuf,
     pub is_steam: bool,
     pub game_version: Option<String>,
+}
+
+/// Reads a `REG_SZ` or `REG_EXPAND_SZ` value straight from the registry, unexpanded (what
+/// `reg query` prints). `key` starts with `HKCU\` or `HKLM\`. Read in-process on purpose: a
+/// spawned `reg.exe` is orphaned, suspended forever, when its parent exits during the spawn.
+#[cfg(windows)]
+fn read_registry_string(key: &str, value_name: &str) -> Option<String> {
+    use windows::core::PCWSTR;
+    use windows::Win32::Foundation::{ERROR_MORE_DATA, ERROR_SUCCESS};
+    use windows::Win32::System::Registry::{
+        RegGetValueW, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, RRF_NOEXPAND, RRF_RT_REG_EXPAND_SZ,
+        RRF_RT_REG_SZ,
+    };
+    let (hive, subkey) = if let Some(rest) = key.strip_prefix(r"HKCU\") {
+        (HKEY_CURRENT_USER, rest)
+    } else if let Some(rest) = key.strip_prefix(r"HKLM\") {
+        (HKEY_LOCAL_MACHINE, rest)
+    } else {
+        return None;
+    };
+    let wide = |s: &str| s.encode_utf16().chain(Some(0)).collect::<Vec<u16>>();
+    let (subkey, value_name) = (wide(subkey), wide(value_name));
+    let flags = RRF_RT_REG_SZ | RRF_RT_REG_EXPAND_SZ | RRF_NOEXPAND;
+    let mut buf = vec![0u16; 260];
+    // The value can grow between calls; retry a few times with the size the registry reports.
+    for _ in 0..4 {
+        let mut bytes = (buf.len() * 2) as u32;
+        // SAFETY: both names are NUL-terminated and outlive the call; `bytes` is the buffer's size.
+        let status = unsafe {
+            RegGetValueW(
+                hive,
+                PCWSTR(subkey.as_ptr()),
+                PCWSTR(value_name.as_ptr()),
+                flags,
+                None,
+                Some(buf.as_mut_ptr().cast()),
+                Some(&mut bytes),
+            )
+        };
+        if status == ERROR_MORE_DATA {
+            buf.resize(bytes as usize / 2 + 1, 0);
+            continue;
+        }
+        if status != ERROR_SUCCESS {
+            return None;
+        }
+        let data = &buf[..(bytes as usize / 2).min(buf.len())];
+        let end = data.iter().position(|c| *c == 0).unwrap_or(data.len());
+        return Some(String::from_utf16_lossy(&data[..end]));
+    }
+    None
 }
 
 /// Auto-detects the Steam client executable (`Steam.exe`).
@@ -257,24 +377,10 @@ pub fn detect_steam_exe() -> Option<PathBuf> {
             (r"HKLM\SOFTWARE\WOW6432Node\Valve\Steam", "SteamExe"),
             (r"HKLM\SOFTWARE\Valve\Steam", "SteamExe"),
         ] {
-            if let Ok(output) = crate::winproc::system_command("reg")
-                .args(["query", hive, "/v", value_name])
-                .output()
-            {
-                if output.status.success() {
-                    let text = String::from_utf8_lossy(&output.stdout);
-                    for line in text.lines() {
-                        let parts: Vec<&str> = line.split_whitespace().collect();
-                        if parts.len() >= 3 && parts[1].starts_with("REG_") {
-                            if let Some(idx) = line.find(parts[1]) {
-                                let path_str = line[idx + parts[1].len()..].trim().replace('/', "\\");
-                                let path = PathBuf::from(path_str);
-                                if path.is_file() {
-                                    return Some(path);
-                                }
-                            }
-                        }
-                    }
+            if let Some(data) = read_registry_string(hive, value_name) {
+                let path = PathBuf::from(data.trim().replace('/', "\\"));
+                if path.is_file() {
+                    return Some(path);
                 }
             }
         }
@@ -312,24 +418,10 @@ pub fn detect_steam_game_installation() -> Option<PathBuf> {
             (r"HKLM\SOFTWARE\WOW6432Node\Valve\Steam", "InstallPath"),
             (r"HKLM\SOFTWARE\Valve\Steam", "InstallPath"),
         ] {
-            if let Ok(output) = crate::winproc::system_command("reg")
-                .args(["query", hive, "/v", value_name])
-                .output()
-            {
-                if output.status.success() {
-                    let text = String::from_utf8_lossy(&output.stdout);
-                    for line in text.lines() {
-                        let parts: Vec<&str> = line.split_whitespace().collect();
-                        if parts.len() >= 3 && parts[1].starts_with("REG_") {
-                            if let Some(idx) = line.find(parts[1]) {
-                                let path_str = line[idx + parts[1].len()..].trim();
-                                let path = PathBuf::from(path_str);
-                                if path.is_dir() && !steam_roots.contains(&path) {
-                                    steam_roots.push(path);
-                                }
-                            }
-                        }
-                    }
+            if let Some(data) = read_registry_string(hive, value_name) {
+                let path = PathBuf::from(data.trim());
+                if path.is_dir() && !steam_roots.contains(&path) {
+                    steam_roots.push(path);
                 }
             }
         }
@@ -454,20 +546,12 @@ pub fn detect_game_installation() -> Option<PathBuf> {
     None
 }
 
-/// Auto-detects the LÖVE save directory for Mud and Blood (`%APPDATA%\mnb\`).
+/// Auto-detects the LÖVE save directory for Mud and Blood (`%APPDATA%\mnb\`); only an existing folder.
 pub fn detect_save_directory() -> Option<PathBuf> {
-    if let Some(appdata) = dirs::data_dir() {
-        let mnb_save = appdata.join("mnb");
-        if mnb_save.is_dir() {
-            return Some(mnb_save);
-        }
-        let love_save = appdata.join("LOVE").join("mnb");
-        if love_save.is_dir() {
-            return Some(love_save);
-        }
-        return Some(mnb_save);
-    }
-    None
+    let appdata = dirs::data_dir()?;
+    [appdata.join("mnb"), appdata.join("LOVE").join("mnb")]
+        .into_iter()
+        .find(|p| p.is_dir())
 }
 
 /// Auto-detects the `MnB-Mods` development repository if present in the workspace.
@@ -735,6 +819,13 @@ impl StateJournal {
         self.save(journal_path)
     }
 
+    /// Drops the pending transaction without applying it: the step failed and left the
+    /// previous state active.
+    pub fn abort_transaction(&mut self, journal_path: &Path) -> Result<(), String> {
+        self.pending_transaction = None;
+        self.save(journal_path)
+    }
+
     pub fn commit_transaction(&mut self, journal_path: &Path) -> Result<(), String> {
         if let Some(tx) = self.pending_transaction.take() {
             if tx.kind == "profile_swap" {
@@ -826,6 +917,25 @@ mod tests {
             );
             assert!(path_str.ends_with("mnb.exe"), "Path must end with mnb.exe");
         }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn read_registry_string_reads_values_unexpanded() {
+        let name = read_registry_string(
+            r"HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion",
+            "ProductName",
+        );
+        assert!(name.is_some_and(|n| n.starts_with("Windows")));
+        // A REG_EXPAND_SZ comes back as stored, like `reg query` prints it.
+        let pf = read_registry_string(
+            r"HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion",
+            "ProgramFilesPath",
+        );
+        assert_eq!(pf.as_deref(), Some("%ProgramFiles%"));
+        assert_eq!(read_registry_string(r"HKCU\Software\QmNoSuchKey", "SteamPath"), None);
+        assert_eq!(read_registry_string(r"HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion", "QmNoSuchValue"), None);
+        assert_eq!(read_registry_string(r"HKCR\.txt", ""), None);
     }
 
     #[test]

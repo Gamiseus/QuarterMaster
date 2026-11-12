@@ -6,6 +6,8 @@
     label: string;
     placeholder?: string;
     type?: "text" | "number" | "password";
+    /** Keep the label for screen readers only (a FieldRow already shows it). */
+    hideLabel?: boolean;
   }
 
   let {
@@ -13,6 +15,7 @@
     label,
     placeholder,
     type = "text",
+    hideLabel = false,
     id: idProp,
     oninput,
     class: className = "",
@@ -29,7 +32,7 @@
 </script>
 
 <div class={["field", className]}>
-  <label for={id}>{label}</label>
+  <label for={id} class={{ "qm-visually-hidden": hideLabel }}>{label}</label>
   <input {...rest} {id} {type} {placeholder} {value} oninput={handleInput} />
 </div>
 
@@ -48,7 +51,7 @@
   input {
     min-height: var(--qm-row-h);
     padding: var(--qm-space-1) var(--qm-space-3);
-    border: 1px solid var(--qm-border);
+    border: 1px solid var(--qm-border-strong);
     border-radius: var(--qm-radius-sm);
     background: var(--qm-canvas);
     color: var(--qm-text);

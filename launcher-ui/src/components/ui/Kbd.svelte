@@ -14,7 +14,7 @@
 <style>
   .kbd {
     display: inline-block;
-    min-width: 20px;
+    min-width: var(--qm-kbd-min);
     padding: 1px var(--qm-space-2);
     border: 1px solid var(--qm-border);
     border-bottom-width: 2px;

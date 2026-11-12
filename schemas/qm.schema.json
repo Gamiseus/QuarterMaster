@@ -1,5 +1,243 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "hunk": {
+      "description": "One edit of an \"at\" patch.",
+      "properties": {
+        "fp": {
+          "description": "The patch's content when the choice was made.",
+          "properties": {
+            "anchor": {
+              "type": "string"
+            },
+            "ordinal": {
+              "type": "integer"
+            },
+            "payload": {
+              "type": "string"
+            },
+            "source": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "anchor",
+            "payload"
+          ],
+          "type": "object"
+        },
+        "keep": {
+          "description": "The patch whose change to these lines stays, as \"mod_id:patch_id\".",
+          "type": "string"
+        },
+        "ordinal": {
+          "description": "The edit's place among the patch's edits, from 0.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "vanilla": {
+          "description": "The edit's pattern lines, trimmed, one per line.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "fp",
+        "vanilla",
+        "ordinal"
+      ],
+      "type": "object"
+    },
+    "override": {
+      "additionalProperties": false,
+      "properties": {
+        "after": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "anchors": {
+          "items": {
+            "$ref": "#/definitions/rung"
+          },
+          "type": "array"
+        },
+        "apply_as": {
+          "enum": [
+            "literal",
+            "edits"
+          ],
+          "type": "string"
+        },
+        "before": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "disable": {
+          "default": false,
+          "type": "boolean"
+        },
+        "fingerprint": {
+          "properties": {
+            "anchor": {
+              "type": "string"
+            },
+            "ordinal": {
+              "type": "integer"
+            },
+            "payload": {
+              "type": "string"
+            },
+            "source": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "anchor",
+            "payload"
+          ],
+          "type": "object"
+        },
+        "patch": {
+          "description": "The patch to change, as \"mod_id:patch_id\".",
+          "type": "string"
+        },
+        "priority": {
+          "type": "integer"
+        },
+        "replace_anchors": {
+          "default": false,
+          "type": "boolean"
+        },
+        "sites": {
+          "items": {
+            "$ref": "#/definitions/site"
+          },
+          "type": "array"
+        },
+        "skip_hunks": {
+          "description": "Edits of the \"at\" patch that do not run, so another patch's change to the same lines stays. The patch then runs as separate edits.",
+          "items": {
+            "$ref": "#/definitions/hunk"
+          },
+          "type": "array"
+        },
+        "stack_above": {
+          "description": "At a shared line, put this patch's block above this patch's block, as \"mod_id:patch_id\".",
+          "type": "string"
+        },
+        "stack_below": {
+          "description": "At a shared line, put this patch's block below this patch's block, as \"mod_id:patch_id\".",
+          "type": "string"
+        },
+        "stack_side": {
+          "description": "The side of that line. Both sides when absent.",
+          "enum": [
+            "before",
+            "after"
+          ],
+          "type": "string"
+        },
+        "stack_site": {
+          "$ref": "#/definitions/site",
+          "description": "The game's line the stack rule is for. Every line where both blocks meet when absent."
+        }
+      },
+      "required": [
+        "patch"
+      ],
+      "type": "object"
+    },
+    "rung": {
+      "description": "A place on another patch's code (within) or in the whole file. See the modding wiki, Part 7: https://gamiseus.github.io/wiki/",
+      "properties": {
+        "b_fp": {
+          "description": "The other patch's content when the rung was made.",
+          "properties": {
+            "anchor": {
+              "type": "string"
+            },
+            "mod_version": {
+              "type": "string"
+            },
+            "ordinal": {
+              "type": "integer"
+            },
+            "payload": {
+              "type": "string"
+            },
+            "source": {
+              "type": "string"
+            },
+            "v": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "anchor",
+            "payload",
+            "source",
+            "ordinal"
+          ],
+          "type": "object"
+        },
+        "b_site": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "check": {
+          "type": "string"
+        },
+        "edge": {
+          "enum": [
+            "start",
+            "end"
+          ],
+          "type": "string"
+        },
+        "exact": {
+          "default": false,
+          "type": "boolean"
+        },
+        "nth": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "pattern": {
+          "type": "string"
+        },
+        "position": {
+          "enum": [
+            "before",
+            "after"
+          ],
+          "type": "string"
+        },
+        "within": {
+          "description": "The other patch, as \"mod_id:patch_id\".",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "site": {
+      "properties": {
+        "context": {
+          "type": "string"
+        },
+        "ordinal": {
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "context"
+      ],
+      "type": "object"
+    }
+  },
   "description": "In-memory Lua patch definitions for QuarterMaster.",
   "properties": {
     "manifest": {
@@ -21,6 +259,13 @@
         "version"
       ],
       "type": "object"
+    },
+    "overrides": {
+      "description": "Changes to other mods' patches. Every mod an entry names must be in this mod's requires.",
+      "items": {
+        "$ref": "#/definitions/override"
+      },
+      "type": "array"
     },
     "patches": {
       "items": {
@@ -124,6 +369,21 @@
           },
           "pattern": {
             "properties": {
+              "anchors": {
+                "items": {
+                  "$ref": "#/definitions/rung"
+                },
+                "type": "array"
+              },
+              "apply_as": {
+                "default": "literal",
+                "description": "\"edits\" runs an \"at\" patch as separate edits next to the lines it keeps.",
+                "enum": [
+                  "literal",
+                  "edits"
+                ],
+                "type": "string"
+              },
               "expect": {
                 "minimum": 1,
                 "type": "integer"
@@ -161,6 +421,27 @@
                 ],
                 "type": "string"
               },
+              "requires": {
+                "description": "Patches this patch needs, by id, \"mod_id:patch_id\" or \"mod_id:*\". One in the same file runs first; when it did not apply, this patch is skipped.",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "sites": {
+                "items": {
+                  "$ref": "#/definitions/site"
+                },
+                "type": "array"
+              },
+              "stack": {
+                "description": "Where this patch's block goes among the code other patches add at its line: \"first\" on top (it runs first), \"last\" at the bottom. A mod it needs stays above it.",
+                "enum": [
+                  "first",
+                  "last"
+                ],
+                "type": "string"
+              },
               "target": {
                 "oneOf": [
                   {
@@ -192,6 +473,12 @@
           },
           "regex": {
             "properties": {
+              "anchors": {
+                "items": {
+                  "$ref": "#/definitions/rung"
+                },
+                "type": "array"
+              },
               "expect": {
                 "minimum": 1,
                 "type": "integer"
@@ -228,7 +515,28 @@
                 ],
                 "type": "string"
               },
+              "requires": {
+                "description": "Patches this patch needs, by id, \"mod_id:patch_id\" or \"mod_id:*\". One in the same file runs first; when it did not apply, this patch is skipped.",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
               "root_capture": {
+                "type": "string"
+              },
+              "sites": {
+                "items": {
+                  "$ref": "#/definitions/site"
+                },
+                "type": "array"
+              },
+              "stack": {
+                "description": "Where this patch's block goes among the code other patches add at its line: \"first\" on top (it runs first), \"last\" at the bottom. A mod it needs stays above it.",
+                "enum": [
+                  "first",
+                  "last"
+                ],
                 "type": "string"
               },
               "target": {
@@ -266,6 +574,67 @@
       },
       "type": "array"
     },
+    "publish": {
+      "description": "Lists the mod on the QuarterMaster site and in the launcher's Browse tab. The game ignores this table. See the modding wiki, Part 11: https://gamiseus.github.io/wiki/",
+      "properties": {
+        "asset": {
+          "description": "The release file to install, a .zip or .qmpack. Without it, the first one in the release.",
+          "type": "string"
+        },
+        "channel": {
+          "enum": [
+            "stable"
+          ],
+          "type": "string"
+        },
+        "image": {
+          "description": "A picture for the mod's card: a .png, .jpg, .webp or .gif in the mod's folder, at most 1 MB.",
+          "type": "string"
+        },
+        "repository": {
+          "description": "The GitHub repository that publishes the mod, as \"owner/name\".",
+          "type": "string"
+        },
+        "summary": {
+          "description": "One line for the mod list. Without it, the first line of the mod's description.",
+          "maxLength": 140,
+          "type": "string"
+        }
+      },
+      "required": [
+        "repository"
+      ],
+      "type": "object"
+    },
+    "sprites": {
+      "additionalProperties": {
+        "additionalProperties": false,
+        "properties": {
+          "like": {
+            "description": "Show the image at the size another image global is shown at.",
+            "type": "string"
+          },
+          "scale": {
+            "description": "A fraction of the image's own pixel size: 0.25 shows a 400x400 file at 100x100.",
+            "exclusiveMinimum": 0,
+            "type": "number"
+          },
+          "size": {
+            "description": "Width and height to show the image at, in the game's pixels.",
+            "items": {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            "maxItems": 2,
+            "minItems": 2,
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "description": "The size an image is shown at, by the name of its global (e.g. top_m1), whatever the file's resolution. A replaced image takes the original's size without a rule. See the modding wiki, Part 2: https://gamiseus.github.io/wiki/",
+      "type": "object"
+    },
     "vars": {
       "additionalProperties": {
         "type": "string"
@@ -274,8 +643,7 @@
     }
   },
   "required": [
-    "manifest",
-    "patches"
+    "manifest"
   ],
   "title": "QuarterMaster Patch Manifest (qm.toml)",
   "type": "object"

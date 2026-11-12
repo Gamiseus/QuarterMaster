@@ -1,6 +1,7 @@
-<script lang="ts"></script>
+<script lang="ts">
+  import { Screen } from "../../components/ui";
+</script>
 
-<section class="qm-page">
-  <h1>Mod Engine</h1>
+<Screen title="Mod Engine">
   <p class="qm-muted">Mod Engine arrives in a later update.</p>
-</section>
+</Screen>

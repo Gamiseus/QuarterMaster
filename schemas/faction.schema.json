@@ -1,0 +1,278 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://quartermaster.local/schemas/faction-1.json",
+  "title": "QuarterMaster faction.toml (schema 1)",
+  "description": "A faction mod: an army that takes over the Allied or German side. Guide: the modding wiki, Part 3: https://gamiseus.github.io/wiki/faction-mods/",
+  "type": "object",
+  "required": ["schema", "id", "name", "replaces"],
+  "additionalProperties": false,
+  "properties": {
+    "schema": { "const": 1, "description": "Schema version." },
+    "id": { "type": "string", "pattern": "^[a-z0-9_]+$", "description": "Stable id, stored in saves." },
+    "name": { "type": "string", "minLength": 1, "description": "Display name." },
+    "replaces": { "enum": ["allied", "axis"], "description": "Side this faction takes over." },
+    "side_name": { "type": "string", "description": "Short side name, e.g. \"Soviet\"." },
+    "description": { "type": "string" },
+
+    "units": {
+      "type": "object",
+      "description": "Art per unit. Allied side: base, sarge, para, french. Axis side: base, officer, volks.",
+      "propertyNames": { "$ref": "#/definitions/variant" },
+      "additionalProperties": { "$ref": "#/definitions/unit" }
+    },
+
+    "weapons": { "type": "array", "items": { "$ref": "#/definitions/weapon" } },
+
+    "spawn_swap": {
+      "type": "object",
+      "description": "vanilla_tag = weapon_tag. Hands out the second weapon wherever the game hands out the first. Advanced: the tag really changes.",
+      "propertyNames": { "$ref": "#/definitions/vanilla_weapon" },
+      "additionalProperties": { "$ref": "#/definitions/tag" }
+    },
+
+    "pools": {
+      "type": "object",
+      "description": "Edit the random weapon pools the game draws loot and reinforcement guns from.",
+      "propertyNames": { "$ref": "#/definitions/pool" },
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "add": { "type": "array", "items": { "$ref": "#/definitions/tag" } },
+          "remove": { "type": "array", "items": { "$ref": "#/definitions/vanilla_weapon" } }
+        }
+      }
+    },
+
+    "classes": {
+      "type": "object",
+      "description": "The 12 class slots. Allied side only.",
+      "propertyNames": { "$ref": "#/definitions/spec" },
+      "additionalProperties": { "$ref": "#/definitions/class" }
+    },
+
+    "names": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Allied side: soldier, french and vehicle names. Axis side: the soldier names name the German commander.",
+      "properties": {
+        "first": { "$ref": "#/definitions/name_list" },
+        "last": { "$ref": "#/definitions/name_list" },
+        "first_file": { "$ref": "#/definitions/path" },
+        "last_file": { "$ref": "#/definitions/path" },
+        "format": { "$ref": "#/definitions/name_format" },
+        "vehicles": { "$ref": "#/definitions/name_list", "description": "Vehicle call signs." },
+        "vehicles_file": { "$ref": "#/definitions/path" },
+        "french": { "$ref": "#/definitions/name_pool", "description": "Names for the french unit." }
+      }
+    },
+
+    "voices": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "folder": { "$ref": "#/definitions/path", "description": "Replaces lines in the side's main voice folder (sounds/vo/allied or sounds/vo/axis)." },
+        "dirs": {
+          "type": "object",
+          "description": "Other vanilla voice folders of the side: vanilla folder name = mod folder (e.g. frenchies = \"voices_fr\").",
+          "propertyNames": { "enum": ["allied", "frenchies", "axis"] },
+          "additionalProperties": { "$ref": "#/definitions/path" }
+        },
+        "fill_missing": { "type": "boolean", "default": true, "description": "Reuse the faction's own lines when it has fewer files than vanilla." },
+        "map": {
+          "type": "object",
+          "description": "faction file name = vanilla file name, without numbers or extension (hurt = \"alliedHurt\").",
+          "additionalProperties": { "type": "string" }
+        }
+      }
+    },
+
+    "text": {
+      "type": "object",
+      "description": "Game strings to replace, by name (see includes/localisation.lua).",
+      "additionalProperties": { "type": "string" }
+    },
+
+    "sprites": {
+      "type": "object",
+      "description": "Any other game image to replace while the faction is active: global name = image file.",
+      "additionalProperties": { "$ref": "#/definitions/path" }
+    },
+
+    "sounds": {
+      "type": "object",
+      "description": "Any other game sound to replace while the faction is active: global name = sound file.",
+      "additionalProperties": { "$ref": "#/definitions/path" }
+    },
+
+    "vehicles": { "type": "array", "items": { "$ref": "#/definitions/vehicle" } },
+
+    "hooks": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["lua"],
+      "properties": { "lua": { "$ref": "#/definitions/path" } }
+    }
+  },
+
+  "definitions": {
+    "path": {
+      "type": "string",
+      "pattern": "^[^/\\\\:][^:]*$",
+      "description": "Path relative to the mod folder. No drive letters, no leading slash."
+    },
+
+    "tag": { "type": "string", "pattern": "^[A-Za-z0-9_]+$" },
+
+    "variant": { "enum": ["base", "sarge", "para", "french", "officer", "volks"] },
+
+    "spec": {
+      "enum": ["rifle", "light", "gunner", "medic", "comms", "officer", "engy", "scout", "sniper", "commando", "sapper", "intel"]
+    },
+
+    "pool": { "enum": ["allied", "allied_sniper", "grunt", "para", "resistance", "smg", "axis", "axis_crew"] },
+
+    "vanilla_weapon": {
+      "enum": ["m1", "g98", "k98", "springfield", "boysRifle", "pz39", "g33", "mas36", "m1Carbine", "matchGarand", "m1941", "t20", "t22", "scopedK98", "1917", "scopedGarand", "scopedSpringfield", "scopedEnfield", "g43", "scopedG43", "svt40", "vg15", "m1CarbinePara", "m2Carbine", "m2CarbineA1", "bren", "chauchat", "zb26", "m1919", "vicker", "mg42", "mg15", "mg34", "tommy", "stenMKVI", "sten", "bar", "johnson", "m3", "m38", "mp40", "mp41", "ppsh41", "stg44", "irstg44", "fg42", "shotgun", "slamShotgun"]
+    },
+
+    "vanilla_vehicle": {
+      "enum": ["sherman", "stuart", "churchill", "m10", "m20", "m5", "greyHound", "jeep", "deuce", "weasel", "weaselBoxed", "halfTrack", "ambulance", "howitzer", "landMattress", "bofor", "m2hb", "clownCar", "panzer4", "panther", "tiger", "stug", "flakPanzer", "wespe", "puma", "sdkfz", "sdkfz2", "sdkfz2Boxed", "sdkfz222", "opel", "kubel", "benz", "bike", "horseCart", "goliath", "r35", "nebel", "flak30", "flak38", "germHowitzer", "pak36", "pak38", "pak88", "zb60", "armoredCannon", "brestCannon"]
+    },
+
+    "frame": {
+      "type": "string",
+      "pattern": "^(idle|aim|fire|parry|pinned|pinCover|call|observe|dead|deadBBQ|proneAim|proneFire|unjam[12]|attack[1-4]|fragThrow[1-3]|faustToss|faustFired|reload([1-9]|10)|buringMan[1-4]|analyze|brief|bazooka[1-3]?|bazookaFired|flare[1-7]|mortar[1-4]|smoking[12]|jagerMove)$"
+    },
+
+    "name_list": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+
+    "name_format": {
+      "enum": ["initial", "full"],
+      "default": "initial",
+      "description": "initial: \"A. Ivanov\" (vanilla style). full: \"Pyotr Ivanov\" (needs first names)."
+    },
+
+    "name_pool": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "first": { "$ref": "#/definitions/name_list" },
+        "last": { "$ref": "#/definitions/name_list" },
+        "first_file": { "$ref": "#/definitions/path" },
+        "last_file": { "$ref": "#/definitions/path" },
+        "format": { "$ref": "#/definitions/name_format" }
+      }
+    },
+
+    "unit": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "folder": { "$ref": "#/definitions/path", "description": "One image per frame, named <frame>.png." },
+        "frames": {
+          "type": "object",
+          "description": "Per-frame image files, used instead of the folder's file for that frame.",
+          "propertyNames": { "$ref": "#/definitions/frame" },
+          "additionalProperties": { "$ref": "#/definitions/path" }
+        },
+        "copy_from": { "$ref": "#/definitions/variant", "description": "Another unit whose faction frames fill this unit's gaps." }
+      }
+    },
+
+    "weapon_stats": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "action": { "enum": ["semi", "bolt", "auto"] },
+        "class": { "enum": ["", "smg", "lmg", "atRifle"] },
+        "ammo": { "type": "integer", "minimum": 1 },
+        "maxAmmo": { "type": "integer", "minimum": 1 },
+        "range": { "type": "number", "minimum": 0 },
+        "damage": { "type": "number", "minimum": 0 },
+        "recoil": { "type": "number", "minimum": 0 },
+        "bulk": { "type": "number", "minimum": 0 },
+        "rof": { "type": "number", "minimum": 0 },
+        "rofTime": { "type": "number", "minimum": 0 },
+        "jam": { "type": "number", "minimum": 0 },
+        "rgCapable": { "enum": [0, 1] }
+      }
+    },
+
+    "weapon": {
+      "type": "object",
+      "additionalProperties": false,
+      "oneOf": [
+        { "required": ["reskin"], "not": { "anyOf": [{ "required": ["tag"] }, { "required": ["based_on"] }, { "required": ["loot_side"] }, { "required": ["pools"] }] } },
+        { "required": ["tag", "based_on"], "not": { "required": ["reskin"] } }
+      ],
+      "properties": {
+        "reskin": { "$ref": "#/definitions/vanilla_weapon", "description": "Change this vanilla weapon in place." },
+        "tag": {
+          "allOf": [{ "$ref": "#/definitions/tag" }, { "not": { "$ref": "#/definitions/vanilla_weapon" } }],
+          "description": "A new weapon's tag. Must not be a vanilla tag."
+        },
+        "based_on": { "$ref": "#/definitions/vanilla_weapon", "description": "New weapons: copy this weapon's stats first." },
+        "name": { "type": "string", "description": "Used as the squad UI text when there is no description." },
+        "description": { "type": "string", "description": "Squad UI text." },
+        "top_sprite": { "$ref": "#/definitions/path" },
+        "side_sprite": { "$ref": "#/definitions/path" },
+        "sound": { "type": "string", "description": "A game sound by name (springfieldSound), a file, or a name prefix: weapons/mosin loads mosin1.wav, mosin2.wav, ..." },
+        "mag_sprite": { "type": "string", "description": "A game sprite name or an image file." },
+        "stats": { "$ref": "#/definitions/weapon_stats" },
+        "loot_side": { "enum": ["allied", "axis", "none"], "default": "none", "description": "Shorthand for pools = [\"allied\"] or [\"axis\"]." },
+        "pools": { "type": "array", "items": { "$ref": "#/definitions/pool" }, "description": "Random weapon pools this new weapon joins." }
+      }
+    },
+
+    "class": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "start_weapon": { "$ref": "#/definitions/tag" },
+        "unlocks": { "type": "array", "items": { "$ref": "#/definitions/tag" }, "minItems": 3, "maxItems": 3 },
+        "bonus": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Replaces the vanilla bonus for this class when present.",
+          "properties": {
+            "speed": { "type": "number", "description": "Added." },
+            "skill": { "type": "number", "description": "Added." },
+            "max_health": { "type": "number", "description": "Added (also heals by the same amount)." },
+            "hth_damage": { "type": "number", "description": "Added." },
+            "detect_range": { "type": "number", "exclusiveMinimum": 0, "description": "Multiplied." },
+            "mine_detect_range": { "type": "number", "exclusiveMinimum": 0, "description": "Multiplied." }
+          }
+        },
+        "skills": { "type": "array", "items": { "type": "string" }, "minItems": 3, "maxItems": 3 },
+        "icon": { "$ref": "#/definitions/path", "description": "Class badge image." }
+      }
+    },
+
+    "vehicle": {
+      "type": "object",
+      "required": ["reskin"],
+      "additionalProperties": false,
+      "properties": {
+        "reskin": { "$ref": "#/definitions/vanilla_vehicle" },
+        "name": { "type": "string", "description": "Shown instead of the tag in the vehicle tooltip." },
+        "body": { "$ref": "#/definitions/path" },
+        "turret": { "$ref": "#/definitions/path" },
+        "driver": { "$ref": "#/definitions/path" },
+        "gunner": { "$ref": "#/definitions/path" },
+        "icon": { "$ref": "#/definitions/path" },
+        "husk": { "$ref": "#/definitions/path" },
+        "debris": { "$ref": "#/definitions/path", "description": "Name prefix: vehicles/t34/debris loads debris1.png, ..." },
+        "parts": {
+          "type": "object",
+          "description": "Other sprites, by the part of the game name after the tag (SecondTurret1 = ...).",
+          "additionalProperties": { "$ref": "#/definitions/path" }
+        },
+        "call_signs": { "$ref": "#/definitions/name_list", "description": "Call signs this vehicle gets when it spawns (Allied vehicles)." },
+        "call_signs_file": { "$ref": "#/definitions/path" }
+      }
+    }
+  }
+}

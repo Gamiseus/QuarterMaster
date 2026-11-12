@@ -4,10 +4,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::fs;
 use std::io::Read;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
-const GITHUB_SEARCH_API: &str = "https://api.github.com/search/repositories";
 const USER_AGENT: &str = "QuarterMaster-Launcher/1.0 (Mud and Blood Mod Manager)";
 pub const CACHE_TTL_SECONDS: u64 = 900; // 15 minutes
 
@@ -35,13 +34,18 @@ pub struct CommunityModItem {
 
 /// Fetches real community mods by searching GitHub topics and keywords.
 /// Respects unauthenticated rate limits (60 req/hr) via 15-minute disk caching.
+#[allow(clippy::too_many_arguments)]
 pub fn get_community_catalog(
     paths: &QuarterMasterPaths,
     query_opt: Option<&str>,
     topic_filter: Option<&str>,
     source_filter: Option<&str>,
     force_refresh: bool,
+    api_base: &str,
+    allow_api: UrlCheck<'_>,
+    token: Option<&str>,
 ) -> Value {
+    let token = token.map(str::trim).filter(|t| !t.is_empty());
     let cache_file = paths.cache_dir.join("community-catalog-cache.json");
     let trimmed_query = query_opt.unwrap_or("").trim();
     let is_default_search = trimmed_query.is_empty();
@@ -55,6 +59,7 @@ pub fn get_community_catalog(
                         if let Ok(cached_str) = fs::read_to_string(&cache_file) {
                             if let Ok(mut cached_val) = serde_json::from_str::<Value>(&cached_str) {
                                 // Mark already installed state against current library
+                                normalize_download_urls(&mut cached_val);
                                 annotate_installed_status(paths, &mut cached_val);
                                 return cached_val;
                             }
@@ -81,15 +86,15 @@ pub fn get_community_catalog(
         "topic:quartermaster-mod".to_string()
     };
 
-    let settings = paths.load_settings();
     let mut items = Vec::new();
     let mut rate_limited = false;
     let mut error_note: Option<String> = None;
 
     // 1. Fetch from GitHub Search API
     if source_filter.unwrap_or("all") != "NexusMods" {
-        match fetch_github_repositories(&gh_query, settings.github_token.as_deref()) {
+        match fetch_github_repositories(api_base, &gh_query, token, allow_api) {
             Ok(repos) => {
+                let mut releases_limited = false;
                 for repo in repos {
                     let full_name = repo["full_name"].as_str().unwrap_or("").to_string();
                     let owner = repo["owner"]["login"].as_str().unwrap_or("").to_string();
@@ -107,9 +112,12 @@ pub fn get_community_catalog(
 
                     // Check for releases / asset zip
                     let (rel_tag, dl_url, asset_name) = fetch_latest_release_asset(
+                        api_base,
                         &owner,
                         &name,
-                        settings.github_token.as_deref(),
+                        token,
+                        allow_api,
+                        &mut releases_limited,
                     );
 
                     let item_id = format!("{}_{}", owner, name).to_ascii_lowercase().replace('-', "_");
@@ -136,9 +144,15 @@ pub fn get_community_catalog(
                         update_key: Some(update_key),
                     });
                 }
+                if releases_limited {
+                    error_note = Some(
+                        "GitHub API rate limit reached. Some mods offer their source archive instead of a release."
+                            .to_string(),
+                    );
+                }
             }
             Err(e) => {
-                if e.contains("403") || e.contains("rate limit") {
+                if e == RATE_LIMITED {
                     rate_limited = true;
                     error_note = Some(
                         "GitHub API rate limit reached (60 req/hr unauthenticated). Showing cached results."
@@ -185,6 +199,7 @@ pub fn get_community_catalog(
                         obj.insert("error_message".to_string(), json!(err));
                     }
                 }
+                normalize_download_urls(&mut cached_val);
                 annotate_installed_status(paths, &mut cached_val);
                 return cached_val;
             }
@@ -252,67 +267,196 @@ fn annotate_installed_status(paths: &QuarterMasterPaths, val: &mut Value) {
     }
 }
 
-/// Calls GitHub Search API
-fn fetch_github_repositories(
-    query: &str,
-    token_opt: Option<&str>,
-) -> Result<Vec<Value>, String> {
-    let mut req = ureq::get(GITHUB_SEARCH_API)
-        .set("User-Agent", USER_AGENT)
-        .set("Accept", "application/vnd.github.v3+json")
-        .timeout(Duration::from_secs(8))
-        .query("q", query)
-        .query("sort", "stars")
-        .query("order", "desc");
+/// The `Err` of an API call that hit GitHub's rate limit (403 or 429).
+const RATE_LIMITED: &str = "GitHub API rate limit reached";
+/// A search or release JSON is small; anything near this is not one.
+const MAX_API_BYTES: u64 = 8 * 1024 * 1024;
+const API_HOST: &str = "api.github.com";
+/// The real GitHub API, for callers without a service network policy.
+pub const GITHUB_API_BASE: &str = "https://api.github.com";
 
-    if let Some(token) = token_opt.filter(|t| !t.trim().is_empty()) {
-        req = req.set("Authorization", &format!("Bearer {}", token.trim()));
+/// Accepts only `https://api.github.com/...` (no userinfo or port): the `allow_api` callback for
+/// callers without a service network policy.
+pub fn allow_github_api(url: &str) -> Result<(), String> {
+    let parsed = url::Url::parse(url.trim()).map_err(|e| format!("Invalid URL '{url}': {e}"))?;
+    let ok = parsed.scheme() == "https"
+        && parsed.host_str() == Some(API_HOST)
+        && parsed.port().is_none()
+        && parsed.username().is_empty()
+        && parsed.password().is_none();
+    if ok {
+        Ok(())
+    } else {
+        Err(format!("Only https://{API_HOST} may be contacted ({url})"))
     }
+}
 
-    let resp = req.call().map_err(|e| format!("{e}"))?;
-    let body_str = resp.into_string().map_err(|e| format!("{e}"))?;
-    let json_val: Value = serde_json::from_str(&body_str).map_err(|e| format!("{e}"))?;
+/// GET a GitHub API JSON document; every hop is checked with `allow`. A rate limit is
+/// `Err(RATE_LIMITED)`.
+fn github_api_get(url: &str, token: Option<&str>, allow: UrlCheck<'_>) -> Result<Value, String> {
+    let mut headers = vec![
+        ("User-Agent", USER_AGENT.to_string()),
+        ("Accept", "application/vnd.github+json".to_string()),
+    ];
+    if let Some(t) = token {
+        headers.push(("Authorization", format!("Bearer {t}")));
+    }
+    let resp = fetch_conditional(url, &headers, allow, MAX_API_BYTES)?;
+    match resp.status {
+        200 => {
+            serde_json::from_slice(&resp.body).map_err(|e| format!("Invalid GitHub response: {e}"))
+        }
+        403 | 429 => Err(RATE_LIMITED.to_string()),
+        status => Err(format!("GitHub returned HTTP {status}")),
+    }
+}
 
-    let items = json_val
+/// Calls the GitHub Search API at `api_base`.
+fn fetch_github_repositories(
+    api_base: &str,
+    query: &str,
+    token: Option<&str>,
+    allow: UrlCheck<'_>,
+) -> Result<Vec<Value>, String> {
+    let base = api_base.trim_end_matches('/');
+    let mut url = url::Url::parse(&format!("{base}/search/repositories"))
+        .map_err(|e| format!("Invalid API base '{api_base}': {e}"))?;
+    url.query_pairs_mut()
+        .append_pair("q", query)
+        .append_pair("sort", "stars")
+        .append_pair("order", "desc");
+    let json_val = github_api_get(url.as_str(), token, allow)?;
+    Ok(json_val
         .get("items")
         .and_then(|it| it.as_array())
         .cloned()
-        .unwrap_or_default();
-
-    Ok(items)
+        .unwrap_or_default())
 }
 
-/// Checks latest release for a given repository to find downloadable zip assets
+/// GitHub owner and repository names: ASCII letters, digits, `.`, `_`, `-`.
+fn valid_github_name(s: &str) -> bool {
+    !s.is_empty()
+        && s != "."
+        && s != ".."
+        && s.bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
+}
+
+/// `https://codeload.github.com/{owner}/{repo}/zip/{reference...}`, each segment encoded.
+fn codeload_url(owner: &str, repo: &str, reference: &[&str]) -> Option<String> {
+    let mut url = url::Url::parse("https://codeload.github.com/").ok()?;
+    url.path_segments_mut()
+        .ok()?
+        .clear()
+        .extend([owner, repo, "zip"])
+        .extend(reference);
+    Some(url.to_string())
+}
+
+/// The default-branch source archive (offered when no release asset is known).
+fn default_branch_archive(owner: &str, repo: &str) -> Option<String> {
+    codeload_url(owner, repo, &["HEAD"])
+}
+
+/// `https://api.github.com/repos/{o}/{r}/zipball/{ref}` (refused by the download allowlist) as
+/// the equivalent codeload URL; `None` for any other URL.
+fn codeload_from_zipball(url: &str) -> Option<String> {
+    let parsed = url::Url::parse(url.trim()).ok()?;
+    if parsed.scheme() != "https" || parsed.host_str() != Some(API_HOST) {
+        return None;
+    }
+    let segs: Vec<String> = parsed.path_segments()?.map(percent_decode).collect();
+    let segs: Vec<&str> = segs.iter().map(String::as_str).collect();
+    match segs.as_slice() {
+        ["repos", owner, repo, "zipball", reference @ ..]
+            if valid_github_name(owner) && valid_github_name(repo) =>
+        {
+            if reference.is_empty() || reference.iter().any(|r| r.is_empty()) {
+                default_branch_archive(owner, repo)
+            } else {
+                codeload_url(owner, repo, reference)
+            }
+        }
+        _ => None,
+    }
+}
+
+/// Decode `%XX` escapes in one path segment (invalid escapes stay as they are).
+fn percent_decode(s: &str) -> String {
+    let bytes = s.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            let hex = std::str::from_utf8(&bytes[i + 1..i + 3]).ok();
+            if let Some(b) = hex.and_then(|h| u8::from_str_radix(h, 16).ok()) {
+                out.push(b);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+/// Rewrite API zipball URLs in a catalog value (old disk caches hold them) to codeload.
+fn normalize_download_urls(val: &mut Value) {
+    let Some(arr) = val.get_mut("catalog").and_then(|c| c.as_array_mut()) else {
+        return;
+    };
+    for item in arr {
+        let fixed = item
+            .get("download_url")
+            .and_then(Value::as_str)
+            .and_then(codeload_from_zipball);
+        if let (Some(fixed), Some(obj)) = (fixed, item.as_object_mut()) {
+            obj.insert("download_url".to_string(), json!(fixed));
+        }
+    }
+}
+
+/// Checks the latest release of a repository for a downloadable zip asset. Without one (or
+/// without an answer) the source archive on codeload is offered. Once `limited` is set (the
+/// first rate limit) no more requests are made.
 fn fetch_latest_release_asset(
+    api_base: &str,
     owner: &str,
     repo: &str,
-    token_opt: Option<&str>,
+    token: Option<&str>,
+    allow: UrlCheck<'_>,
+    limited: &mut bool,
 ) -> (Option<String>, Option<String>, Option<String>) {
-    let url = format!("https://api.github.com/repos/{owner}/{repo}/releases/latest");
-    let mut req = ureq::get(&url)
-        .set("User-Agent", USER_AGENT)
-        .set("Accept", "application/vnd.github.v3+json")
-        .timeout(Duration::from_secs(4));
-
-    if let Some(token) = token_opt.filter(|t| !t.trim().is_empty()) {
-        req = req.set("Authorization", &format!("Bearer {}", token.trim()));
+    if !valid_github_name(owner) || !valid_github_name(repo) {
+        return (None, None, None);
     }
-
-    let Ok(resp) = req.call() else {
-        // Fallback: Default branch archive URL
-        let fallback_dl = format!("https://github.com/{owner}/{repo}/archive/refs/heads/main.zip");
-        return (None, Some(fallback_dl), Some("main.zip".to_string()));
+    let fallback = || {
+        (
+            None,
+            default_branch_archive(owner, repo),
+            Some("source.zip".to_string()),
+        )
+    };
+    if *limited {
+        return fallback();
+    }
+    let base = api_base.trim_end_matches('/');
+    let url = format!("{base}/repos/{owner}/{repo}/releases/latest");
+    let rel_json = match github_api_get(&url, token, allow) {
+        Ok(v) => v,
+        Err(e) => {
+            if e == RATE_LIMITED {
+                *limited = true;
+            }
+            return fallback();
+        }
     };
 
-    let Ok(body) = resp.into_string() else {
-        return (None, None, None);
-    };
-
-    let Ok(rel_json) = serde_json::from_str::<Value>(&body) else {
-        return (None, None, None);
-    };
-
-    let tag = rel_json.get("tag_name").and_then(|t| t.as_str()).map(|s| s.to_string());
+    let tag = rel_json
+        .get("tag_name")
+        .and_then(|t| t.as_str())
+        .map(|s| s.to_string());
 
     if let Some(assets) = rel_json.get("assets").and_then(|a| a.as_array()) {
         for asset in assets {
@@ -327,14 +471,17 @@ fn fetch_latest_release_asset(
         }
     }
 
-    // If release has no zip asset, use zipball_url
-    let zipball = rel_json
-        .get("zipball_url")
-        .and_then(|z| z.as_str())
-        .map(|s| s.to_string())
-        .or_else(|| Some(format!("https://github.com/{owner}/{repo}/archive/refs/heads/main.zip")));
-
-    (tag, zipball, Some("release.zip".to_string()))
+    // No zip asset: the release's source archive on codeload (the API zipball URL is not on a
+    // download host).
+    let source = match tag.as_deref().filter(|t| !t.is_empty()) {
+        Some(t) => codeload_url(owner, repo, &["refs", "tags", t]),
+        None => rel_json
+            .get("zipball_url")
+            .and_then(Value::as_str)
+            .and_then(codeload_from_zipball)
+            .or_else(|| default_branch_archive(owner, repo)),
+    };
+    (tag, source, Some("release.zip".to_string()))
 }
 
 /// Downloads a remote mod archive with safety verifications:
@@ -342,7 +489,7 @@ fn fetch_latest_release_asset(
 /// 2. Zip-slip protection (no directory traversal or drive letters)
 /// 3. Schema verification (checks for qm.toml or mod.json)
 /// 4. Lua static security audit (flags ffi, os.execute, etc.)
-/// 5. Clean import into library/<mod_id>/<version>/
+/// 5. Clean import into library/<mod_id>/<version>/ with the `upgrade` policy
 pub fn download_and_install_community_mod(
     paths: &QuarterMasterPaths,
     download_url: &str,
@@ -350,6 +497,18 @@ pub fn download_and_install_community_mod(
     max_bytes: u64,
     allow: UrlCheck<'_>,
 ) -> Result<Value, String> {
+    let zip = download_to_temp(paths, download_url, max_bytes, allow)?;
+    install_downloaded(paths, &zip, download_url.trim(), expected_mod_id, "upgrade")
+}
+
+/// Download `download_url` (size-capped, every hop checked by `allow`) into a temp zip under
+/// `cache/downloads`; returns its path. Nothing in the library is touched.
+pub fn download_to_temp(
+    paths: &QuarterMasterPaths,
+    download_url: &str,
+    max_bytes: u64,
+    allow: UrlCheck<'_>,
+) -> Result<PathBuf, String> {
     let trimmed_url = download_url.trim();
     if trimmed_url.is_empty() {
         return Err("Download URL is required".to_string());
@@ -376,36 +535,47 @@ pub fn download_and_install_community_mod(
         "qm_{}_{}",
         SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
-            .map(|d| d.as_millis())
+            .map(|d| d.as_nanos())
             .unwrap_or(0),
         filename
     ));
 
     let buffer = fetch_capped(trimmed_url, USER_AGENT, allow, max_bytes)?;
 
-    fs::write(&dest_file, &buffer)
-        .map_err(|e| format!("Failed to write downloaded archive: {e}"))?;
+    if let Err(e) = fs::write(&dest_file, &buffer) {
+        let _ = fs::remove_file(&dest_file);
+        return Err(format!("Failed to write downloaded archive: {e}"));
+    }
+    Ok(dest_file)
+}
 
-    // Perform pre-flight safety audit on the zip archive
-    let security_report = audit_remote_archive_safety(&dest_file)?;
-
-    // Import cleanly into library
-    let import_res = paths.import_mod_from_path_with_options(
-        &dest_file,
-        None,
-        false,
-        expected_mod_id.map(|id| vec![id.to_string()]),
-        Some("Upgrade".to_string()),
-    )?;
-
-    // Clean up temporary downloaded archive
-    let _ = fs::remove_file(&dest_file);
-
-    Ok(json!({
-        "ok": true,
-        "import_summary": import_res,
-        "security_audit": security_report,
-    }))
+/// Audit a downloaded `zip`, then import it with `policy` (`upgrade` | `replace` | `alongside`)
+/// recording `source_url`. The zip is removed on every exit path.
+pub fn install_downloaded(
+    paths: &QuarterMasterPaths,
+    zip: &Path,
+    source_url: &str,
+    expected_mod_id: Option<&str>,
+    policy: &str,
+) -> Result<Value, String> {
+    let result = (|| {
+        // Perform pre-flight safety audit on the zip archive
+        let security_report = audit_remote_archive_safety(zip)?;
+        let import_res = paths.import_mod_from_path_with_options(
+            zip,
+            Some(source_url.to_string()),
+            false,
+            expected_mod_id.map(|id| vec![id.to_string()]),
+            Some(policy.to_ascii_lowercase()),
+        )?;
+        Ok(json!({
+            "ok": true,
+            "import_summary": import_res,
+            "security_audit": security_report,
+        }))
+    })();
+    let _ = fs::remove_file(zip);
+    result
 }
 
 fn size_limit_error(max_bytes: u64) -> String {
@@ -500,6 +670,111 @@ pub fn fetch_capped(
         }
     }
     Err(format!("Download request failed: more than {MAX_REDIRECTS} redirects"))
+}
+
+/// GET `url` once without following redirects (`allow` checks it first). Returns the status
+/// and the `Location` header; the body is not read. For github.com's `releases/latest`
+/// redirect, which names the latest tag without the REST API.
+pub fn fetch_head_location(url: &str, user_agent: &str, allow: UrlCheck<'_>) -> Result<(u16, Option<String>), String> {
+    allow(url)?;
+    let agent = ureq::AgentBuilder::new()
+        .redirects(0)
+        .timeout_connect(CONNECT_TIMEOUT)
+        .timeout_read(READ_TIMEOUT)
+        .build();
+    match agent.get(url).set("User-Agent", user_agent).call() {
+        Ok(resp) => Ok((resp.status(), resp.header("Location").map(str::to_string))),
+        Err(ureq::Error::Status(status, resp)) => Ok((status, resp.header("Location").map(str::to_string))),
+        Err(ureq::Error::Transport(t)) => Err(format!("Request failed: {t}")),
+    }
+}
+
+/// One final response from `fetch_conditional`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FetchResponse {
+    pub status: u16,
+    pub etag: Option<String>,
+    pub body: Vec<u8>,
+    /// GitHub said the rate limit is spent: `X-RateLimit-Remaining: 0` or a `Retry-After`
+    /// (secondary limit). Lets a 403 for a rate limit be told apart from a refused token.
+    pub rate_limited: bool,
+}
+
+fn rate_limit_spent(resp: &ureq::Response) -> bool {
+    resp.header("X-RateLimit-Remaining").is_some_and(|v| v.trim() == "0") || resp.header("Retry-After").is_some()
+}
+
+/// GET `start` with `headers`, following redirects by hand like `fetch_capped` (`allow` sees
+/// every hop first). Returns the final status, its `ETag` and body: 304 comes back with an empty
+/// body, 4xx/5xx with their (capped) body. Only transport failures and refused hops are `Err`.
+/// The `Authorization` header is never sent once a hop leaves the first origin.
+pub fn fetch_conditional(
+    start: &str,
+    headers: &[(&str, String)],
+    allow: UrlCheck<'_>,
+    max_bytes: u64,
+) -> Result<FetchResponse, String> {
+    allow(start)?;
+    let origin = |u: &str| url::Url::parse(u).ok().map(|p| p.origin());
+    let first_origin = origin(start).ok_or_else(|| format!("Invalid URL '{start}'"))?;
+    let agent = ureq::AgentBuilder::new()
+        .redirects(0)
+        .timeout_connect(CONNECT_TIMEOUT)
+        .timeout_read(READ_TIMEOUT)
+        .build();
+    let mut url = start.to_string();
+    let mut same_origin = true;
+    for _ in 0..=MAX_REDIRECTS {
+        same_origin = same_origin && origin(&url).as_ref() == Some(&first_origin);
+        let mut req = agent.get(&url);
+        for (name, value) in headers {
+            if same_origin || !name.eq_ignore_ascii_case("authorization") {
+                req = req.set(name, value);
+            }
+        }
+        let resp = match req.call() {
+            Ok(resp) => resp,
+            Err(ureq::Error::Status(status, resp)) => {
+                return read_response(status, resp, max_bytes)
+            }
+            Err(ureq::Error::Transport(t)) => return Err(format!("Request failed: {t}")),
+        };
+        let status = resp.status();
+        if status == 304 {
+            return Ok(FetchResponse {
+                status,
+                etag: resp.header("ETag").map(str::to_string),
+                body: Vec::new(),
+                rate_limited: false,
+            });
+        }
+        match next_hop(&url, status, resp.header("Location"), allow)? {
+            Some(next) => url = next,
+            None => return read_response(status, resp, max_bytes),
+        }
+    }
+    Err(format!(
+        "Request failed: more than {MAX_REDIRECTS} redirects"
+    ))
+}
+
+fn read_response(
+    status: u16,
+    resp: ureq::Response,
+    max_bytes: u64,
+) -> Result<FetchResponse, String> {
+    let etag = resp.header("ETag").map(str::to_string);
+    let rate_limited = rate_limit_spent(&resp);
+    let declared = resp
+        .header("Content-Length")
+        .and_then(|v| v.trim().parse::<u64>().ok());
+    let body = cap_reader(declared, resp.into_reader(), max_bytes)?;
+    Ok(FetchResponse {
+        status,
+        etag,
+        body,
+        rate_limited,
+    })
 }
 
 /// Audits a downloaded zip archive for path safety, schemas, and dangerous Lua functions
@@ -671,6 +946,82 @@ mod tests {
         assert_eq!(seen.lock().unwrap().len(), 2);
     }
 
+    /// Serves `responses` in order, one per connection, and returns each request head.
+    fn serve_in_order(responses: Vec<String>) -> (u16, std::thread::JoinHandle<Vec<String>>) {
+        use std::io::{BufRead, BufReader, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = std::thread::spawn(move || {
+            let mut heads = Vec::new();
+            for body in responses {
+                let (stream, _) = listener.accept().unwrap();
+                let mut reader = BufReader::new(stream.try_clone().unwrap());
+                let mut head = String::new();
+                let mut line = String::new();
+                while reader.read_line(&mut line).unwrap() > 0 && line != "\r\n" {
+                    head.push_str(&line);
+                    line.clear();
+                }
+                heads.push(head);
+                let mut s = stream;
+                s.write_all(body.as_bytes()).unwrap();
+            }
+            heads
+        });
+        (port, server)
+    }
+
+    #[test]
+    fn fetch_conditional_returns_304_and_status_codes() {
+        let resp = |status: &str, extra: &str, body: &str| {
+            format!(
+                "HTTP/1.1 {status}\r\n{extra}Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            )
+        };
+        let (port, server) = serve_in_order(vec![
+            resp("304 Not Modified", "ETag: \"e1\"\r\n", ""),
+            resp("429 Too Many Requests", "", "slow down"),
+            resp("404 Not Found", "", "{}"),
+            resp("200 OK", "ETag: \"e2\"\r\n", "{\"tag_name\":\"v1\"}"),
+        ]);
+        let base = format!("http://127.0.0.1:{port}");
+        let allow = |u: &str| {
+            if u.starts_with(&base) {
+                Ok(())
+            } else {
+                Err(format!("not allowed: {u}"))
+            }
+        };
+        let headers = [("If-None-Match", "\"e1\"".to_string())];
+        let r = fetch_conditional(&format!("{base}/a"), &headers, &allow, 1024).unwrap();
+        assert_eq!((r.status, r.etag.as_deref()), (304, Some("\"e1\"")));
+        assert!(r.body.is_empty());
+        let r = fetch_conditional(&format!("{base}/b"), &[], &allow, 1024).unwrap();
+        assert_eq!((r.status, r.body.as_slice()), (429, &b"slow down"[..]));
+        let r = fetch_conditional(&format!("{base}/c"), &[], &allow, 1024).unwrap();
+        assert_eq!(r.status, 404);
+        let r = fetch_conditional(&format!("{base}/d"), &[], &allow, 1024).unwrap();
+        assert_eq!((r.status, r.etag.as_deref()), (200, Some("\"e2\"")));
+        assert_eq!(r.body, b"{\"tag_name\":\"v1\"}");
+        let heads = server.join().unwrap();
+        assert!(
+            heads[0]
+                .to_ascii_lowercase()
+                .contains("if-none-match: \"e1\""),
+            "{}",
+            heads[0]
+        );
+        // A refused start URL is an error before any request.
+        assert!(fetch_conditional("https://evil.example/", &[], &allow, 1024).is_err());
+        // A transport failure is an error.
+        let closed = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let dead = format!("http://127.0.0.1:{}/x", closed.local_addr().unwrap().port());
+        drop(closed);
+        let any = |_: &str| Ok(());
+        assert!(fetch_conditional(&dead, &[], &any, 1024).is_err());
+    }
+
     #[test]
     fn test_audit_rejects_zip_slip() {
         let temp_dir = tempfile::tempdir().unwrap();
@@ -689,5 +1040,51 @@ mod tests {
         let res = audit_remote_archive_safety(&zip_path);
         assert!(res.is_err());
         assert!(res.unwrap_err().contains("path traversal"));
+    }
+
+    #[test]
+    fn zipball_urls_map_to_codeload() {
+        assert_eq!(
+            codeload_from_zipball("https://api.github.com/repos/o/r/zipball/v1.0").as_deref(),
+            Some("https://codeload.github.com/o/r/zip/v1.0")
+        );
+        assert_eq!(
+            codeload_from_zipball("https://api.github.com/repos/o/r/zipball").as_deref(),
+            Some("https://codeload.github.com/o/r/zip/HEAD")
+        );
+        assert_eq!(codeload_from_zipball("https://github.com/o/r/archive/x.zip"), None);
+        assert_eq!(codeload_from_zipball("https://api.github.com/repos/o/../zipball/x"), None);
+        assert_eq!(
+            codeload_url("o", "r", &["refs", "tags", "v 1#x"]).as_deref(),
+            Some("https://codeload.github.com/o/r/zip/refs/tags/v%201%23x")
+        );
+        let mut cached = json!({ "catalog": [
+            { "download_url": "https://api.github.com/repos/o/r/zipball/v2" },
+            { "download_url": "https://github.com/o/r/releases/download/v2/m.zip" }
+        ]});
+        normalize_download_urls(&mut cached);
+        assert_eq!(
+            cached["catalog"][0]["download_url"],
+            "https://codeload.github.com/o/r/zip/v2"
+        );
+        assert_eq!(
+            cached["catalog"][1]["download_url"],
+            "https://github.com/o/r/releases/download/v2/m.zip"
+        );
+    }
+
+    #[test]
+    fn allow_github_api_accepts_only_the_api_host() {
+        assert!(allow_github_api("https://api.github.com/search/repositories?q=x").is_ok());
+        for url in [
+            "http://api.github.com/x",
+            "https://github.com/x",
+            "https://api.github.com:8443/x",
+            "https://user@api.github.com/x",
+            "https://api.github.com.evil.example/x",
+            "http://127.0.0.1:1/x",
+        ] {
+            assert!(allow_github_api(url).is_err(), "{url}");
+        }
     }
 }

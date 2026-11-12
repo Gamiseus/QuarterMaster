@@ -5,8 +5,8 @@ use std::time::Duration;
 pub trait ProcessProbe: Send + Sync + 'static {
     /// Pid of a running game process, if any.
     fn find_game(&self) -> Option<u32>;
-    /// Block until the given pid exits.
-    fn wait_for_exit(&self, pid: u32) -> QmResult<()>;
+    /// Block until the given pid exits. Returns its exit code when it can be read (D67).
+    fn wait_for_exit(&self, pid: u32) -> QmResult<Option<u32>>;
     /// Spawn the game via `spawn_fn`; fakes may skip the closure and return a fake pid.
     fn spawn(&self, spawn_fn: &dyn Fn() -> QmResult<u32>) -> QmResult<u32>;
 }
@@ -68,19 +68,34 @@ impl ProcessProbe for Win32Probe {
         }
     }
 
-    fn wait_for_exit(&self, pid: u32) -> QmResult<()> {
+    fn wait_for_exit(&self, pid: u32) -> QmResult<Option<u32>> {
         use crate::error::{ErrorKind, QmError};
         use windows::Win32::Foundation::{CloseHandle, WAIT_FAILED};
         use windows::Win32::System::Threading::{
-            OpenProcess, WaitForSingleObject, INFINITE, PROCESS_SYNCHRONIZE,
+            GetExitCodeProcess, OpenProcess, WaitForSingleObject, INFINITE,
+            PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE,
         };
-        // SAFETY: the handle comes from OpenProcess and is closed before returning.
+        // SAFETY: the handle comes from OpenProcess and is closed before returning; the exit
+        // code is written into a local.
         unsafe {
-            // A pid that cannot be opened has already exited (or was never ours to watch).
-            let Ok(handle) = OpenProcess(PROCESS_SYNCHRONIZE, false, pid) else {
-                return Ok(());
+            // Without the query right the wait still works, with no exit code.
+            let (handle, can_query) = match OpenProcess(
+                PROCESS_SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION,
+                false,
+                pid,
+            ) {
+                Ok(h) => (h, true),
+                // A pid that cannot be opened has already exited (or was never ours to watch).
+                Err(_) => match OpenProcess(PROCESS_SYNCHRONIZE, false, pid) {
+                    Ok(h) => (h, false),
+                    Err(_) => return Ok(None),
+                },
             };
             let res = WaitForSingleObject(handle, INFINITE);
+            let mut code = 0u32;
+            let code =
+                (res != WAIT_FAILED && can_query && GetExitCodeProcess(handle, &mut code).is_ok())
+                    .then_some(code);
             if let Err(e) = CloseHandle(handle) {
                 tracing::warn!("CloseHandle(process) failed: {e}");
             }
@@ -90,8 +105,8 @@ impl ProcessProbe for Win32Probe {
                     format!("Waiting for process {pid} failed."),
                 ));
             }
+            Ok(code)
         }
-        Ok(())
     }
 
     fn spawn(&self, spawn_fn: &dyn Fn() -> QmResult<u32>) -> QmResult<u32> {

@@ -1,14 +1,17 @@
 <script lang="ts">
-  import { Badge, Button, Dialog, Skeleton, StencilHeading, Switch } from "../../../components/ui";
+  import { Badge, Button, Callout, Skeleton, StencilHeading, Switch } from "../../../components/ui";
   import { call } from "../../../lib/api";
-  import {
-    commands,
-    type ConflictResolutionSuggestion,
-    type DetectedConflict,
-    type ModPatchStatus,
-    type PatchState,
-  } from "../../../lib/bindings";
+  import { commands, type CompatChangesView, type DetectedConflict, type ModPatchStatus, type PatchState } from "../../../lib/bindings";
+  import { changedBy, changedMods, idleLines, ignoredLines } from "../../../lib/patches/compat";
+  import { explainConflict, isNote, isRecordless } from "../../../lib/patches/explain";
+  import { foldConflicts } from "../../../lib/patches/groups";
+  import FailureGroupRow from "../patches/FailureGroupRow.svelte";
+  import { fixes } from "../../../lib/stores/fixes.svelte";
+  import { loadOrder } from "../../../lib/stores/loadorder.svelte";
+  import { mods } from "../../../lib/stores/mods.svelte";
   import { patches } from "../../../lib/stores/patches.svelte";
+  import { openPatch } from "../mods-view.svelte";
+  import { resolver } from "../../../lib/stores/resolver.svelte";
 
   interface Props {
     modId: string;
@@ -17,46 +20,74 @@
 
   let { modId, canMutate }: Props = $props();
 
-  type Winner = Extract<ConflictResolutionSuggestion, { tier: "select_winner" }>;
-
-  const STATE: Record<PatchState, { label: string; tone: "ok" | "danger" | "neutral" }> = {
+  const STATE: Record<PatchState, { label: string; tone: "ok" | "warn" | "danger" | "neutral" }> = {
     applied: { label: "Applied", tone: "ok" },
     broken: { label: "Broken", tone: "danger" },
     disabled: { label: "Disabled", tone: "neutral" },
     skipped: { label: "Skipped", tone: "neutral" },
-  };
-  const SUGGESTION: Record<ConflictResolutionSuggestion["tier"], string> = {
-    swap_mod_order: "Swap order",
-    generate_glue_patch: "Use glue patch",
-    select_winner: "Pick winner",
+    not_run: { label: "Does not run in the game", tone: "warn" },
   };
 
   const entry = $derived(patches.get(modId));
   const list = $derived(entry.status === "ready" ? entry.data : []);
-  const conflicts = $derived.by(() => {
+  const named = $derived.by(() => {
     const byId = new Map<string, DetectedConflict>();
     for (const p of list) for (const c of p.conflicts) byId.set(c.id, c);
     return [...byId.values()];
   });
+  /** Info notes (`multi_match`) are not conflicts: shown as notes, with nothing to resolve. */
+  const conflicts = $derived(named.filter((c) => !isNote(c)));
+  /** Failures caused by another patch fold under it (G10). */
+  const rows = $derived(
+    foldConflicts(conflicts, loadOrder.simulation.status === "ready" ? (loadOrder.simulation.data.failure_groups ?? []) : []),
+  );
+  const notes = $derived(named.filter(isNote));
+  /** This mod's conflicts that no patch row has (a module, a `[vars]` name). */
+  const modConflicts = $derived(
+    loadOrder.simulation.status === "ready"
+      ? loadOrder.simulation.data.conflicts.filter(
+          (c) => isRecordless(c) && (c.mod_a_id === modId || c.mod_b_id === modId) && !named.some((n) => n.id === c.id),
+        )
+      : [],
+  );
 
   /** Toggles in flight; dropped when fresh patch data arrives or the write fails. */
   let overrides = $state<Record<string, boolean>>({});
-  let busy = $state(false);
   /** Patch ids whose toggle is still being written. */
   let pending = $state<Set<string>>(new Set());
-  let picking = $state<Winner | null>(null);
-  let pickOpen = $state(false);
 
   $effect(() => {
     void entry;
     overrides = {};
   });
 
+  /** What this mod's compatibility overrides did, and its rungs that are never used (§11.6). */
+  let compat = $state<CompatChangesView | null>(null);
+  let compatSeq = 0;
+  async function loadCompat(id: string) {
+    const mine = ++compatSeq;
+    try {
+      const r = await call(commands.compatChangesGet(id), { expect: ["not_found"] });
+      if (mine === compatSeq) compat = r.status === "ready" ? r.data : null;
+    } catch {
+      if (mine === compatSeq) compat = null;
+    }
+  }
+
+  // Refetched with the patch rows: both follow the load order and the mod set.
+  $effect(() => {
+    void entry;
+    void loadCompat(modId);
+  });
+
+  const modNames = $derived(Object.fromEntries((mods.list.status === "ready" ? mods.list.data : []).map((m) => [m.id, m.name])));
+  const modName = (id: string) => modNames[id] ?? id;
+  const simOverrides = $derived(loadOrder.simulation.status === "ready" ? (loadOrder.simulation.data.overrides ?? []) : []);
+  const changes = $derived(compat ? changedMods(compat) : []);
+  const ignored = $derived(compat ? ignoredLines(compat) : []);
+  const idle = $derived(compat ? idleLines(compat) : []);
+
   const nameOf = (p: ModPatchStatus) => p.name ?? p.patch_id;
-  const patchName = (id: string) => {
-    const p = list.find((x) => x.patch_id === id);
-    return p ? nameOf(p) : id;
-  };
 
   async function toggle(p: ModPatchStatus, enabled: boolean) {
     const id = p.patch_id;
@@ -74,35 +105,16 @@
       pending = next;
     }
   }
-
-  async function resolve(s: ConflictResolutionSuggestion, winner: number | null) {
-    busy = true;
-    try {
-      await call(commands.conflictResolve(s, winner));
-    } catch {
-      // call() already showed the error.
-    } finally {
-      busy = false;
-    }
-  }
-
-  function suggest(s: ConflictResolutionSuggestion) {
-    if (s.tier === "select_winner") {
-      picking = s;
-      pickOpen = true;
-    } else {
-      void resolve(s, null);
-    }
-  }
-
-  function pick(index: 0 | 1) {
-    const s = picking;
-    pickOpen = false;
-    if (s) void resolve(s, index);
-  }
 </script>
 
 <div class="patches">
+  {#if ignored.length > 0}
+    <Callout tone="warn" title="QuarterMaster ignores some of this mod's changes.">
+      <ul class="lines" aria-label="Ignored changes">
+        {#each ignored as line, i (`${line}:${i}`)}<li>{line}</li>{/each}
+      </ul>
+    </Callout>
+  {/if}
   {#if entry.status === "loading"}
     <div aria-busy="true" aria-label="Loading patches"><Skeleton lines={3} /></div>
   {:else if entry.status === "error"}
@@ -121,6 +133,11 @@
             <code class="file">{p.target_file}</code>
           </div>
           <Badge tone={STATE[p.state].tone}>{STATE[p.state].label}</Badge>
+          {#if fixes.forPatch(p.patch_id, modId).length > 0}<Badge tone="accent">Fixed by you</Badge>{/if}
+          {#each changedBy(simOverrides, modId, p.patch_id, p) as m (m)}<Badge tone="info">Changed by {modName(m)}</Badge>{/each}
+          {#if p.target_file}
+            <Button size="sm" variant="ghost" aria-label={`Show ${nameOf(p)} in patch view`} onclick={() => openPatch(p.patch_id)}>Show</Button>
+          {/if}
           <Switch
             checked={overrides[p.patch_id] ?? p.state !== "disabled"}
             label={`Enable ${nameOf(p)}`}
@@ -133,44 +150,64 @@
     </ul>
   {/if}
 
-  {#if conflicts.length > 0}
+  {#if changes.length > 0 || idle.length > 0}
+    <section class="compat" aria-label="Changes to other mods">
+      <StencilHeading level={3}>{changes.length > 0 ? `Changes patches of: ${changes.map(modName).join(", ")}` : "Changes patches of other mods"}</StencilHeading>
+      {#if compat && compat.applied.length > 0}
+        <ul class="lines" aria-label="Changes it makes">
+          {#each compat.applied as o, i (`${o.target}:${i}`)}<li>{o.detail}.</li>{/each}
+        </ul>
+      {/if}
+      {#if idle.length > 0}
+        <ul class="lines qm-muted" aria-label="Changes not in use now">
+          {#each idle as line, i (`${line}:${i}`)}<li>{line}</li>{/each}
+        </ul>
+      {/if}
+    </section>
+  {/if}
+
+  {#if conflicts.length > 0 || modConflicts.length > 0}
     <section class="conflicts">
       <StencilHeading level={3}>Conflicts</StencilHeading>
-      {#each conflicts as c (c.id)}
+      {#each rows as r (r.kind === "one" ? r.conflict.id : `group:${r.group.target_file}:${r.group.root}`)}
+        {#if r.kind === "one"}
+          {@const c = r.conflict}
+          <div class="conflict">
+            <p>{c.description}</p>
+            <code class="file">{c.target_file}</code>
+            <!-- Every fix goes through the resolver, which previews its impact before Apply. -->
+            <div class="actions">
+              <Button size="sm" variant="primary" onclick={() => resolver.show(c.id)}>Resolve...</Button>
+            </div>
+          </div>
+        {:else}
+          <div class="conflict">
+            <FailureGroupRow row={r} {modName} onresolve={(id) => resolver.show(id)} />
+            <code class="file">{r.group.target_file}</code>
+          </div>
+        {/if}
+      {/each}
+      {#each modConflicts as c (c.id)}
+        <div class="conflict" data-testid="mod-conflict">
+          <p>{explainConflict(c, { records: [], modName })}</p>
+          {#if c.target_file}<code class="file">{c.target_file}</code>{/if}
+        </div>
+      {/each}
+    </section>
+  {/if}
+
+  {#if notes.length > 0}
+    <section class="conflicts" aria-label="Notes">
+      <StencilHeading level={3}>Notes</StencilHeading>
+      {#each notes as c (c.id)}
         <div class="conflict">
           <p>{c.description}</p>
           <code class="file">{c.target_file}</code>
-          {#if c.suggestions.length > 0}
-            <div class="actions">
-              {#each c.suggestions as s, i (i)}
-                <Button size="sm" disabled={!canMutate || busy} title={s.explanation} onclick={() => suggest(s)}>
-                  {SUGGESTION[s.tier]}
-                </Button>
-              {/each}
-            </div>
-          {/if}
         </div>
       {/each}
     </section>
   {/if}
 </div>
-
-<Dialog
-  bind:open={pickOpen}
-  title="Pick winner"
-  initialFocus="content"
-  description="Choose which patch to keep. The other one is disabled."
->
-  {#if picking}
-    <div class="choices">
-      <Button onclick={() => pick(0)}>Keep {patchName(picking.patch_a_id)}</Button>
-      <Button onclick={() => pick(1)}>Keep {patchName(picking.patch_b_id)}</Button>
-    </div>
-  {/if}
-  {#snippet footer()}
-    <Button variant="ghost" onclick={() => (pickOpen = false)}>Cancel</Button>
-  {/snippet}
-</Dialog>
 
 <style>
   .patches {
@@ -223,6 +260,17 @@
     overflow-wrap: anywhere;
   }
 
+  .lines {
+    margin: 0;
+    padding-left: var(--qm-space-4);
+  }
+
+  .compat {
+    display: flex;
+    flex-direction: column;
+    gap: var(--qm-space-2);
+  }
+
   .conflicts {
     display: flex;
     flex-direction: column;
@@ -244,11 +292,5 @@
     flex-wrap: wrap;
     gap: var(--qm-space-2);
     margin-top: var(--qm-space-1);
-  }
-
-  .choices {
-    display: flex;
-    flex-direction: column;
-    gap: var(--qm-space-2);
   }
 </style>

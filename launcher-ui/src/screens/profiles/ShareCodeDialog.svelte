@@ -5,7 +5,7 @@
   import { Button, Dialog, TextField } from "../../components/ui";
   import { app } from "../../lib/stores/app.svelte";
   import { toasts } from "../../lib/stores/toasts.svelte";
-  import { slug } from "./slug";
+  import { slug } from "../../lib/slug";
 
   interface Props {
     open?: boolean;

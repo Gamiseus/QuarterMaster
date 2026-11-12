@@ -9,6 +9,8 @@ use qm_manager::LauncherSettings;
 use std::path::{Path, PathBuf};
 
 const MAX_BACKUPS: std::ops::RangeInclusive<u32> = 1..=100;
+const THEMES: [&str; 3] = ["system", "dark", "light"];
+const COLOR_VISIONS: [&str; 5] = ["standard", "deutan", "protan", "tritan", "mono"];
 
 impl Service {
     pub fn app_info(&self) -> AppInfo {
@@ -55,6 +57,7 @@ impl Service {
             RevealKind::Logs => (paths.logs_dir.clone(), true),
             RevealKind::Library => (paths.library_dir.clone(), true),
             RevealKind::DataDir => (paths.root_dir.clone(), true),
+            RevealKind::Diagnostics => (paths.cache_dir.join("diagnostics"), true),
             RevealKind::ProfileDir => (paths.profiles_dir.join(&settings.active_profile_id), true),
             RevealKind::GameDir => (
                 settings
@@ -96,13 +99,24 @@ impl Service {
                 self.ensure_not_running()?;
             }
         }
+        let old_save_dir = s.save_dir_path.clone();
+        let old_workspace = s.workspace_mods_dir.clone();
         apply(&mut s, patch);
+        let save_dir_changed = s.save_dir_path != old_save_dir;
+        let workspace_changed = s.workspace_mods_dir != old_workspace;
         if complete_onboarding {
             s.first_run_completed = true;
         }
         self.paths().save_settings(&s).or_kind(ErrorKind::Io)?;
         // Also requests WarmVanilla, which rereads the game path.
         self.invalidate(Scope::Settings);
+        if save_dir_changed {
+            self.invalidate(Scope::Saves);
+        }
+        // Onboarding warms the mods itself once it is done.
+        if workspace_changed && !complete_onboarding {
+            self.warm_mods();
+        }
         Ok(SettingsView::from(&s))
     }
 }
@@ -130,6 +144,29 @@ fn validate(p: &SettingsPatch) -> QmResult<()> {
             }
         }
     }
+    if let Some(t) = &p.theme {
+        if !THEMES.contains(&t.as_str()) {
+            return Err(invalid(format!(
+                "Theme must be system, dark or light (got {t:?})."
+            )));
+        }
+    }
+    if let Some(c) = &p.color_vision {
+        if !COLOR_VISIONS.contains(&c.as_str()) {
+            return Err(invalid(format!(
+                "Colour vision must be standard, deutan, protan, tritan or mono (got {c:?})."
+            )));
+        }
+    }
+    if let Some(s) = p.text_scale {
+        // 100% to 175% in 12.5% steps (exact in binary floating point).
+        let steps = (s - 1.0) / 0.125;
+        if !(1.0..=1.75).contains(&s) || steps.fract() != 0.0 {
+            return Err(invalid(format!(
+                "Text size must be 100% to 175% in 12.5% steps (got {s})."
+            )));
+        }
+    }
     if let Some(n) = p.max_save_backups {
         if !MAX_BACKUPS.contains(&n) {
             return Err(invalid("Keep between 1 and 100 save backups.".to_string()));
@@ -145,7 +182,9 @@ fn apply(s: &mut LauncherSettings, p: SettingsPatch) {
     if let Some(v) = p.save_dir_path {
         s.save_dir_path = Some(v);
     }
-    if let Some(v) = p.workspace_mods_dir {
+    if p.clear_workspace_mods_dir == Some(true) {
+        s.workspace_mods_dir = None;
+    } else if let Some(v) = p.workspace_mods_dir {
         s.workspace_mods_dir = Some(v);
     }
     if let Some(v) = p.theme {
@@ -166,8 +205,26 @@ fn apply(s: &mut LauncherSettings, p: SettingsPatch) {
     if let Some(v) = p.disable_console_on_launch {
         s.disable_console_on_launch = v;
     }
-    if let Some(v) = p.github_token {
-        s.github_token = if v.is_empty() { None } else { Some(v) };
+    if let Some(v) = p.debug_mode {
+        s.debug_mode = v;
+    }
+    if let Some(v) = p.dev_commands {
+        s.dev_commands = v;
+    }
+    if let Some(v) = p.auto_check_updates {
+        s.auto_check_updates = v;
+    }
+    if let Some(v) = p.auto_install_updates {
+        s.auto_install_updates = v;
+    }
+    if let Some(v) = p.color_vision {
+        s.color_vision = v;
+    }
+    if let Some(v) = p.high_contrast {
+        s.high_contrast = v;
+    }
+    if let Some(v) = p.text_scale {
+        s.text_scale = v;
     }
 }
 

@@ -1,0 +1,51 @@
+/* Colour vision modes and high contrast (spec 6.4). Each mode swaps the four status tones for a set
+   that stays apart under that deficiency (tests/unit/tokens.test.ts simulates each one with the
+   Machado 2009 matrices and checks CIEDE2000 distances and contrast). Status badges also carry an
+   icon, so meaning never rests on colour alone.
+   `[data-cvd-preview]` applies a mode to one element, for the samples in Settings. */
+
+/* Deuteranopia (red-green, green weak): blue for ok, yellow for warn, orange for danger, purple for info. */
+:root[data-cvd="deutan"],
+[data-cvd-preview="deutan"] {
+  --qm-ok: light-dark(#13589e, #76aefd);
+  --qm-warn: light-dark(#6a5614, #fdcd0f);
+  --qm-danger: light-dark(#4e1a02, #e3a072);
+  --qm-info: light-dark(#5d395a, #e6b6e7);
+}
+
+/* Protanopia (red-green, red weak): like deuteranopia, with a brighter danger because reds read dark. */
+:root[data-cvd="protan"],
+[data-cvd-preview="protan"] {
+  --qm-ok: light-dark(#0554af, #aae0ff);
+  --qm-warn: light-dark(#6a5614, #fdcd0f);
+  --qm-danger: light-dark(#612007, #f0995b);
+  --qm-info: light-dark(#541f6a, #ca9ff7);
+}
+
+/* Tritanopia (blue-yellow): teal for ok, pink for warn, red for danger, violet for info. */
+:root[data-cvd="tritan"],
+[data-cvd-preview="tritan"] {
+  --qm-ok: light-dark(#07615d, #32c5b8);
+  --qm-warn: light-dark(#98276f, #f8bdeb);
+  --qm-danger: light-dark(#a0030f, #fb8c88);
+  --qm-info: light-dark(#5b45b2, #ada4f9);
+}
+
+/* Monochrome (achromatopsia, greyscale filters): even lightness steps; the icons carry the rest. */
+:root[data-cvd="mono"],
+[data-cvd-preview="mono"] {
+  --qm-ok: light-dark(#585858, #acacac);
+  --qm-info: light-dark(#3b3b3b, #c7c7c7);
+  --qm-warn: light-dark(#202020, #e3e3e3);
+  --qm-danger: light-dark(#000000, #ffffff);
+}
+
+/* High contrast, on top of any mode: 7:1 text and 4.5:1 boundaries. */
+:root[data-contrast="high"] {
+  --qm-text: light-dark(#000000, #ffffff);
+  --qm-text-muted: light-dark(#283228, #d3dcd3);
+  --qm-accent-text: light-dark(#523a05, #ecc775);
+  --qm-border: light-dark(#7d8b76, #6f8572);
+  --qm-border-strong: light-dark(#46553f, #98b19b);
+  --qm-enabled: light-dark(#1d4626, #6fbf7c);
+}

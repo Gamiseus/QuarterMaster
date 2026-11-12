@@ -1,57 +1,46 @@
 <script lang="ts">
-  import { open } from "@tauri-apps/plugin-dialog";
-  import { app } from "../../lib/stores/app.svelte";
-  import { toasts } from "../../lib/stores/toasts.svelte";
-
-  async function browse() {
-    let path: string | null;
-    try {
-      path = await open({ filters: [{ name: "mnb.exe", extensions: ["exe"] }] });
-    } catch (e) {
-      toasts.error("Could not open the file picker.", e instanceof Error ? e.message : String(e));
-      return;
-    }
-    if (!path) return;
-    await app.updateSettings({ game_exe_path: path }).catch(() => {});
-  }
+  import { Screen } from "../../components/ui";
+  import AboutCard from "./AboutCard.svelte";
+  import AppearanceCard from "./AppearanceCard.svelte";
+  import BackupsCard from "./BackupsCard.svelte";
+  import FoldersCard from "./FoldersCard.svelte";
+  import LaunchCard from "./LaunchCard.svelte";
+  import PathsCard from "./PathsCard.svelte";
+  import UpdatesCard from "./UpdatesCard.svelte";
 </script>
 
-<section class="qm-page">
-  <h1>Settings</h1>
-
-  <div class="qm-card">
-    <h2>Game</h2>
-    <div class="row">
-      <div class="path">
-        <p class="qm-muted">Game executable</p>
-        <code data-testid="game-path">{app.settings?.game_exe_path ?? "Not set"}</code>
-      </div>
-      <button type="button" class="qm-btn" onclick={browse}>Browse</button>
-    </div>
+<Screen title="Settings">
+  <div class="grid">
+    <div class="wide"><PathsCard /></div>
+    <LaunchCard />
+    <UpdatesCard />
+    <BackupsCard />
+    <AppearanceCard />
+    <FoldersCard />
+    <AboutCard />
   </div>
-</section>
+</Screen>
 
 <style>
-  .row {
-    display: flex;
-    align-items: flex-end;
-    justify-content: space-between;
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(calc(var(--qm-detail-w) * 1.1), 1fr));
     gap: var(--qm-space-4);
-    margin-top: var(--qm-space-3);
+    align-items: start;
   }
 
-  .path {
-    min-width: 0;
+  .wide {
+    grid-column: 1 / -1;
   }
 
-  p {
-    margin: 0 0 var(--qm-space-1);
+  /* Selects in setting rows: wide enough for their longest option, not the whole row. */
+  .grid :global(.control-select) {
+    width: calc(var(--qm-detail-w) * 0.5);
   }
 
-  code {
-    display: block;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+  .grid :global(.settings-card) {
+    display: flex;
+    flex-direction: column;
+    gap: var(--qm-space-3);
   }
 </style>

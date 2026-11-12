@@ -14,7 +14,7 @@ body {
   background: var(--qm-bg);
   color: var(--qm-text);
   font-family: var(--qm-font-sans);
-  font-size: 14px;
+  font-size: var(--qm-text-14);
   line-height: 1.45;
   overflow: hidden;
   -webkit-font-smoothing: antialiased;
@@ -22,6 +22,21 @@ body {
 
 #app {
   height: 100%;
+}
+
+/* Thin, theme-coloured scrollbars everywhere. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--qm-scrollbar-thumb) transparent;
+}
+
+/* A scroll region: fills the space its parent gives it and scrolls inside. The gutter is reserved
+   so content does not shift when the scrollbar appears. */
+.qm-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  scrollbar-gutter: stable;
 }
 
 h1,
@@ -36,11 +51,11 @@ h3,
 }
 
 h1 {
-  font-size: 22px;
+  font-size: var(--qm-text-20);
 }
 
 h2 {
-  font-size: 15px;
+  font-size: var(--qm-text-16);
 }
 
 button {
@@ -76,6 +91,18 @@ pre {
 
 .qm-btn:hover:not(:disabled) {
   border-color: var(--qm-accent);
+}
+
+/* Hidden on screen, still read by screen readers. */
+.qm-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
 .qm-muted {

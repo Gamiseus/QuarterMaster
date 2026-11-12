@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::ops::Range;
 use std::path::Path;
 
 /// A parsed Lua value from a `ser.lua` file (zero code execution).
@@ -140,6 +141,110 @@ impl SerDocument {
 
         Ok(doc)
     }
+
+    /// Where each entry of the root table sits in `raw`, in file order (Phase E D86). The
+    /// root table is the `return {...}` line, or the `_[0]={...}` line when the file ends in
+    /// `return _[0]`. Byte offsets are into `raw`.
+    pub fn root_entry_spans(raw: &str) -> Result<Vec<RootEntry>, String> {
+        let mut root_line: Option<(usize, &str)> = None;
+        let mut memo_zero: Option<(usize, &str)> = None;
+        let mut returns_memo_zero = false;
+        let base = raw.as_ptr() as usize;
+        for raw_line in raw.lines() {
+            let line = raw_line.trim();
+            if let Some(rest) = line.strip_prefix("return ") {
+                let trimmed = rest.trim();
+                if trimmed == "_[0]" {
+                    returns_memo_zero = true;
+                } else if trimmed.starts_with('{') {
+                    root_line = Some((trimmed.as_ptr() as usize - base, trimmed));
+                }
+            } else if let Some(rest) = line.strip_prefix("_[0]") {
+                if let Some(rhs) = rest.trim_start().strip_prefix('=') {
+                    let rhs = rhs.trim();
+                    if rhs.starts_with('{') {
+                        memo_zero = Some((rhs.as_ptr() as usize - base, rhs));
+                    }
+                }
+            }
+        }
+        let (offset, text) = match (root_line, returns_memo_zero, memo_zero) {
+            (Some(r), _, _) => r,
+            (None, true, Some(m)) => m,
+            _ => return Err("The save has no root table".to_string()),
+        };
+        let mut parser = LineParser::new(text);
+        let mut entries = parser.root_entries()?;
+        for e in &mut entries {
+            e.entry = e.entry.start + offset..e.entry.end + offset;
+        }
+        Ok(entries)
+    }
+
+    /// `raw` without the root-table entries named in `keys`: each entry is cut out with one
+    /// separator and every other byte stays as it is (Phase E D86). Returns the new text and
+    /// the keys that were found and removed. Keys set by a later `_[0].key=...` line (a
+    /// cyclic value) are not root-table entries and are left alone.
+    pub fn remove_root_keys(raw: &str, keys: &[&str]) -> Result<(String, Vec<String>), String> {
+        let entries = Self::root_entry_spans(raw)?;
+        let gone: Vec<bool> = entries
+            .iter()
+            .map(|e| e.key.as_deref().is_some_and(|k| keys.contains(&k)))
+            .collect();
+        let mut cut = vec![false; raw.len()];
+        let mut mark = |range: Range<usize>| {
+            for b in cut.iter_mut().take(range.end).skip(range.start) {
+                *b = true;
+            }
+        };
+        let mut removed = Vec::new();
+        for (i, e) in entries.iter().enumerate() {
+            if !gone.get(i).copied().unwrap_or(false) {
+                continue;
+            }
+            if let Some(k) = &e.key {
+                removed.push(k.clone());
+            }
+            match entries.get(i + 1) {
+                // Up to the next entry: the entry and the separator after it.
+                Some(next) => mark(e.entry.start..next.entry.start),
+                // The last entry: also the separator before it, back to the last kept entry.
+                None => {
+                    let kept_end = entries
+                        .iter()
+                        .zip(&gone)
+                        .take(i)
+                        .filter(|(_, g)| !**g)
+                        .map(|(k, _)| k.entry.end)
+                        .next_back();
+                    let from = match (kept_end, entries.first()) {
+                        (Some(end), _) => end,
+                        (None, Some(first)) => first.entry.start,
+                        (None, None) => e.entry.start,
+                    };
+                    mark(from..e.entry.end);
+                }
+            }
+        }
+        let bytes: Vec<u8> = raw
+            .bytes()
+            .zip(&cut)
+            .filter(|(_, c)| !**c)
+            .map(|(b, _)| b)
+            .collect();
+        let text =
+            String::from_utf8(bytes).map_err(|_| "The edit split a character".to_string())?;
+        Ok((text, removed))
+    }
+}
+
+/// One entry of a save's root table and where it sits in the file.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RootEntry {
+    /// The key; None for a positional entry.
+    pub key: Option<String>,
+    /// From the first byte of the key (or value) to the last byte of the value.
+    pub entry: Range<usize>,
 }
 
 struct LineParser<'a> {
@@ -226,6 +331,63 @@ impl<'a> LineParser<'a> {
         Ok(table)
     }
 
+    /// The entries of the table at the start of the input, with their byte ranges in it. The
+    /// same walk as `parse_table`, for the outermost table only.
+    fn root_entries(&mut self) -> Result<Vec<RootEntry>, String> {
+        self.skip_ws();
+        if self.peek() != Some(b'{') {
+            return Err("Expected '{'".to_string());
+        }
+        self.pos += 1;
+        let mut out = Vec::new();
+        loop {
+            self.skip_ws();
+            match self.peek() {
+                None => return Err("Unexpected end of input inside table".to_string()),
+                Some(b'}') => break,
+                Some(b',') | Some(b';') => {
+                    self.pos += 1;
+                    continue;
+                }
+                _ => {}
+            }
+            let start = self.pos;
+            let key = if self.peek() == Some(b'[') {
+                self.pos += 1;
+                let key_val = self.parse_value()?;
+                self.skip_ws();
+                if self.peek() != Some(b']') {
+                    return Err("Expected ']' after bracketed key".to_string());
+                }
+                self.pos += 1;
+                self.skip_ws();
+                if self.peek() != Some(b'=') {
+                    return Err("Expected '=' after bracketed key".to_string());
+                }
+                self.pos += 1;
+                self.parse_value()?;
+                match key_val {
+                    SerValue::String(s) => Some(s),
+                    SerValue::Number(n) => Some(format!("{n}")),
+                    SerValue::Bool(b) => Some(format!("{b}")),
+                    _ => None,
+                }
+            } else if let Some(ident) = self.try_parse_ident_key() {
+                self.parse_value()?;
+                Some(ident)
+            } else {
+                self.pos = start;
+                self.parse_value()?;
+                None
+            };
+            out.push(RootEntry {
+                key,
+                entry: start..self.pos,
+            });
+        }
+        Ok(out)
+    }
+
     /// Checks for `ident = ` (not `_[idx]`). Advances past `=` if matched.
     fn try_parse_ident_key(&mut self) -> Option<String> {
         self.skip_ws();
@@ -281,8 +443,7 @@ impl<'a> LineParser<'a> {
                 let start = self.pos;
                 while self.pos < self.bytes.len() {
                     let b = self.bytes[self.pos];
-                    if b == b',' || b == b'}' || b == b';' || b == b']' || b.is_ascii_whitespace()
-                    {
+                    if b == b',' || b == b'}' || b == b';' || b == b']' || b.is_ascii_whitespace() {
                         break;
                     }
                     self.pos += 1;
@@ -374,7 +535,7 @@ pub struct ReinforcementCardSummary {
 }
 
 /// Authentic rank title lookups matching base game engine (urb_engine.lua).
-pub fn classic_rank_title(lvl: i64) -> &'static str {
+pub fn campaign_rank_title(lvl: i64) -> &'static str {
     match lvl {
         0 => "Dirty civy",
         1 => "Cadet",
@@ -394,7 +555,7 @@ pub fn classic_rank_title(lvl: i64) -> &'static str {
     }
 }
 
-pub fn campaign_rank_title(lvl: i64) -> &'static str {
+pub fn classic_rank_title(lvl: i64) -> &'static str {
     match lvl {
         0 => "Balloon enthusiast",
         1 => "Squad Commander",
@@ -498,6 +659,8 @@ pub struct SaveSummary {
     pub reserve_soldiers: Vec<SoldierSummary>,
     pub fallen_soldiers_count: usize,
     pub ribbons_count: usize,
+    /// Ribbon ids from `ribs`, in the order they were earned (`sprites/rib<N>.png`).
+    pub ribbons: Vec<i64>,
     pub unlocked_classes: Vec<String>,
     pub class_unlock_trees: HashMap<String, Vec<String>>,
     pub active_battle_conditions: Vec<String>,
@@ -549,6 +712,8 @@ pub struct SoldierSummary {
     pub weapon_jam: i64,
     pub equipment: Vec<String>,
     pub awards_count: usize,
+    /// Icon ids of the soldier's awards (`sprites/award<N>.png`).
+    pub award_icons: Vec<i64>,
     pub perks_count: usize,
     pub combat_time: f64,
 }
@@ -562,6 +727,10 @@ pub struct SaveQmMeta {
     pub timestamp: Option<String>,
     /// Map of `mod_id -> version` active when the save was written.
     pub mods: HashMap<String, String>,
+    /// `mod_id -> save fields` that mod owned when the save was stamped (Phase E D85). Empty
+    /// for a stamp from before Phase E.
+    #[serde(default)]
+    pub fields: HashMap<String, Vec<String>>,
 }
 
 impl SaveSummary {
@@ -602,18 +771,40 @@ impl SaveSummary {
             campaign_casualties: root.get_i64("casualty", memo).unwrap_or(0),
             win_streak: root.get_i64("winStreak", memo).unwrap_or(0),
             missions_completed: root.get_i64("missionCounter", memo).unwrap_or(0),
-            campaign_rank: root.get_i64("mnb2Rank", memo).unwrap_or(1),
-            campaign_experience: root.get_i64("mnb2Experience", memo).unwrap_or(0),
-            classic_rank: root.get_i64("rank", memo).unwrap_or(1),
-            classic_experience: root.get_i64("experience", memo).unwrap_or(0),
+            // Mode fields, checked against decompile/includes (plan 2c Task 7). The game's main
+            // menu shows "Campaign rank: rankTell(player.rank)" and "Classic rank:
+            // mnb2RankTell(player.mnb2Rank)"; `mnb2*` is the classic (wave) mode.
+            //
+            // | Field                     | Game variable          | Where the game sets it            |
+            // |---------------------------|------------------------|-----------------------------------|
+            // | day                       | dayz                   | urb_engine.lua (+1 per day)       |
+            // | campaign_rank / _title    | rank, rankTell()       | urb_engine.lua main menu          |
+            // | campaign_experience       | experience             | campaign debrief                  |
+            // | campaign_kills            | kills                  | urb_engine.lua, gameType 0        |
+            // | campaign_casualties       | casualty               | urb_engine.lua                    |
+            // | missions_completed        | missionCounter         | campaign                          |
+            // | classic_rank / rank_title | mnb2Rank, mnb2RankTell | mnb2.lua debrief                  |
+            // | classic_experience        | mnb2Experience         | mnb2.lua (score from waves)       |
+            // | classic_total_kills       | mnb2TotalKills         | urb_engine.lua, gameType 1        |
+            // | classic_total_casualties  | mnb2TotalCasualty      | urb_engine.lua                    |
+            // | classic_max_wave / current| maxWave, currentWave   | mnb2.lua                          |
+            // | trench_rank / _title      | trenchModeRank         | drawFiles.lua                     |
+            // | trench_xp                 | trenchModeXP           | trench.lua                        |
+            // | ribbons                   | ribs (ids, in order)   | bcChecks.lua checkRibCondition    |
+            campaign_rank: root.get_i64("rank", memo).unwrap_or(1),
+            campaign_experience: root.get_i64("experience", memo).unwrap_or(0),
+            classic_rank: root.get_i64("mnb2Rank", memo).unwrap_or(1),
+            classic_experience: root.get_i64("mnb2Experience", memo).unwrap_or(0),
             classic_total_kills: root.get_i64("mnb2TotalKills", memo).unwrap_or(0),
             classic_total_casualties: root.get_i64("mnb2TotalCasualty", memo).unwrap_or(0),
             classic_max_wave: root.get_i64("maxWave", memo).unwrap_or(0),
             classic_current_wave: root.get_i64("currentWave", memo).unwrap_or(0),
             trench_rank: root.get_i64("trenchModeRank", memo).unwrap_or(1),
-            rank_title: classic_rank_title(root.get_i64("rank", memo).unwrap_or(1)).to_string(),
-            campaign_rank_title: campaign_rank_title(root.get_i64("mnb2Rank", memo).unwrap_or(1)).to_string(),
-            trench_rank_title: trench_rank_title(root.get_i64("trenchModeRank", memo).unwrap_or(1)).to_string(),
+            rank_title: classic_rank_title(root.get_i64("mnb2Rank", memo).unwrap_or(1)).to_string(),
+            campaign_rank_title: campaign_rank_title(root.get_i64("rank", memo).unwrap_or(1))
+                .to_string(),
+            trench_rank_title: trench_rank_title(root.get_i64("trenchModeRank", memo).unwrap_or(1))
+                .to_string(),
             trench_xp: root.get_i64("trenchModeXP", memo).unwrap_or(0),
             trench_axis_kills: root.get_i64("trenchAxisKills", memo).unwrap_or(0),
             trench_total_casualties: root.get_i64("trenchTotalCasualty", memo).unwrap_or(0),
@@ -708,6 +899,14 @@ impl SaveSummary {
         // Ribbons count
         if let Some(ribs_tbl) = root.get_table("ribs", memo) {
             summary.ribbons_count = ribs_tbl.array.len() + ribs_tbl.map.len();
+            summary.ribbons = ribs_tbl
+                .array
+                .iter()
+                .filter_map(|v| match v {
+                    SerValue::Number(n) if n.fract() == 0.0 => Some(*n as i64),
+                    _ => None,
+                })
+                .collect();
         }
 
         // Unlocked classes & weapon trees (`unlock = _[19]`)
@@ -768,11 +967,31 @@ impl SaveSummary {
                     }
                 }
             }
+            let mut fields: HashMap<String, Vec<String>> = HashMap::new();
+            if let Some(fields_tbl) = qm_tbl.get_table("fields", memo) {
+                for (m_id, list) in &fields_tbl.map {
+                    let Some(list) = doc.resolve_table(list) else {
+                        continue;
+                    };
+                    let mut names: Vec<String> = list
+                        .array
+                        .iter()
+                        .filter_map(|v| match v {
+                            SerValue::String(s) => Some(s.clone()),
+                            _ => None,
+                        })
+                        .collect();
+                    names.sort();
+                    names.dedup();
+                    fields.insert(m_id.clone(), names);
+                }
+            }
             summary.qm_meta = Some(SaveQmMeta {
                 profile_id: qm_tbl.get_str("profile_id", memo).map(|s| s.to_string()),
                 profile_name: qm_tbl.get_str("profile_name", memo).map(|s| s.to_string()),
                 timestamp: qm_tbl.get_str("timestamp", memo).map(|s| s.to_string()),
                 mods,
+                fields,
             });
         }
 
@@ -804,10 +1023,22 @@ impl SaveSummary {
                 let sol_spec = s_tbl.get_str("spec", memo).unwrap_or("");
                 let sol_rank_title = soldier_rank_title(sol_rank, sol_spec).to_string();
 
-                let awards_count = s_tbl
-                    .get_table("awards", memo)
-                    .map(|t| t.array.len() + t.map.len())
-                    .unwrap_or(0);
+                let awards_tbl = s_tbl.get_table("awards", memo);
+                let awards_count = awards_tbl.map(|t| t.array.len() + t.map.len()).unwrap_or(0);
+                // Each award is `{icon = N, ...}`; the game draws `sprites/award<N>.png`.
+                let award_icons: Vec<i64> = awards_tbl
+                    .map(|t| {
+                        t.array
+                            .iter()
+                            .filter_map(|v| match v {
+                                SerValue::Table(t) => Some(t),
+                                SerValue::Ref(i) => memo.get(i),
+                                _ => None,
+                            })
+                            .filter_map(|a| a.get_i64("icon", memo))
+                            .collect()
+                    })
+                    .unwrap_or_default();
                 let perks_count = s_tbl
                     .get_table("perks", memo)
                     .map(|t| t.array.len() + t.map.len())
@@ -876,6 +1107,7 @@ impl SaveSummary {
                     weapon_jam,
                     equipment,
                     awards_count,
+                    award_icons,
                     perks_count,
                     combat_time: s_tbl.get_f64("combatTime", memo).unwrap_or(0.0),
                 });
@@ -1052,8 +1284,16 @@ pub fn compare_saves(older: &SaveSummary, newer: &SaveSummary) -> SaveComparison
     cmp.promoted_soldiers.sort();
 
     let empty_mods = HashMap::new();
-    let old_mods = older.qm_meta.as_ref().map(|m| &m.mods).unwrap_or(&empty_mods);
-    let new_mods = newer.qm_meta.as_ref().map(|m| &m.mods).unwrap_or(&empty_mods);
+    let old_mods = older
+        .qm_meta
+        .as_ref()
+        .map(|m| &m.mods)
+        .unwrap_or(&empty_mods);
+    let new_mods = newer
+        .qm_meta
+        .as_ref()
+        .map(|m| &m.mods)
+        .unwrap_or(&empty_mods);
 
     for m in new_mods.keys() {
         if !old_mods.contains_key(m) {
@@ -1099,15 +1339,17 @@ return {currentao="Omaha Beach",germCommanderName="A. M\195\188ller",dayz=4,rank
 
     #[test]
     fn test_compare_saves_identical_zero_deltas() {
-        let mut save = SaveSummary::default();
-        save.area_of_operations = "Omaha Beach".to_string();
-        save.day = 5;
-        save.rank = 3;
-        save.experience = 1000;
-        save.tactical_points = 20;
-        save.campaign_kills = 50;
-        save.campaign_casualties = 2;
-        save.classic_max_wave = 15;
+        let mut save = SaveSummary {
+            area_of_operations: "Omaha Beach".to_string(),
+            day: 5,
+            rank: 3,
+            experience: 1000,
+            tactical_points: 20,
+            campaign_kills: 50,
+            campaign_casualties: 2,
+            classic_max_wave: 15,
+            ..Default::default()
+        };
         save.deployed_squad.push(SoldierSummary {
             name: "J. Miller".to_string(),
             rank: 2,
@@ -1149,15 +1391,17 @@ return {currentao="Omaha Beach",germCommanderName="A. M\195\188ller",dayz=4,rank
 
     #[test]
     fn test_compare_saves_different_metrics_squad_and_mods() {
-        let mut save_a = SaveSummary::default();
-        save_a.area_of_operations = "Cherbourg".to_string();
-        save_a.day = 2;
-        save_a.rank = 1;
-        save_a.experience = 200;
-        save_a.tactical_points = 5;
-        save_a.campaign_kills = 10;
-        save_a.campaign_casualties = 1;
-        save_a.classic_max_wave = 5;
+        let mut save_a = SaveSummary {
+            area_of_operations: "Cherbourg".to_string(),
+            day: 2,
+            rank: 1,
+            experience: 200,
+            tactical_points: 5,
+            campaign_kills: 10,
+            campaign_casualties: 1,
+            classic_max_wave: 5,
+            ..Default::default()
+        };
         save_a.deployed_squad.push(SoldierSummary {
             name: "J. Miller".to_string(),
             rank: 1,
@@ -1180,15 +1424,17 @@ return {currentao="Omaha Beach",germCommanderName="A. M\195\188ller",dayz=4,rank
             ..Default::default()
         });
 
-        let mut save_b = SaveSummary::default();
-        save_b.area_of_operations = "Carentan".to_string();
-        save_b.day = 7;
-        save_b.rank = 3;
-        save_b.experience = 1500;
-        save_b.tactical_points = 25;
-        save_b.campaign_kills = 45;
-        save_b.campaign_casualties = 3;
-        save_b.classic_max_wave = 12;
+        let mut save_b = SaveSummary {
+            area_of_operations: "Carentan".to_string(),
+            day: 7,
+            rank: 3,
+            experience: 1500,
+            tactical_points: 25,
+            campaign_kills: 45,
+            campaign_casualties: 3,
+            classic_max_wave: 12,
+            ..Default::default()
+        };
         save_b.deployed_squad.push(SoldierSummary {
             name: "J. Miller".to_string(),
             rank: 2,
@@ -1248,26 +1494,29 @@ return {currentao="Omaha Beach",germCommanderName="A. M\195\188ller",dayz=4,rank
     #[test]
     fn test_verifies_authentic_base_game_ranks() {
         // Classic ranks (rankTell)
-        assert_eq!(classic_rank_title(0), "Dirty civy");
-        assert_eq!(classic_rank_title(1), "Cadet");
-        assert_eq!(classic_rank_title(2), "2nd lt");
-        assert_eq!(classic_rank_title(3), "1rst lt");
-        assert_eq!(classic_rank_title(4), "Captain");
-        assert_eq!(classic_rank_title(13), "Mud and Blood Grand Master");
+        assert_eq!(campaign_rank_title(0), "Dirty civy");
+        assert_eq!(campaign_rank_title(1), "Cadet");
+        assert_eq!(campaign_rank_title(2), "2nd lt");
+        assert_eq!(campaign_rank_title(3), "1rst lt");
+        assert_eq!(campaign_rank_title(4), "Captain");
+        assert_eq!(campaign_rank_title(13), "Mud and Blood Grand Master");
 
         // Campaign ranks (mnb2RankTell)
-        assert_eq!(campaign_rank_title(0), "Balloon enthusiast");
-        assert_eq!(campaign_rank_title(1), "Squad Commander");
-        assert_eq!(campaign_rank_title(2), "Section Commander");
-        assert_eq!(campaign_rank_title(3), "Platoon Commander");
-        assert_eq!(campaign_rank_title(4), "Company Commander");
-        assert_eq!(campaign_rank_title(13), "Grand Master Commander");
+        assert_eq!(classic_rank_title(0), "Balloon enthusiast");
+        assert_eq!(classic_rank_title(1), "Squad Commander");
+        assert_eq!(classic_rank_title(2), "Section Commander");
+        assert_eq!(classic_rank_title(3), "Platoon Commander");
+        assert_eq!(classic_rank_title(4), "Company Commander");
+        assert_eq!(classic_rank_title(13), "Grand Master Commander");
 
         // Deployed Soldier ranks (soldierRankTell)
         // Enlisted
         assert_eq!(soldier_rank_title(None, "rifleman"), "Recruit");
         assert_eq!(soldier_rank_title(Some(0), "rifleman"), "Private");
-        assert_eq!(soldier_rank_title(Some(1), "rifleman"), "Private First Class");
+        assert_eq!(
+            soldier_rank_title(Some(1), "rifleman"),
+            "Private First Class"
+        );
         assert_eq!(soldier_rank_title(Some(2), "sniper"), "Corporal");
         assert_eq!(soldier_rank_title(Some(3), "gunner"), "Sergeant");
 
@@ -1283,5 +1532,144 @@ return {currentao="Omaha Beach",germCommanderName="A. M\195\188ller",dayz=4,rank
         assert_eq!(trench_rank_title(2), "Lance Corporal");
         assert_eq!(trench_rank_title(5), "Sergeant");
         assert_eq!(trench_rank_title(16), "General");
+    }
+
+    #[test]
+    fn parser_reads_ribbon_ids() {
+        let sample = r#"local _={}
+_[1]={1,4,61}
+return {ribs=_[1]}"#;
+        let summary = SaveSummary::from_ser_str("saveMNB3.lua", sample).unwrap();
+        assert_eq!(summary.ribbons, vec![1, 4, 61]);
+        assert_eq!(summary.ribbons_count, 3);
+    }
+
+    #[test]
+    fn parser_reads_soldier_award_icons() {
+        let sample = r#"local _={}
+_[4]={icon=7,called=1}
+_[3]={icon=12}
+_[2]={_[4],_[3]}
+_[5]={id=1,name="A",awards=_[2]}
+_[1]={_[5]}
+return {deployedTroops=_[1]}"#;
+        let summary = SaveSummary::from_ser_str("saveMNB3.lua", sample).unwrap();
+        assert_eq!(summary.deployed_squad[0].award_icons, vec![7, 12]);
+        assert_eq!(summary.deployed_squad[0].awards_count, 2);
+    }
+
+    /// Distinct values per mode, so a field reading another mode's variable shows up.
+    #[test]
+    fn parser_mode_fields_match_game_variables() {
+        let sample = r#"return {rank=4,experience=1111,kills=222,casualty=33,dayz=9,missionCounter=5,mnb2Rank=2,mnb2Experience=4444,mnb2TotalKills=555,mnb2TotalCasualty=66,maxWave=77,currentWave=8,trenchModeRank=3,trenchModeXP=999}"#;
+        let s = SaveSummary::from_ser_str("saveMNB3.lua", sample).unwrap();
+        // Campaign (gameType 0): rank, experience, kills, casualty, dayz.
+        assert_eq!(s.campaign_rank, 4);
+        assert_eq!(s.campaign_experience, 1111);
+        assert_eq!(s.campaign_kills, 222);
+        assert_eq!(s.campaign_casualties, 33);
+        assert_eq!(s.day, 9);
+        assert_eq!(s.campaign_rank_title, "Captain");
+        // Classic (mnb2, gameType 1): mnb2Rank, mnb2Experience, mnb2Total*, waves.
+        assert_eq!(s.classic_rank, 2);
+        assert_eq!(s.classic_experience, 4444);
+        assert_eq!(s.classic_total_kills, 555);
+        assert_eq!(s.classic_total_casualties, 66);
+        assert_eq!(s.classic_max_wave, 77);
+        assert_eq!(s.classic_current_wave, 8);
+        assert_eq!(s.rank_title, classic_rank_title(2));
+        // Trench.
+        assert_eq!(s.trench_rank, 3);
+        assert_eq!(s.trench_xp, 999);
+    }
+
+    const CLEAN_SAVE: &str = "local _={}\n_[2]={\"option_a\",\"option_b\"}\n_[1]={gcore=_[2]}\n_[3]={x=1}\nreturn {rank=4,option_a=1,[\"odd key\"]=\"v,}\",option_b=_[3],dayz=9,_qm_meta={profile_id=\"p\",fields=_[1]},7,last=2}";
+
+    #[test]
+    fn the_stamp_lists_the_fields_each_mod_owns() {
+        let summary = SaveSummary::from_ser_str("saveMNB3.lua", CLEAN_SAVE).unwrap();
+        let meta = summary.qm_meta.unwrap();
+        assert_eq!(meta.profile_id.as_deref(), Some("p"));
+        assert_eq!(meta.fields["gcore"], ["option_a", "option_b"]);
+        // A stamp from before Phase E has no fields.
+        let old = SaveSummary::from_ser_str("s", "return {_qm_meta={profile_id=\"p\"}}").unwrap();
+        assert!(old.qm_meta.unwrap().fields.is_empty());
+    }
+
+    #[test]
+    fn root_entry_spans_cover_every_root_entry() {
+        let spans = SerDocument::root_entry_spans(CLEAN_SAVE).unwrap();
+        let keys: Vec<_> = spans.iter().map(|e| e.key.as_deref()).collect();
+        assert_eq!(
+            keys,
+            [
+                Some("rank"),
+                Some("option_a"),
+                Some("odd key"),
+                Some("option_b"),
+                Some("dayz"),
+                Some("_qm_meta"),
+                None,
+                Some("last")
+            ]
+        );
+        let text = |i: usize| &CLEAN_SAVE[spans[i].entry.clone()];
+        assert_eq!(text(0), "rank=4");
+        assert_eq!(
+            text(2),
+            "[\"odd key\"]=\"v,}\"",
+            "a separator inside a string is not one"
+        );
+        assert_eq!(text(3), "option_b=_[3]");
+        assert_eq!(text(5), "_qm_meta={profile_id=\"p\",fields=_[1]}");
+        assert_eq!(text(6), "7");
+        assert_eq!(text(7), "last=2");
+
+        // The memo form: the root is the `_[0]` line.
+        let memo = "local _={}\n_[1]={}\n_[0]={a=1,b=_[1]}\n_[1].up=_[0]\nreturn _[0]";
+        let spans = SerDocument::root_entry_spans(memo).unwrap();
+        assert_eq!(spans.len(), 2);
+        assert_eq!(&memo[spans[1].entry.clone()], "b=_[1]");
+        assert!(SerDocument::root_entry_spans("local _={}\n").is_err());
+    }
+
+    #[test]
+    fn removing_root_keys_keeps_every_other_byte() {
+        let (text, removed) =
+            SerDocument::remove_root_keys(CLEAN_SAVE, &["option_a", "option_b", "absent"]).unwrap();
+        assert_eq!(removed, ["option_a", "option_b"]);
+        assert_eq!(
+            text,
+            CLEAN_SAVE
+                .replace("option_a=1,", "")
+                .replace("option_b=_[3],", "")
+        );
+        let doc = SerDocument::parse(&text).unwrap();
+        assert!(!doc.root.map.contains_key("option_a") && !doc.root.map.contains_key("option_b"));
+        assert_eq!(doc.root.get_i64("rank", &doc.memo), Some(4));
+        assert_eq!(doc.root.get_i64("last", &doc.memo), Some(2));
+        assert_eq!(doc.root.array.len(), 1);
+
+        // The last entry goes with the separator before it; so do entries removed next to it.
+        let (text, _) = SerDocument::remove_root_keys("return {a=1,b=2,c=3}", &["c"]).unwrap();
+        assert_eq!(text, "return {a=1,b=2}");
+        let (text, _) = SerDocument::remove_root_keys("return {a=1,b=2,c=3}", &["b", "c"]).unwrap();
+        assert_eq!(text, "return {a=1}");
+        let (text, _) = SerDocument::remove_root_keys("return {a=1,b=2,c=3}", &["a", "c"]).unwrap();
+        assert_eq!(text, "return {b=2}");
+        let (text, removed) =
+            SerDocument::remove_root_keys("return {a=1,b=2,c=3}", &["a", "b", "c"]).unwrap();
+        assert_eq!((text.as_str(), removed.len()), ("return {}", 3));
+        let (text, _) =
+            SerDocument::remove_root_keys("return { a = 1 , b = 2 , }", &["b"]).unwrap();
+        assert_eq!(text, "return { a = 1 , }");
+        // Nothing to remove: the text is unchanged.
+        let (text, removed) = SerDocument::remove_root_keys(CLEAN_SAVE, &["nope"]).unwrap();
+        assert!(removed.is_empty());
+        assert_eq!(text, CLEAN_SAVE);
+        // Only root entries: a nested key of the same name stays.
+        let (text, removed) =
+            SerDocument::remove_root_keys("return {a={b=1},b=2}", &["b"]).unwrap();
+        assert_eq!((text.as_str(), removed.len()), ("return {a={b=1}}", 1));
     }
 }

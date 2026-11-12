@@ -1,17 +1,25 @@
 //! Thin Tauri commands: each runs one `Service` call on the blocking pool.
-use qm_core::handshake::CrashReport;
+use qm_core::handshake::{CrashReport, GluePatchEntry, StackMode};
+use qm_core::patch::order::OrderRule;
+use qm_core::patch::InsertPosition;
 use qm_manager::storage::DetectedPaths;
 use qm_manager::{
     ArchiveModCandidate, ConflictResolutionSuggestion, LoadOrderResolution, ModProfile,
-    SaveBackupEntry, SaveProfile,
+    ProfileDiff, SaveBackupEntry, SaveProfile, SharedStack,
 };
 use qm_schema::{ConfigValue, SaveComparison, SaveSummary};
+use qm_service::ops::modpacks::ModpackPreview;
+use qm_service::ops::sprites::{RibbonInfo, SpriteKind};
 use qm_service::{
-    AppInfo, CatalogQuery, CatalogResult, ConfigResetMode, ErrorKind, FileDiff, GameStatus,
-    HealthReport, ImportRequest, JobId, JobInfo, LaunchRequest, LoadOrderUpdate, Loadable,
-    LogSource, ModDetail, ModPatchStatus, ModSummary, NewProfile, ProfileSettingsPatch,
-    ProfileSummary, QmError, QmResult, RevealKind, SaveSlotSummary, Service, SettingsPatch,
-    SettingsView, SimulationOverview, StartupReport, SwitchPreview, UpdatesReport,
+    AnchorCandidate, AppInfo, BisectPreview, BisectStatus, BisectView, CatalogQuery, CatalogResult,
+    CompatChangesView, CompatExportPreview, CompatExportRequest, CompatExportResult,
+    ConfigResetMode, ErrorKind, FileDiff, FixDraft, FixView, FixesView, GameStatus, HealthReport,
+    ImportRequest, JobId, JobInfo, JournalUndoChoice, JournalUndoPreview, LaunchRequest,
+    LoadOrderUpdate, Loadable, LogSource, ModDetail, ModPatchStatus, ModSummary, NewProfile,
+    PatchDetail, PreviewChanges, PreviewResult, ProfileSettingsPatch, ProfileSummary, QmError,
+    QmResult, RegionOptions, RegionRef, RevealKind, SaveSlotSummary, Service, SettingsPatch,
+    SettingsView, SimulationOverview, StartupReport, SwitchPreview, TrialRequest, TrialResult,
+    TrialSuspect, UndoPreview, UpdatesReport,
 };
 use serde::Serialize;
 use std::collections::HashMap;
@@ -157,6 +165,66 @@ pub async fn profile_get(svc: Svc<'_>, id: String) -> Result<ModProfile, QmError
 
 #[tauri::command]
 #[specta::specta]
+pub async fn profile_diff(svc: Svc<'_>, a: String, b: String) -> Result<ProfileDiff, QmError> {
+    run(&svc, move |s| s.profile_diff(&a, &b)).await
+}
+
+/// Asks where to save the modpack with the native save dialog (the path never comes from the
+/// UI), then writes it in a job. `None` when the dialog was cancelled.
+#[tauri::command]
+#[specta::specta]
+pub async fn modpack_export(
+    app: tauri::AppHandle,
+    svc: Svc<'_>,
+    profile_id: String,
+) -> Result<Option<JobId>, QmError> {
+    use tauri_plugin_dialog::DialogExt;
+    let name = svc.profile_get(&profile_id)?.name;
+    let safe: String = name
+        .chars()
+        .map(|c| {
+            if c.is_alphanumeric() || c == ' ' || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    let file_name = format!("{}.qmpack", safe.trim());
+    let picked = tauri::async_runtime::spawn_blocking(move || {
+        app.dialog()
+            .file()
+            .add_filter("QuarterMaster modpack", &["qmpack"])
+            .set_file_name(&file_name)
+            .blocking_save_file()
+    })
+    .await
+    .map_err(|_| QmError::new(ErrorKind::Internal, MSG_INTERNAL))?;
+    let Some(dest) = picked.and_then(|p| p.into_path().ok()) else {
+        return Ok(None);
+    };
+    run(&svc, move |s| s.modpack_export(&profile_id, dest).map(Some)).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn modpack_inspect(svc: Svc<'_>, path: PathBuf) -> Result<ModpackPreview, QmError> {
+    run(&svc, move |s| s.modpack_inspect(&path)).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn modpack_import(
+    svc: Svc<'_>,
+    path: PathBuf,
+    name: String,
+    slot: Option<String>,
+) -> Result<JobId, QmError> {
+    run(&svc, move |s| s.modpack_import(path, name, slot)).await
+}
+
+#[tauri::command]
+#[specta::specta]
 pub async fn profile_preview_switch(svc: Svc<'_>, id: String) -> Result<SwitchPreview, QmError> {
     run(&svc, move |s| s.profile_preview_switch(&id)).await
 }
@@ -240,6 +308,33 @@ pub async fn mod_patches_get(
 
 #[tauri::command]
 #[specta::specta]
+pub async fn compat_changes_get(
+    svc: Svc<'_>,
+    mod_id: String,
+) -> Result<Loadable<CompatChangesView>, QmError> {
+    run(&svc, move |s| s.compat_changes_get(&mod_id)).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn compat_export_preview(
+    svc: Svc<'_>,
+    req: CompatExportRequest,
+) -> Result<CompatExportPreview, QmError> {
+    run(&svc, move |s| s.compat_export_preview(req)).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn compat_export(
+    svc: Svc<'_>,
+    req: CompatExportRequest,
+) -> Result<CompatExportResult, QmError> {
+    run(&svc, move |s| s.compat_export(req)).await
+}
+
+#[tauri::command]
+#[specta::specta]
 pub async fn mod_detail(svc: Svc<'_>, id: String) -> Result<ModDetail, QmError> {
     run(&svc, move |s| s.mod_detail(&id)).await
 }
@@ -279,8 +374,9 @@ pub async fn mod_config_reset(
 pub async fn mod_import_inspect(
     svc: Svc<'_>,
     path: PathBuf,
+    allow_unmanaged: bool,
 ) -> Result<Vec<ArchiveModCandidate>, QmError> {
-    run(&svc, move |s| s.mod_import_inspect(&path)).await
+    run(&svc, move |s| s.mod_import_inspect(&path, allow_unmanaged)).await
 }
 
 #[tauri::command]
@@ -345,6 +441,224 @@ pub async fn conflict_resolve(
     winner_index: Option<u32>,
 ) -> Result<(), QmError> {
     run(&svc, move |s| s.conflict_resolve(suggestion, winner_index)).await
+}
+
+// Patch tools (plan 2d)
+
+#[tauri::command]
+#[specta::specta]
+pub async fn patch_detail(svc: Svc<'_>, patch_id: String) -> Result<PatchDetail, QmError> {
+    run(&svc, move |s| s.patch_detail(&patch_id)).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn simulation_preview(
+    svc: Svc<'_>,
+    changes: PreviewChanges,
+) -> Result<PreviewResult, QmError> {
+    run(&svc, move |s| s.simulation_preview(changes)).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn trial_preview(
+    svc: Svc<'_>,
+    changes: qm_manager::runs::TrialChanges,
+) -> Result<PreviewResult, QmError> {
+    run(&svc, move |s| s.trial_preview(changes)).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn anchor_candidates(
+    svc: Svc<'_>,
+    target_file: String,
+    line: u32,
+    radius: u32,
+    region: Option<RegionRef>,
+) -> Result<Vec<AnchorCandidate>, QmError> {
+    run(&svc, move |s| {
+        s.anchor_candidates(&target_file, line, radius, region)
+    })
+    .await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn region_options(
+    svc: Svc<'_>,
+    target_file: String,
+    patch_id: String,
+    conflict_id: Option<String>,
+) -> Result<RegionOptions, QmError> {
+    run(&svc, move |s| {
+        s.region_options(&target_file, &patch_id, conflict_id.as_deref())
+    })
+    .await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn glue_patch_create(
+    svc: Svc<'_>,
+    base_patch_id: String,
+    pattern: String,
+    position: InsertPosition,
+    conflict_id: Option<String>,
+) -> Result<GluePatchEntry, QmError> {
+    run(&svc, move |s| {
+        s.glue_patch_create_for(&base_patch_id, &pattern, position, conflict_id.as_deref())
+    })
+    .await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn glue_patch_remove(svc: Svc<'_>, glue_id: String) -> Result<(), QmError> {
+    run(&svc, move |s| s.glue_patch_remove(&glue_id)).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn patch_order_set(svc: Svc<'_>, rule: OrderRule) -> Result<(), QmError> {
+    run(&svc, move |s| s.patch_order_set(rule)).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn patch_order_reset(svc: Svc<'_>, patch_id: String) -> Result<(), QmError> {
+    run(&svc, move |s| s.patch_order_reset(&patch_id)).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn stacks_get(
+    svc: Svc<'_>,
+    target_file: Option<String>,
+) -> Result<Vec<SharedStack>, QmError> {
+    run(&svc, move |s| s.stacks_get(target_file.as_deref())).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn stacking_set(svc: Svc<'_>, mode: StackMode) -> Result<(), QmError> {
+    run(&svc, move |s| s.stacking_set(mode)).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn line_rules_set(svc: Svc<'_>, on: bool) -> Result<(), QmError> {
+    run(&svc, move |s| s.line_rules_set(on)).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn notice_dismiss(svc: Svc<'_>, key: String) -> Result<(), QmError> {
+    run(&svc, move |s| s.notice_dismiss(&key)).await
+}
+
+// Fixes (Phase C)
+
+#[tauri::command]
+#[specta::specta]
+pub async fn fixes_list(svc: Svc<'_>) -> Result<FixesView, QmError> {
+    run(&svc, move |s| s.fixes_list()).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn fixes_import(svc: Svc<'_>) -> Result<FixesView, QmError> {
+    run(&svc, move |s| s.fixes_import()).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn fix_create(svc: Svc<'_>, draft: FixDraft) -> Result<FixView, QmError> {
+    run(&svc, move |s| s.fix_create(draft)).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn fix_create_many(svc: Svc<'_>, drafts: Vec<FixDraft>) -> Result<Vec<FixView>, QmError> {
+    run(&svc, move |s| s.fix_create_many(drafts)).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn fix_suggestion_apply(
+    svc: Svc<'_>,
+    drafts: Vec<FixDraft>,
+    removes: Vec<String>,
+) -> Result<Vec<FixView>, QmError> {
+    run(&svc, move |s| s.fix_suggestion_apply(drafts, removes)).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn fix_undo_preview(svc: Svc<'_>, fix_id: String) -> Result<UndoPreview, QmError> {
+    run(&svc, move |s| s.fix_undo_preview(&fix_id)).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn fix_undo(svc: Svc<'_>, fix_id: String, confirmed: bool) -> Result<(), QmError> {
+    run(&svc, move |s| s.fix_undo(&fix_id, confirmed)).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn fix_journal_undo_preview(
+    svc: Svc<'_>,
+    entry_index: u32,
+) -> Result<JournalUndoPreview, QmError> {
+    run(&svc, move |s| s.fix_journal_undo_preview(entry_index)).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn fix_journal_undo(
+    svc: Svc<'_>,
+    entry_index: u32,
+    choice: Option<JournalUndoChoice>,
+) -> Result<(), QmError> {
+    run(&svc, move |s| s.fix_journal_undo(entry_index, choice)).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn fix_set_paused(
+    svc: Svc<'_>,
+    fix_id: String,
+    paused: bool,
+) -> Result<FixView, QmError> {
+    run(&svc, move |s| s.fix_set_paused(&fix_id, paused)).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn fix_accept(svc: Svc<'_>, fix_id: String) -> Result<FixView, QmError> {
+    run(&svc, move |s| s.fix_accept(&fix_id)).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn fix_rebind(
+    svc: Svc<'_>,
+    fix_id: String,
+    patch_id: String,
+) -> Result<FixView, QmError> {
+    run(&svc, move |s| s.fix_rebind(&fix_id, &patch_id)).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn patch_set_enabled_many(
+    svc: Svc<'_>,
+    patch_ids: Vec<String>,
+    enabled: bool,
+) -> Result<(), QmError> {
+    run(&svc, move |s| s.patch_set_enabled_many(&patch_ids, enabled)).await
 }
 
 // Saves
@@ -426,6 +740,76 @@ pub async fn game_launch(svc: Svc<'_>, req: LaunchRequest) -> Result<GameStatus,
 
 #[tauri::command]
 #[specta::specta]
+pub async fn game_launch_trial(svc: Svc<'_>, req: TrialRequest) -> Result<GameStatus, QmError> {
+    run(&svc, move |s| s.game_launch_trial(req)).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn diagnostic_run_preview(
+    svc: Svc<'_>,
+) -> Result<qm_service::DiagnosticRunPreview, QmError> {
+    run(&svc, move |s| Ok(s.diagnostic_run_preview())).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn game_launch_diagnostic(
+    svc: Svc<'_>,
+    req: qm_service::DiagnosticRunRequest,
+) -> Result<GameStatus, QmError> {
+    run(&svc, move |s| s.game_launch_diagnostic(req)).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn diagnostic_run_result(
+    svc: Svc<'_>,
+) -> Result<Option<qm_service::DiagnosticRunResult>, QmError> {
+    run(&svc, move |s| Ok(s.diagnostic_run_result())).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn bisect_start(svc: Svc<'_>, run_id: String) -> Result<BisectView, QmError> {
+    run(&svc, move |s| s.bisect_start(&run_id)).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn bisect_get(svc: Svc<'_>) -> Result<BisectStatus, QmError> {
+    run(&svc, move |s| Ok(s.bisect_get())).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn bisect_preview(svc: Svc<'_>) -> Result<BisectPreview, QmError> {
+    run(&svc, move |s| s.bisect_preview()).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn bisect_launch(
+    svc: Svc<'_>,
+    method: Option<qm_manager::LaunchMethod>,
+) -> Result<GameStatus, QmError> {
+    run(&svc, move |s| s.bisect_launch(method)).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn bisect_answer(svc: Svc<'_>, result: TrialResult) -> Result<BisectView, QmError> {
+    run(&svc, move |s| s.bisect_answer(result)).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn bisect_stop(svc: Svc<'_>) -> Result<BisectView, QmError> {
+    run(&svc, move |s| s.bisect_stop()).await
+}
+
+#[tauri::command]
+#[specta::specta]
 pub async fn game_restore_clean(svc: Svc<'_>) -> Result<(), QmError> {
     run(&svc, move |s| s.game_restore_clean()).await
 }
@@ -442,6 +826,57 @@ pub async fn health_get(svc: Svc<'_>) -> Result<Loadable<HealthReport>, QmError>
 #[specta::specta]
 pub async fn crashes_list(svc: Svc<'_>) -> Result<Vec<CrashReport>, QmError> {
     run(&svc, move |s| Ok(s.crashes_list())).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn runs_list(
+    svc: Svc<'_>,
+    profile_id: String,
+) -> Result<Vec<qm_manager::runs::RunEntry>, QmError> {
+    run(&svc, move |s| s.runs_list(&profile_id)).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn assets_ledger(
+    svc: Svc<'_>,
+) -> Result<Loadable<qm_manager::assets_ledger::AssetLedger>, QmError> {
+    run(&svc, |s| s.assets_ledger()).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn asset_choice_preview(
+    svc: Svc<'_>,
+    key: String,
+    winner: String,
+) -> Result<qm_service::ops::assets::AssetChoicePreview, QmError> {
+    run(&svc, move |s| s.asset_choice_preview(&key, &winner)).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn asset_choice_clear(svc: Svc<'_>, key: String) -> Result<(), QmError> {
+    run(&svc, move |s| s.asset_choice_clear(&key)).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn faction_choices(
+    svc: Svc<'_>,
+) -> Result<Loadable<Vec<qm_service::ops::assets::FactionSideChoice>>, QmError> {
+    run(&svc, |s| s.faction_choices()).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn faction_pick_set(
+    svc: Svc<'_>,
+    side: String,
+    faction_id: Option<String>,
+) -> Result<(), QmError> {
+    run(&svc, move |s| s.faction_pick_set(&side, faction_id)).await
 }
 
 #[tauri::command]
@@ -468,8 +903,146 @@ pub async fn crash_disable_suspect(svc: Svc<'_>, crash_id: String) -> Result<(),
 
 #[tauri::command]
 #[specta::specta]
+pub async fn crash_suspect(
+    svc: Svc<'_>,
+    crash_id: String,
+) -> Result<Option<TrialSuspect>, QmError> {
+    run(&svc, move |s| s.crash_suspect(&crash_id)).await
+}
+
+#[tauri::command]
+#[specta::specta]
 pub async fn dll_repair(svc: Svc<'_>) -> Result<String, QmError> {
     run(&svc, move |s| s.dll_repair()).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn overwrite_clear(svc: Svc<'_>) -> Result<u32, QmError> {
+    run(&svc, move |s| s.overwrite_clear()).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn game_update_acknowledge(svc: Svc<'_>) -> Result<(), QmError> {
+    run(&svc, move |s| s.game_update_acknowledge()).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn workspace_sync(svc: Svc<'_>) -> Result<JobId, QmError> {
+    run(&svc, move |s| s.workspace_sync()).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn save_rename(svc: Svc<'_>, id: String, name: String) -> Result<SaveProfile, QmError> {
+    run(&svc, move |s| s.save_rename(&id, &name)).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn save_create(svc: Svc<'_>, name: String) -> Result<SaveProfile, QmError> {
+    run(&svc, move |s| s.save_create(&name)).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn save_delete(svc: Svc<'_>, id: String) -> Result<(), QmError> {
+    run(&svc, move |s| s.save_delete(&id)).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn save_cleanup(
+    svc: Svc<'_>,
+    id: String,
+    fields: Vec<String>,
+) -> Result<qm_manager::save_cleanup::SaveCleanup, QmError> {
+    run(&svc, move |s| s.save_cleanup(&id, &fields)).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn save_reset(svc: Svc<'_>, id: String) -> Result<(), QmError> {
+    run(&svc, move |s| s.save_reset(&id)).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn save_lock_set(svc: Svc<'_>, id: String, locked: bool) -> Result<SaveProfile, QmError> {
+    run(&svc, move |s| s.save_lock_set(&id, locked)).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn game_sprite_get(svc: Svc<'_>, kind: SpriteKind, id: u32) -> Result<String, QmError> {
+    run(&svc, move |s| s.game_sprite_get(kind, id)).await
+}
+
+/// Largest dossier text accepted for export.
+const MAX_DOSSIER_BYTES: usize = 1024 * 1024;
+
+/// Asks where to save a slot's dossier with the native save dialog, then writes `text` there.
+/// The path comes only from that dialog, never from the UI. Returns the file name, or `None`
+/// when the dialog was cancelled.
+#[tauri::command]
+#[specta::specta]
+pub async fn save_dossier_export(
+    app: tauri::AppHandle,
+    slot_name: String,
+    text: String,
+) -> Result<Option<String>, QmError> {
+    use tauri_plugin_dialog::DialogExt;
+    if text.len() > MAX_DOSSIER_BYTES {
+        return Err(QmError::new(
+            ErrorKind::InvalidInput,
+            "The dossier is too large to export.",
+        ));
+    }
+    let safe: String = slot_name
+        .chars()
+        .map(|c| {
+            if c.is_alphanumeric() || c == ' ' || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    let file_name = format!("{} dossier.txt", safe.trim());
+    let picked = tauri::async_runtime::spawn_blocking(move || {
+        app.dialog()
+            .file()
+            .add_filter("Text", &["txt"])
+            .set_file_name(&file_name)
+            .blocking_save_file()
+    })
+    .await
+    .map_err(|_| QmError::new(ErrorKind::Internal, MSG_INTERNAL))?;
+    let Some(path) = picked.and_then(|p| p.into_path().ok()) else {
+        return Ok(None);
+    };
+    std::fs::write(&path, text.as_bytes()).map_err(|e| {
+        QmError::new(ErrorKind::Io, "The dossier could not be saved.").with_details(e.to_string())
+    })?;
+    Ok(path.file_name().map(|n| n.to_string_lossy().into_owned()))
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn game_ribbons_get(svc: Svc<'_>) -> Result<Vec<RibbonInfo>, QmError> {
+    run(&svc, move |s| s.game_ribbons_get()).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn mod_auto_update_set(
+    svc: Svc<'_>,
+    mod_id: String,
+    enabled: Option<bool>,
+) -> Result<(), QmError> {
+    run(&svc, move |s| s.mod_auto_update_set(&mod_id, enabled)).await
 }
 
 // Updates and catalog
@@ -509,6 +1082,12 @@ pub async fn catalog_install(
     mod_id: Option<String>,
 ) -> Result<JobId, QmError> {
     run(&svc, move |s| s.catalog_install(&download_url, mod_id)).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn mod_update_install(svc: Svc<'_>, mod_id: String) -> Result<JobId, QmError> {
+    run(&svc, move |s| s.mod_update_install(&mod_id)).await
 }
 
 #[tauri::command]

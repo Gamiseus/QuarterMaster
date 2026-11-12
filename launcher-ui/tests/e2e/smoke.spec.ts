@@ -35,6 +35,29 @@ test("sidebar navigates to each page", async ({ page }) => {
   await expect(page.getByText("Mod Engine arrives in a later update.")).toBeVisible();
 });
 
+test("each screen and the Browse tab load without an error toast", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByRole("row", { name: "GCore" })).toBeVisible();
+  const nav = page.getByRole("navigation", { name: "Main" });
+  const errors = page.locator(".toast.error");
+  await page.getByRole("tab", { name: "Browse" }).click();
+  await expect(page.getByRole("article", { name: "HUD Compass" })).toBeVisible();
+  await expect(errors).toHaveCount(0);
+  await page.getByRole("tab", { name: "Installed" }).click();
+  await expect(page.getByRole("row", { name: "GCore" })).toBeVisible();
+  const ready: Record<string, string> = {
+    Saves: "Campaign day",
+    Diagnostics: "Clean. QuarterMaster sets it up at launch.",
+    Settings: "Start the game with",
+  };
+  for (const [name, text] of Object.entries(ready)) {
+    await nav.getByRole("button", { name, exact: true }).click();
+    await expect(page.getByRole("heading", { level: 1, name })).toBeVisible();
+    await expect(page.getByText(text).first()).toBeVisible();
+    await expect(errors).toHaveCount(0);
+  }
+});
+
 test("game status events update the launch button", async ({ page }) => {
   await page.goto("/");
   const button = page.getByTestId("launch-button");

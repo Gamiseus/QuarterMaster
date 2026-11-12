@@ -1,6 +1,7 @@
 <script lang="ts">
   import { loadOrder } from "../lib/stores/loadorder.svelte";
   import { prelaunch } from "../lib/stores/prelaunch.svelte";
+  import FixButton from "./FixButton.svelte";
   import { Button } from "./ui";
 
   const errors = $derived(loadOrder.errors);
@@ -12,9 +13,12 @@
     <span class="message">
       {errors[0].message}{#if more > 0}<span class="more"> ({more} more)</span>{/if}
     </span>
-    {#if !prelaunch.vanilla}
-      <Button size="sm" onclick={() => prelaunch.review()}>Review</Button>
-    {/if}
+    <div class="actions">
+      <FixButton diagnostic={errors[0]} />
+      {#if !prelaunch.vanillaActive}
+        <Button size="sm" onclick={() => prelaunch.review()}>Review</Button>
+      {/if}
+    </div>
   </div>
 {/if}
 
@@ -33,6 +37,12 @@
 
   .message {
     min-width: 0;
+  }
+
+  .actions {
+    display: flex;
+    flex: none;
+    gap: var(--qm-space-2);
   }
 
   .more {

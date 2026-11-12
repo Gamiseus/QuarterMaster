@@ -227,6 +227,7 @@ impl QuarterMasterPaths {
             patch_priorities: HashMap::new(),
             disabled_patches: Vec::new(),
             glue_patches: Vec::new(),
+            patch_order: Vec::new(),
             linked_save_profile_id: new_profile_id.to_string(),
             launch_method: None,
             disable_console: false,
@@ -236,6 +237,16 @@ impl QuarterMasterPaths {
             locked_mods: Vec::new(),
             favorites: Vec::new(),
             mod_notes: HashMap::new(),
+            // A new profile (D40).
+            stacking: Some(qm_core::handshake::StackMode::Dependencies),
+            notices_seen: crate::profiles::new_profile_notices(),
+            line_rules_v2: Some(true),
+            fixes: Vec::new(),
+            fixes_version: crate::fixes::FIXES_VERSION,
+            auto_follow: false,
+            fix_journal: Vec::new(),
+            migration_error: None,
+            faction_picks: Default::default(),
         };
         self.save_profile(&prof)?;
 
@@ -265,7 +276,13 @@ impl QuarterMasterPaths {
     }
 
     /// Lists all recorded crash reports across the active game `Mods/qm/log/crashes/` and launcher logs.
+    /// Each carries the run id of its launch when the DLL wrote one (D67).
     pub fn list_crash_reports(&self) -> Vec<CrashReport> {
+        self.list_crash_reports_for(&self.load_settings().active_profile_id)
+    }
+
+    /// `list_crash_reports` with `profile_id`'s staged folder in place of the active one's.
+    pub fn list_crash_reports_for(&self, profile_id: &str) -> Vec<CrashReport> {
         let mut reports = Vec::new();
         let mut crash_dirs = vec![self.logs_dir.join("crashes")];
 
@@ -277,7 +294,7 @@ impl QuarterMasterPaths {
         }
         crash_dirs.push(
             self.profiles_dir
-                .join(&settings.active_profile_id)
+                .join(profile_id)
                 .join("Mods")
                 .join("qm")
                 .join("log")
@@ -319,6 +336,109 @@ pub struct TemplateDefinition {
     pub description: &'static str,
     pub preview_code: &'static str,
 }
+
+/// Starter `faction.toml` for the `faction_mod` template. `custom_faction` and `Custom Faction`
+/// are replaced with the new mod's id and name.
+pub const FACTION_TEMPLATE: &str = r##"# faction.toml — a faction mod for QuarterMaster (schema 1)
+# Guide: the modding wiki, Part 3: https://gamiseus.github.io/wiki/faction-mods/
+# For completion and error checking in your editor, point the first line at QuarterMaster's
+# schemas/faction.schema.json (write a copy with `qm schema --out <folder>`), for example:
+#:schema ./faction.schema.json
+#
+# Every section below is optional except the first five lines. Anything you leave out stays
+# vanilla. Check your work any time with `qm faction check <this folder>` or Mod Tools > Lint.
+
+schema = 1
+id = "custom_faction"
+name = "Custom Faction"
+replaces = "allied"          # "allied" or "axis"
+side_name = "Custom"
+
+# --- Unit art --------------------------------------------------------------------------------
+# One PNG per frame, named by frame: idle.png, aim.png, fire.png, reload1.png ... reload10.png.
+# Allied units: base, sarge, para, french. Axis units: base, officer, volks.
+[units.base]
+folder = "units/base"
+
+[units.sarge]
+folder = "units/sarge"
+copy_from = "base"           # frames the sergeant lacks use the base soldier's
+
+# --- Weapons ---------------------------------------------------------------------------------
+# A reskin keeps the vanilla tag, so everything in the game that checks for it still works.
+# [[weapons]]
+# reskin = "m1"
+# description = "Mosin-Nagant M91/30. Bolt-action service rifle."
+# top_sprite = "weapons/mosin_top.png"
+# side_sprite = "weapons/mosin_side.png"
+# sound = "weapons/mosin"    # mosin1.wav, mosin2.wav, ...
+# stats = { action = "bolt", ammo = 5, maxAmmo = 5, range = 480, damage = 110 }
+
+# A new weapon has its own tag and copies a vanilla weapon's stats first.
+# [[weapons]]
+# tag = "pps43"
+# based_on = "m3"
+# name = "PPS-43"
+# top_sprite = "weapons/pps43_top.png"
+# side_sprite = "weapons/pps43_side.png"
+# sound = "weapons/pps43"
+# stats = { maxAmmo = 35 }
+# loot_side = "allied"       # also drops as loot
+
+# Advanced: hand out one weapon wherever the game hands out another.
+# [spawn_swap]
+# tommy = "ppsh41"
+
+# Random weapon pools: allied, allied_sniper, grunt, para, resistance, smg, axis, axis_crew.
+# [pools.grunt]
+# add = ["pps43"]
+# remove = ["springfield"]
+
+# --- Classes (Allied side) -------------------------------------------------------------------
+# Slots: rifle, light, gunner, medic, comms, officer, engy, scout, sniper, commando, sapper, intel.
+# [classes.rifle]
+# name = "Rifleman"
+# description = "Medium to long range with the Mosin."
+# start_weapon = "m1"
+# unlocks = ["svt40", "ppsh41", "pps43"]     # weapon upgrade tiers 1 to 3
+# bonus = { speed = 0, skill = 5 }           # replaces the vanilla bonus
+# skills = ["Smoke, ...", "Frag, ...", "Charge, ..."]
+# icon = "icons/rifle.png"
+
+# --- Names, voices, text -----------------------------------------------------------------------
+[names]
+last_file = "names/last.txt"
+# first_file = "names/first.txt"
+# format = "full"            # "Pyotr Ivanov" instead of "P. Ivanov"; needs first names
+# vehicles = ["Za Rodinu"]
+
+# [voices]
+# folder = "voices"          # contact1.wav, alliedHurt1.wav, pinned1.wav ... (vanilla names)
+# map = { hurt = "alliedHurt" }
+
+# [text]
+# mouseOverLightSpec = "Scout, fast movers with medium range capability"
+
+# Any other game image or sound, by its global name.
+# [sprites]
+# parachuteAllied = "misc/parachute.png"
+# [sounds]
+# airStrike1 = "misc/il2.wav"
+
+# --- Vehicles ----------------------------------------------------------------------------------
+# [[vehicles]]
+# reskin = "sherman"
+# name = "T-34/76"
+# body = "vehicles/t34/body.png"
+# turret = "vehicles/t34/turret.png"
+# husk = "vehicles/t34/husk.png"
+# debris = "vehicles/t34/debris"
+# call_signs = ["Za Stalina", "Moskva"]
+
+# --- Code, for anything the file can't express ---------------------------------------------------
+# [hooks]
+# lua = "hooks.lua"          # returns { on_enable = fn, on_soldier_created = fn, on_weapon_created = fn }
+"##;
 
 /// Built-in production-grade modding templates covering all 5 practical categories in Mud and Blood.
 pub const BUILTIN_TEMPLATES: &[TemplateDefinition] = &[
@@ -1523,6 +1643,15 @@ payload = '''
 "##,
     },
     TemplateDefinition {
+        id: "faction_mod",
+        name: "Faction Mod",
+        category: "Factions",
+        descriptor: "Faction Mod — An army that takes over the Allied or German side",
+        provider: "QuarterMaster",
+        description: "A faction.toml with every section, plus folders for unit frames, weapons, voices, vehicles and names. QuarterMaster checks it and applies it in game; no Lua needed.",
+        preview_code: FACTION_TEMPLATE,
+    },
+    TemplateDefinition {
         id: "empty",
         name: "Minimal Patch Mod",
         category: "Core Code Patching & Engine Hooking",
@@ -1649,6 +1778,12 @@ impl QuarterMasterPaths {
     /// optional GitHub personal access token, 403/429 rate-limit backoff, Update Source Pinning (Section 15),
     /// and Ed25519/Minisign signature verification for launcher self-updates (Section 9 & 15).
     pub fn check_for_updates(&self) -> Result<serde_json::Value, String> {
+        self.check_for_updates_with(true)
+    }
+
+    /// `check_for_updates`; with `write_cache == false` the ETag cache file is only read (the
+    /// service's real GitHub check is then its only writer).
+    pub fn check_for_updates_with(&self, write_cache: bool) -> Result<serde_json::Value, String> {
         let settings = self.load_settings();
         let etag_file = self.cache_dir.join("update-etags.json");
         let mut etag_cache: HashMap<String, serde_json::Value> = fs::read_to_string(&etag_file)
@@ -1707,6 +1842,9 @@ impl QuarterMasterPaths {
                 "changelog": m.changelog_markdown.clone().unwrap_or_else(|| "No changelog recorded.".to_string()),
             }));
 
+            if !write_cache {
+                continue;
+            }
             etag_cache.insert(
                 update_key.clone(),
                 serde_json::json!({
@@ -1717,8 +1855,10 @@ impl QuarterMasterPaths {
             );
         }
 
-        if let Ok(json) = serde_json::to_string_pretty(&etag_cache) {
-            let _ = fs::write(&etag_file, json);
+        if write_cache {
+            if let Ok(json) = serde_json::to_string_pretty(&etag_cache) {
+                let _ = fs::write(&etag_file, json);
+            }
         }
 
         // Check if a previous launcher binary (`qm-launcher.old.exe`) exists for 1-click rollback (Section 9)
@@ -1933,7 +2073,7 @@ if exist %LAUNCHER_EXE% start "" %LAUNCHER_EXE%
     /// Returns the real community mod discovery catalog (Section 12), querying GitHub topics
     /// and Nexus Mods directories with rate-limit protection and disk caching.
     pub fn get_mod_browser_catalog(&self) -> Vec<serde_json::Value> {
-        let resp = crate::community::get_community_catalog(self, None, None, None, false);
+        let resp = self.search_community_catalog(None, None, None, false);
         resp.get("catalog")
             .and_then(|c| c.as_array())
             .cloned()
@@ -1948,7 +2088,17 @@ if exist %LAUNCHER_EXE% start "" %LAUNCHER_EXE%
         source: Option<&str>,
         force_refresh: bool,
     ) -> serde_json::Value {
-        crate::community::get_community_catalog(self, query, topic, source, force_refresh)
+        let token = self.load_settings().github_token;
+        crate::community::get_community_catalog(
+            self,
+            query,
+            topic,
+            source,
+            force_refresh,
+            crate::community::GITHUB_API_BASE,
+            &crate::community::allow_github_api,
+            token.as_deref(),
+        )
     }
 
     /// Downloads and safely installs a remote community mod archive
@@ -2142,16 +2292,17 @@ pub fn lint_mod_directory(
     let mut zero_match_patches = Vec::new();
     let mut patch_count = 0usize;
 
-    match PatchTable::load(temp.path()) {
+    match PatchTable::load_strict(temp.path()) {
         Ok(table) => {
             patch_count = table.patches.len();
+            let prepared = table.prepare();
             for target in &table.targets {
                 let clean = target.trim_start_matches('@');
                 if clean.is_empty() {
                     continue;
                 }
                 if let Some(vanilla_src) = vanilla_files.get(clean) {
-                    if let Ok((_, _, records)) = table.apply_patches_offline(clean, vanilla_src) {
+                    if let Ok((_, _, records)) = table.apply_prepared(&prepared, clean, vanilla_src) {
                         for rec in records {
                             if rec.status == PatchOutcomeStatus::Applied {
                                 matched_patches += 1;
@@ -2180,6 +2331,10 @@ pub fn lint_mod_directory(
                 "Failed to load qm.toml patches: {e:#}"
             )));
         }
+    }
+
+    if qm_schema::faction::has_faction_file(mod_dir) {
+        diagnostics.extend(qm_schema::faction::load_faction(mod_dir).diagnostics);
     }
 
     let passed = !diagnostics
@@ -2233,8 +2388,9 @@ pub fn scaffold_new_mod(
         other => other,
     };
 
+    let is_faction = norm_template == "faction_mod";
     let mut requires = HashMap::new();
-    let mut load_after = vec!["gcore".to_string()];
+    let mut load_after = if is_faction { Vec::new() } else { vec!["gcore".to_string()] };
     if norm_template == "gmenu_settings" || norm_template == "multi_file_engine_hook" {
         requires.insert("gcore".to_string(), ">=1.0.0".to_string());
         requires.insert("gmenu".to_string(), ">=1.0.0".to_string());
@@ -2244,7 +2400,7 @@ pub fn scaffold_new_mod(
     let mut manifest = ModManifest::new(clean_id.clone(), mod_name.to_string(), "1.0.0".to_string());
     manifest.authors = vec![author.to_string()];
     manifest.description = format!("{mod_name} for Mud and Blood.");
-    manifest.tags = vec!["Gameplay".to_string()];
+    manifest.tags = vec![if is_faction { "Faction" } else { "Gameplay" }.to_string()];
     manifest.relationships = qm_schema::ModRelationships {
         requires,
         load_after,
@@ -2254,9 +2410,12 @@ pub fn scaffold_new_mod(
     let mod_json = serde_json::to_string_pretty(&manifest).map_err(|e| e.to_string())?;
     fs::write(mod_dir.join("mod.json"), mod_json).map_err(|e| e.to_string())?;
 
-    // Scaffold standard game-matching assets/ subdirectories for automatic drop-in asset loading
-    for sub in &["sounds/vo", "music", "sprites", "ui"] {
-        let _ = fs::create_dir_all(mod_dir.join("assets").join(sub));
+    // Scaffold standard game-matching assets/ subdirectories for automatic drop-in asset loading.
+    // A faction mod keeps its files out of assets/, which would apply them all the time.
+    if !is_faction {
+        for sub in &["sounds/vo", "music", "sprites", "ui"] {
+            let _ = fs::create_dir_all(mod_dir.join("assets").join(sub));
+        }
     }
 
     // Find preview code from built-in templates if matching
@@ -2785,6 +2944,30 @@ return M
             fs::write(mod_dir.join(&mod_file), module_lua).map_err(|e| e.to_string())?;
         }
 
+        "faction_mod" => {
+            let faction_toml = FACTION_TEMPLATE
+                .replace("custom_faction", &clean_id.replace('-', "_"))
+                .replace("Custom Faction", mod_name);
+            fs::write(mod_dir.join("faction.toml"), faction_toml).map_err(|e| e.to_string())?;
+            fs::write(
+                mod_dir.join("faction.schema.json"),
+                qm_schema::faction::FACTION_JSON_SCHEMA,
+            )
+            .map_err(|e| e.to_string())?;
+            for sub in ["units/base", "units/sarge", "weapons", "voices", "vehicles", "names"] {
+                let _ = fs::create_dir_all(mod_dir.join(sub));
+            }
+            fs::write(
+                mod_dir.join("names").join("last.txt"),
+                "# One last name per line. Lines starting with # are ignored.
+Ivanov
+Petrov
+Smirnov
+",
+            )
+            .map_err(|e| e.to_string())?;
+        }
+
         _ => {
             // Minimal patch mod fallback ("empty" or unknown template)
             let qm_toml = format!(
@@ -3201,11 +3384,47 @@ mod tests {
             );
             let mod_dir = res.unwrap();
             assert!(mod_dir.join("mod.json").is_file());
-            assert!(mod_dir.join("qm.toml").is_file());
+            if t.id == "faction_mod" {
+                // A faction mod is data only: faction.toml instead of qm.toml.
+                assert!(mod_dir.join("faction.toml").is_file());
+                assert!(!mod_dir.join("assets").exists());
+            } else {
+                assert!(mod_dir.join("qm.toml").is_file());
+            }
             assert!(mod_dir.join("README.md").is_file());
         }
 
         let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn faction_template_scaffolds_a_valid_faction() {
+        let temp = tempfile::tempdir().unwrap();
+        let dir = scaffold_new_mod(temp.path(), "eastern-front", "Eastern Front", "Tester", "faction_mod").unwrap();
+        let report = qm_schema::faction::load_faction(&dir);
+        assert!(!report.has_errors(), "{:?}", report.diagnostics);
+        let f = report.faction.unwrap();
+        assert_eq!(f.id, "eastern_front");
+        assert_eq!(f.name, "Eastern Front");
+        assert_eq!(f.names.unwrap().soldiers.unwrap().last, vec!["Ivanov", "Petrov", "Smirnov"]);
+        // The commented-out examples are valid too once uncommented; only their files are missing.
+        let key = regex_lite::Regex::new(r"^# (\[|[A-Za-z_]+ = )").unwrap();
+        let uncommented: String = FACTION_TEMPLATE
+            .lines()
+            .map(|l| if key.is_match(l) { &l[2..] } else { l })
+            .collect::<Vec<_>>()
+            .join("
+");
+        let report = qm_schema::faction::check_faction(&uncommented, &dir);
+        let unexpected: Vec<_> = report
+            .diagnostics
+            .iter()
+            .filter(|d| d.severity == qm_schema::DiagnosticSeverity::Error)
+            .filter(|d| !d.message.contains("not found in the mod folder") && !d.message.contains("no wav/ogg/mp3 files") && !d.message.contains("no png/jpg/jpeg/bmp files"))
+            .collect();
+        assert!(unexpected.is_empty(), "{unexpected:?}");
+        let lint = lint_mod_directory(&dir, &HashMap::new()).unwrap();
+        assert!(lint.diagnostics.iter().any(|d| d.message.starts_with("faction.toml:")));
     }
 
     #[test]

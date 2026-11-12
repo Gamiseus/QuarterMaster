@@ -3,9 +3,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const ok = <T>(data: T) => Promise.resolve({ status: "ok" as const, data });
 const resolution = (tag: string) => ({ ordered_mods: [], diagnostics: [], has_cycles: false, cycle_paths: [], rule_hierarchy: tag });
 const simulation = (total: number) => ({ total_patches: total, applied_patches: total, broken_anchors: 0, conflicts: [], files: [] });
-const report = (checked_at: string) => ({ checked_at, github_token_configured: false, rate_limit_mode: "x", launcher: {}, mods: [] });
+const report = (checked_at: string) => ({ checked_at, rate_limit_mode: "x", launcher: {}, mods: [] });
 const patch = (patch_id: string) => ({ patch_id, name: null, target_file: "a.lua", state: "applied", conflicts: [] });
-const summary = (id: string, is_active: boolean) => ({ id, name: id, description: "", enabled_count: 0, is_active, linked_save_profile_id: "default", updated_at: "" });
+const summary = (id: string, is_active: boolean) => ({ id, name: id, description: "", enabled_count: 0, is_active, linked_save_profile_id: "default", updated_at: "", is_builtin: false });
 
 vi.mock("../../src/lib/bindings", () => ({
   commands: {
@@ -23,6 +23,7 @@ vi.mock("../../src/lib/bindings", () => ({
     updatesGet: vi.fn(() => ok({ status: "ready", data: report("2026-01-01") })),
     modPatchesGet: vi.fn((id: string) => ok({ status: "ready", data: [patch(id)] })),
     profileGet: vi.fn((id: string) => ok({ id, name: id, enabled_mods: [] })),
+    gameLaunch: vi.fn(() => ok({ stage: { stage: "deploying" }, profile_id: "p", is_modded: true })),
   },
 }));
 
@@ -39,6 +40,11 @@ import { prelaunch } from "../../src/lib/stores/prelaunch.svelte";
 import { profiles } from "../../src/lib/stores/profiles.svelte";
 import { selection } from "../../src/lib/stores/selection.svelte";
 import { updates } from "../../src/lib/stores/updates.svelte";
+
+/** Marks the active profile as the built-in Vanilla profile (or not). */
+function setVanillaActive(on: boolean): void {
+  profiles.list = profiles.list.map((p) => (p.is_active ? { ...p, is_builtin: on } : p));
+}
 
 let disconnect: () => void = () => {};
 
@@ -171,12 +177,33 @@ describe("load order store", () => {
     vi.mocked(commands.loadOrderGet).mockImplementationOnce(() => new Promise((r) => (resolveRefresh = r)) as never);
     const refresh = loadOrder.load();
     expect(prelaunch.canLaunch).toBe(false);
-    prelaunch.vanilla = true;
+    setVanillaActive(true);
     expect(prelaunch.canLaunch).toBe(true);
-    prelaunch.vanilla = false;
+    setVanillaActive(false);
     resolveRefresh({ status: "ok", data: { status: "ready", data: resolution("x") } });
     await refresh;
     expect(prelaunch.canLaunch).toBe(true);
+    profiles.list = [];
+  });
+
+  it("shows the last ready simulation of the same profile while a new one runs", async () => {
+    profiles.list = [summary("p1", true), summary("p2", false)];
+    loadOrder.forget();
+    await loadOrder.load();
+    expect(loadOrder.refreshing).toBe(false);
+    // A profile write cleared the service's simulation.
+    vi.mocked(commands.simulationGet).mockImplementationOnce(() => ok({ status: "loading" }) as never);
+    await loadOrder.load();
+    expect(loadOrder.simulation.status).toBe("loading");
+    expect(readyData<{ total_patches: number }>(loadOrder.shown)?.total_patches).toBe(1);
+    expect(loadOrder.refreshing).toBe(true);
+    // The gates still see that it is not ready.
+    expect(prelaunch.compileErrors).toEqual([]);
+    expect(prelaunch.canLaunch).toBe(false);
+    // Another profile: nothing of the old one is shown.
+    profiles.list = [summary("p1", false), summary("p2", true)];
+    expect(loadOrder.shown.status).toBe("loading");
+    expect(loadOrder.refreshing).toBe(false);
     profiles.list = [];
   });
 
@@ -196,6 +223,15 @@ describe("load order store", () => {
     await first;
     expect(readyData(loadOrder.resolution)?.rule_hierarchy).toBe("new");
     expect(readyData(loadOrder.simulation)?.total_patches).toBe(9);
+  });
+});
+
+describe("game store", () => {
+  it("asks for a launch without mods only when told to", async () => {
+    await game.launch("p");
+    expect(commands.gameLaunch).toHaveBeenLastCalledWith({ profile_id: "p", method: null });
+    await game.launch("p", null, true);
+    expect(commands.gameLaunch).toHaveBeenLastCalledWith({ profile_id: "p", method: null, without_mods: true });
   });
 });
 

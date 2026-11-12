@@ -1,13 +1,20 @@
 <script lang="ts">
+  import { KeyValueList } from "../../../components/ui";
+  import AssetFiles from "./AssetFiles.svelte";
+  import AutoUpdateField from "./AutoUpdateField.svelte";
   import type { ModDetail } from "../../../lib/bindings";
   import { guardLinks, isHttpsUrl } from "../../../lib/external";
   import { renderMarkdown } from "../../../lib/markdown";
+  import { factionSide } from "../../../lib/modlist/status";
 
   interface Props {
     detail: ModDetail;
   }
 
   let { detail }: Props = $props();
+
+  const assetsOnly = $derived(detail.summary.kind === "assets");
+  const faction = $derived(detail.summary.faction);
 
   const GITHUB_REPO = /^[\w.-]+\/[\w.-]+$/;
 
@@ -29,12 +36,22 @@
   {#if detail.manifest.description}
     <p class="description">{detail.manifest.description}</p>
   {/if}
-  <dl class="facts">
-    <dt>Authors</dt>
-    <dd>{authors}</dd>
-    <dt>Installed versions</dt>
-    <dd>{detail.summary.installed_versions.join(", ") || detail.summary.version}</dd>
-  </dl>
+  <KeyValueList
+    label="Mod facts"
+    items={[
+      { label: "Authors", value: authors },
+      ...(detail.summary.category ? [{ label: "Category", value: detail.summary.category }] : []),
+      ...(faction
+        ? [{ label: "Faction", value: `${faction.name}. Replaces ${factionSide(faction)} in game; enable one faction per side.` }]
+        : []),
+      ...(assetsOnly
+        ? [{ label: "Type", value: "Assets only. The game loads its files from the assets folder; it has no update source." }]
+        : [{ label: "Installed versions", value: detail.summary.installed_versions.join(", ") || detail.summary.version }]),
+    ]}
+  />
+  {#if !detail.summary.is_workspace_linked && !assetsOnly}
+    <AutoUpdateField modId={detail.summary.id} />
+  {/if}
   {#if links.length > 0}
     <ul class="links" {@attach guardLinks}>
       {#each links as link (link.label)}
@@ -42,10 +59,16 @@
       {/each}
     </ul>
   {/if}
+  {#if detail.asset_files.length > 0 && assetsOnly}
+    <AssetFiles files={detail.asset_files} />
+  {/if}
   {#if readme}
     <div class="markdown" {@attach guardLinks}>{@html readme}</div>
-  {:else}
+  {:else if !assetsOnly}
     <p class="qm-muted">This mod has no readme.</p>
+  {/if}
+  {#if detail.asset_files.length > 0 && !assetsOnly}
+    <AssetFiles files={detail.asset_files} />
   {/if}
   {#if changelog}
     <details class="changelog">
@@ -66,22 +89,6 @@
     margin: 0;
   }
 
-  .facts {
-    display: grid;
-    grid-template-columns: max-content 1fr;
-    gap: var(--qm-space-1) var(--qm-space-3);
-    margin: 0;
-  }
-
-  .facts dt {
-    color: var(--qm-text-muted);
-  }
-
-  .facts dd {
-    margin: 0;
-    overflow-wrap: anywhere;
-  }
-
   .links {
     display: flex;
     flex-wrap: wrap;
@@ -93,7 +100,7 @@
 
   a,
   .markdown :global(a) {
-    color: var(--qm-accent);
+    color: var(--qm-accent-text);
   }
 
   .markdown {

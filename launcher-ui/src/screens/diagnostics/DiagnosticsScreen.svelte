@@ -1,92 +1,74 @@
 <script lang="ts">
-  import { call } from "../../lib/api";
-  import { commands, type HealthReport, type Loadable } from "../../lib/bindings";
-  import { onEvent } from "../../lib/events";
-  import { logs } from "../../lib/stores/logs.svelte";
+  import { untrack } from "svelte";
+  import { Button, Screen } from "../../components/ui";
+  import { diagnostics } from "../../lib/stores/diagnostics.svelte";
+  import { jobs } from "../../lib/stores/jobs.svelte";
+  import CrashList from "./CrashList.svelte";
+  import HealthCard from "./HealthCard.svelte";
+  import LogConsole from "./LogConsole.svelte";
+  import TraceDialog from "./TraceDialog.svelte";
 
-  let health = $state<Loadable<HealthReport>>({ status: "loading" });
+  let building = $state(false);
+  let traceOpen = $state(false);
+  const bundleRunning = $derived(building || jobs.list.some((j) => j.kind === "diagnostic_bundle"));
 
-  function load() {
-    call(commands.healthGet())
-      .then((h) => (health = h))
-      .catch(() => {});
+  // Fresh health and crashes each time the screen opens; events keep them current afterwards.
+  $effect(() => untrack(() => diagnostics.load()));
+
+  async function bugReport() {
+    building = true;
+    try {
+      await diagnostics.buildBundle();
+    } catch {
+      // jobs.track or call() already reported it.
+    } finally {
+      building = false;
+    }
   }
-
-  $effect(() => {
-    load();
-    return onEvent((e) => {
-      if (e.type === "invalidated" && e.scope === "health") load();
-    });
-  });
-
-  const yesNo = (v: boolean) => (v ? "Yes" : "No");
 </script>
 
-<section class="qm-page">
-  <h1>Diagnostics</h1>
-
-  <div class="qm-card">
-    <h2>Health</h2>
-    {#if health.status === "loading"}
-      <p class="qm-muted">Checking...</p>
-    {:else}
-      <dl>
-        <dt>Loader DLL present</dt>
-        <dd>{yesNo(health.data.dll_present)}</dd>
-        <dt>Loader DLL matches build</dt>
-        <dd>{yesNo(health.data.dll_matches_build)}</dd>
-        <dt>Game folder modded</dt>
-        <dd>{yesNo(health.data.is_game_dir_modded)}</dd>
-        <dt>Game running</dt>
-        <dd>{health.data.game_running_pid === null ? "No" : `Yes (PID ${health.data.game_running_pid})`}</dd>
-      </dl>
-      {#if health.data.steam_cloud_warning}
-        <p class="warn">{health.data.steam_cloud_warning}</p>
-      {/if}
-    {/if}
+<Screen title="Diagnostics" scroll={false}>
+  {#snippet actions()}
+    <Button onclick={() => (traceOpen = true)}>Trace globals...</Button>
+    <Button disabled={bundleRunning} onclick={bugReport}>Create bug report</Button>
+  {/snippet}
+  <div class="diag">
+    <div class="top">
+      <HealthCard />
+      <CrashList />
+    </div>
+    <LogConsole />
   </div>
-
-  <div class="qm-card">
-    <h2>Live log</h2>
-    {#if logs.lines.length === 0}
-      <p class="qm-muted">No log lines yet.</p>
-    {:else}
-      <ol class="log">
-        {#each logs.lines as entry (entry.seq)}
-          <li><span class="qm-muted">{entry.source}</span> {entry.line}</li>
-        {/each}
-      </ol>
-    {/if}
-  </div>
-</section>
+</Screen>
+<TraceDialog bind:open={traceOpen} />
 
 <style>
-  dl {
+  .diag {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    gap: var(--qm-space-4);
+    min-height: 0;
+  }
+
+  /* Health and crashes sit side by side at their natural height, each capped at 40% of the screen. */
+  .top {
+    flex: none;
     display: grid;
-    grid-template-columns: max-content 1fr;
-    gap: var(--qm-space-2) var(--qm-space-5);
-    margin: var(--qm-space-3) 0 0;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--qm-space-4);
+    align-items: start;
   }
 
-  dt {
-    color: var(--qm-text-muted);
+  .top :global(:is(.health, .crashes)) {
+    display: flex;
+    flex-direction: column;
+    max-height: 40vh;
+    min-height: 0;
   }
 
-  dd {
-    margin: 0;
-  }
-
-  .warn {
-    color: var(--qm-warn);
-  }
-
-  .log {
-    max-height: 320px;
-    margin: var(--qm-space-3) 0 0;
-    padding: 0;
-    overflow: auto;
-    list-style: none;
-    font-family: var(--qm-font-mono);
-    font-size: 12px;
+  .top :global(.card-scroll) {
+    flex: 0 1 auto;
+    min-height: 0;
   }
 </style>
