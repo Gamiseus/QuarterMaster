@@ -1,6 +1,6 @@
 [package]
 name = "qm-launcher"
-version = "1.2.0"
+version = "1.8.1"
 edition = "2021"
 description = "QuarterMaster Tauri 2 launcher shell"
 authors = ["QuarterMaster Team"]

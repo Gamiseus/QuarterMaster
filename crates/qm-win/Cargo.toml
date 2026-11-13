@@ -1,6 +1,6 @@
 [package]
 name = "qm-win"
-version = "1.2.0"
+version = "1.8.1"
 edition = "2021"
 description = "Windows proxy DLL injector for QuarterMaster (QM) in Mud and Blood"
 authors = ["QuarterMaster Team"]

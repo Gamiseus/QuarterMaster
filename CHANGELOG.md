@@ -2,7 +2,7 @@
 
 Versions are `Major.Minor.Patch`.
 
-## 1.2.1
+## 1.8.1
 
 - security scan: `os.rename` is found
 - security scan: a module asked for with `pcall(require, "ffi")` is found
@@ -20,7 +20,7 @@ Versions are `Major.Minor.Patch`.
 - fixed: the launcher builds from a fresh clone; its build script needed the local test folder
 - fixed: a Windows checkout keeps Lua and Rust sources LF (`.gitattributes`), so the start-up Lua QuarterMaster embeds no longer changes with `core.autocrlf`
 
-## 1.2.0
+## 1.8.0
 
 - launcher: Assets view on the Patches tab lists sounds, images and fonts that two sources replace
 - launcher: pick the winner for a group of files or one file; stored as a fix, undo under Fixes
@@ -54,7 +54,7 @@ Versions are `Major.Minor.Patch`.
 - added `image` in `[publish]`: a picture for the mod's card in the mod list
 - editor schema for `qm.toml` knows the `[publish]` table
 
-## 1.1.0
+## 1.7.0
 
 - added debug mode (`-debug`, `QM_DEBUG=1`, launcher switch)
 - console window only in debug mode
@@ -68,6 +68,6 @@ Versions are `Major.Minor.Patch`.
 - fixed `on_click` ignored on `config.toml` button options
 - removed `disable_console` launch setting (use `--disable-console`)
 
-## 1.0.0
+## 1.6.0
 
 - baseline: patch engine, launcher, asset autoloader, menus, keybinds, faction mods, anchors, compatibility patches

@@ -3121,7 +3121,7 @@ checksum = "007d8adb5ddab6f8e3f491ac63566a7d5002cc7ed73901f72057943fa71ae1ae"
 
 [[package]]
 name = "qm-app"
-version = "1.2.0"
+version = "1.8.1"
 dependencies = [
  "anyhow",
  "qm-core",
@@ -3134,7 +3134,7 @@ dependencies = [
 
 [[package]]
 name = "qm-cli"
-version = "1.2.0"
+version = "1.8.1"
 dependencies = [
  "anyhow",
  "qm-core",
@@ -3147,7 +3147,7 @@ dependencies = [
 
 [[package]]
 name = "qm-core"
-version = "1.2.0"
+version = "1.8.1"
 dependencies = [
  "anyhow",
  "crop",
@@ -3175,7 +3175,7 @@ dependencies = [
 
 [[package]]
 name = "qm-launcher"
-version = "1.2.0"
+version = "1.8.1"
 dependencies = [
  "jiff",
  "qm-core",
@@ -3199,7 +3199,7 @@ dependencies = [
 
 [[package]]
 name = "qm-manager"
-version = "1.2.0"
+version = "1.8.1"
 dependencies = [
  "anyhow",
  "crop",
@@ -3227,7 +3227,7 @@ dependencies = [
 
 [[package]]
 name = "qm-schema"
-version = "1.2.0"
+version = "1.8.1"
 dependencies = [
  "regex-lite",
  "serde",
@@ -3241,7 +3241,7 @@ dependencies = [
 
 [[package]]
 name = "qm-service"
-version = "1.2.0"
+version = "1.8.1"
 dependencies = [
  "jiff",
  "notify",
@@ -3278,7 +3278,7 @@ dependencies = [
 
 [[package]]
 name = "qm-win"
-version = "1.2.0"
+version = "1.8.1"
 dependencies = [
  "anyhow",
  "forward-dll",

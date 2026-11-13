@@ -1,6 +1,6 @@
 [package]
 name = "qm-core"
-version = "1.2.0"
+version = "1.8.1"
 edition = "2021"
 description = "Core runtime patch engine and mod loader for QuarterMaster (QM) in Mud and Blood"
 authors = ["QuarterMaster Team"]
