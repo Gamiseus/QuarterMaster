@@ -44,12 +44,14 @@ tag = "pps43"
 based_on = "m3"
 name = "PPS-43"
 sound = "weapons/pps43"
+mag_sprite = "weapons/pps43_mag.png"
 stats = { maxAmmo = 35 }
 loot_side = "allied"
 
 [[weapons]]
 reskin = "svt40"
 sound = "springfieldSound"
+mag_sprite = "ppshMag"
 
 [spawn_swap]
 tommy = "ppsh41"
@@ -109,6 +111,7 @@ fn red_army_mod(mods: &Path) -> PathBuf {
             "weapons/mosin1.wav",
             "weapons/mosin2.wav",
             "weapons/pps43.wav",
+            "weapons/pps43_mag.png",
             "voices/contact1.wav",
             "voices/contact2.wav",
             "voices/hurt1.wav",
@@ -164,6 +167,7 @@ fn patches_for_an_active_faction() {
             "qm_factions_expected",
             "qm_factions",
             "qm_factions_vehicle_label",
+            "qm_factions_magazines",
             "qm_factions_tag_sound_player",
             "qm_factions_tag_sound_ai"
         ]
@@ -488,6 +492,34 @@ fn patches_match_the_vanilla_sources_once() {
             patched_main = Some(rope.to_string());
         } else if patch.id() == Some("qm_factions_vehicle_label") {
             assert!(text.contains("__qm_vehicle_label(player.deployedVehicles[id])"));
+        } else if patch.id() == Some("qm_factions_magazines") {
+            // The patched addParticle drops a faction's magazine and still drops the game's.
+            let Some(lua) = lua_exe() else { continue };
+            let file = dir.path().join("particlesSystem_patched.lua");
+            fs::write(&file, &text).unwrap();
+            let script = format!(
+                r#"local img = {{ getWidth = function() return 40 end, getHeight = function() return 20 end }}
+genericMag, ppshMag, ownMag = img, img, img
+randNbr = function(n) return 1 end
+player = {{ option_maxParticles = 1 }}
+assert((loadstring or load)(io.open([[{}]], 'rb'):read('*a'), '@particlesSystem.lua'))()
+local function drop(typez) local p = {{}} addParticle(p, typez, 1, 2, 0) return p end
+assert(drop('ppshMag').sprite == 'ppshMag')
+assert(drop('ownMag').lifeSpan == nil, 'an unknown magazine is left empty by the game')
+__qm_mag_sprites = {{ ownMag = true, goneMag = true }}
+local p = drop('ownMag')
+assert(p.sprite == 'ownMag' and p.typez == 'ownMag' and p.lifeSpan and p.velocity)
+assert(p.xoffset == 20 and p.yoffset == 10)
+p = drop('goneMag')
+assert(p.sprite == 'genericMag' and p.lifeSpan, 'a missing image falls back to the generic magazine')
+assert(drop('ppshMag').sprite == 'ppshMag')
+print('MAGAZINES OK')"#,
+                file.display()
+            );
+            let out = Command::new(lua).arg("-e").arg(script).output().unwrap();
+            let seen = String::from_utf8_lossy(&out.stdout).to_string()
+                + &String::from_utf8_lossy(&out.stderr);
+            assert!(seen.contains("MAGAZINES OK"), "{seen}");
         } else {
             // The tag-sound check goes in front of vanilla's Garand check, same indent.
             assert!(text.contains("__qm_sound_by_tag[player.deployedTroops[idz].weapon.tag]) then"));

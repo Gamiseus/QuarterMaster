@@ -33,6 +33,14 @@ R.VARIANTS = {
   axis = { axis = "base", officer = "officer", volks = "volks" },
 }
 
+-- Magazine sprites the game's addParticle can drop (particlesSystem.lua). Any other name is
+-- registered in __qm_mag_sprites, which the magazine patch reads.
+R.VANILLA_MAGS = {
+  genericMag = true, m3Mag = true, g43Mag = true, mg15Mag = true, ammoBox = true, ammoPan = true,
+  barMag = true, brenMag = true, tommyMag = true, m1CarbineMag = true, mp40Mag = true,
+  stgMag = true, ppshMag = true,
+}
+
 R.STAT_KEYS = { "action", "class", "ammo", "maxAmmo", "range", "damage", "recoil", "bulk", "rof", "rofTime", "jam", "rgCapable" }
 
 function R.log(msg)
@@ -269,6 +277,15 @@ function R.load_weapons(f)
       end
     elseif w.mag_name then
       def.mag = w.mag_name
+    end
+    if def.mag and not R.VANILLA_MAGS[def.mag] then
+      if rawget(_G, def.mag) == nil then
+        R.log("weapon " .. tag .. ": magazine sprite " .. def.mag .. " is not loaded; the base weapon's magazine is kept")
+        def.mag = nil
+      else
+        _G.__qm_mag_sprites = _G.__qm_mag_sprites or {}
+        _G.__qm_mag_sprites[def.mag] = true
+      end
     end
     R.weapons[tag] = def
   end

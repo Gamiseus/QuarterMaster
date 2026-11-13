@@ -218,7 +218,7 @@
         "top_sprite": { "$ref": "#/definitions/path" },
         "side_sprite": { "$ref": "#/definitions/path" },
         "sound": { "type": "string", "description": "A game sound by name (springfieldSound), a file, or a name prefix: weapons/mosin loads mosin1.wav, mosin2.wav, ..." },
-        "mag_sprite": { "type": "string", "description": "A game sprite name or an image file." },
+        "mag_sprite": { "type": "string", "description": "The magazine dropped on reload: one of the game's magazines (genericMag, ppshMag, ...), an image file, or a name from [sprites]." },
         "stats": { "$ref": "#/definitions/weapon_stats" },
         "loot_side": { "enum": ["allied", "axis", "none"], "default": "none", "description": "Shorthand for pools = [\"allied\"] or [\"axis\"]." },
         "pools": { "type": "array", "items": { "$ref": "#/definitions/pool" }, "description": "Random weapon pools this new weapon joins." }

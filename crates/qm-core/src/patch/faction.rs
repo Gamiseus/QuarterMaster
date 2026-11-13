@@ -327,6 +327,28 @@ pub fn build_faction_patches(active: &[LoadedFaction], plan: Option<&LoadOrderPl
         ));
     }
 
+    // The game drops a magazine on reload only for its own magazine names; any other name
+    // leaves an empty particle that crashes the particle update. The runtime lists a faction's
+    // own magazine sprites in __qm_mag_sprites, and this makes them drop like the generic one.
+    let own_magazine = active.iter().any(|lf| {
+        lf.faction.weapons.iter().any(|w| {
+            w.mag_file.is_some()
+                || w.mag_name
+                    .as_deref()
+                    .is_some_and(|m| !faction::vanilla::is_magazine(m))
+        })
+    });
+    if own_magazine {
+        patches.push(pattern_patch(
+            "qm_factions_magazines",
+            "Faction magazine sprites",
+            "includes/particlesSystem.lua",
+            "function addParticle(particle, typez, x, y, rotationz)",
+            InsertPosition::After,
+            MAGAZINE_PAYLOAD.to_string(),
+        ));
+    }
+
     // The game picks the firing sound of the Garand and Springfield families by tag, not by
     // weapon.sound. When a faction reskins one of them with its own sound, check first.
     let tag_sound_reskin = active.iter().any(|lf| {
@@ -352,6 +374,20 @@ pub fn build_faction_patches(active: &[LoadedFaction], plan: Option<&LoadOrderPl
     }
     patches
 }
+
+/// Goes at the top of the game's `addParticle`.
+const MAGAZINE_PAYLOAD: &str = r#"  if __qm_mag_sprites and __qm_mag_sprites[typez] then
+    local __qm_mag = _G[typez]
+    addParticle(particle, "genericMag", x, y, rotationz)
+    if __qm_mag ~= nil then
+      particle.typez = typez
+      particle.sprite = typez
+      particle.xoffset = __qm_mag:getWidth()/2
+      particle.yoffset = __qm_mag:getHeight()/2
+    end
+    return
+  end
+"#;
 
 fn regex_patch(id: &str, name: &str, target: &str, pattern: &str, payload: &str) -> Patch {
     Patch::Regex(RegexPatch {

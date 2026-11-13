@@ -347,6 +347,42 @@ sound = \"weapons/mosin\"
 }
 
 #[test]
+fn weapon_magazine_names() {
+    let dir = mod_with(&["weapons/pan.png", "misc/drum.png"]);
+    let r = check_faction(
+        &format!(
+            "{HEADER}[[weapons]]
+reskin = \"m1\"
+mag_sprite = \"ppshMag\"
+[[weapons]]
+reskin = \"bar\"
+mag_sprite = \"weapons/pan.png\"
+[[weapons]]
+reskin = \"bren\"
+mag_sprite = \"drumMag\"
+[[weapons]]
+reskin = \"sten\"
+mag_sprite = \"noSuchMag\"
+[sprites]
+drumMag = \"misc/drum.png\"
+"
+        ),
+        dir.path(),
+    );
+    assert!(errors(&r).is_empty(), "{:?}", r.diagnostics);
+    let w = warnings(&r);
+    assert_eq!(w.len(), 1, "{w:?}");
+    assert!(w[0].contains("noSuchMag") && w[0].contains("[sprites]"), "{w:?}");
+    let f = r.faction.unwrap();
+    assert_eq!(f.weapons[0].mag_name.as_deref(), Some("ppshMag"));
+    assert_eq!(f.weapons[1].mag_file.as_deref(), Some("weapons/pan.png"));
+    assert_eq!(f.weapons[2].mag_name.as_deref(), Some("drumMag"));
+    for m in vanilla::MAGAZINES {
+        assert!(vanilla::is_magazine(m));
+    }
+}
+
+#[test]
 fn spawn_swap_and_pools() {
     let dir = mod_with(&[]);
     let r = check_faction(

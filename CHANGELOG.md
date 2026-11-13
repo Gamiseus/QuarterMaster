@@ -9,6 +9,9 @@ Versions are `Major.Minor.Patch`.
 - launcher: a mod index entry from another repository than the installed mod's own is not offered as its update
 - `qm pack`: the zip holds one folder named after the mod (`ExampleMod.zip` has `ExampleMod/mod.json`), so unpacking it into the Mods folder gives `Mods/ExampleMod/`
 - `qm validate` lists the warnings from reading the mods
+- factions: a weapon's `mag_sprite` can be any image, or a name from `[sprites]` shared by several weapons
+- `qm faction check` warns about a `mag_sprite` name that is neither one of the game's magazines nor in `[sprites]`
+- fixed: a faction weapon whose `mag_sprite` is not one of the game's own magazines no longer crashes the game on its first reload
 - fixed: a mod folder and a `.zip` (or a second folder) with the same mod id no longer both load and apply every patch twice; the folder loads, and the other copy is skipped with a warning
 - fixed: a save that used a faction no longer has the weapons of a loaded weapon mod turned into K98s when it loads
 - fixed: a mod with only a `faction.toml` is found in a zip or folder; it needed "Import as unmanaged" before

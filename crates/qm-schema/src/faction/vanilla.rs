@@ -226,6 +226,28 @@ pub const TAG_PICKED_SOUNDS: &[&str] = &[
     "scopedSpringfield",
 ];
 
+/// Magazine sprites the game can drop on a reload (`addParticle` in particlesSystem.lua). Any
+/// other `weapon.magSprite` needs the faction magazine patch.
+pub const MAGAZINES: &[&str] = &[
+    "genericMag",
+    "m3Mag",
+    "g43Mag",
+    "mg15Mag",
+    "ammoBox",
+    "ammoPan",
+    "barMag",
+    "brenMag",
+    "tommyMag",
+    "m1CarbineMag",
+    "mp40Mag",
+    "stgMag",
+    "ppshMag",
+];
+
+pub fn is_magazine(name: &str) -> bool {
+    MAGAZINES.contains(&name)
+}
+
 /// Random weapon pools the game draws loot and reinforcement guns from, keyed by schema name,
 /// with the vanilla function that draws from each.
 pub const POOLS: &[(&str, &str)] = &[

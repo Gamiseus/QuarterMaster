@@ -316,6 +316,11 @@ eq(weaponText_pps43, "PPS-43", "new weapon text from its name")
 local w3 = {}
 weaponCreator(w3, "svt40")
 eq(w3.sound, "springfieldSound", "weapon sound by game name")
+eq(w2.magSprite, "__qmf_red_army_pps43_mag", "own magazine image gets its own name")
+eq(_G[w2.magSprite] and _G[w2.magSprite].bytes, "weapons/pps43_mag.png", "own magazine image is loaded")
+check(__qm_mag_sprites and __qm_mag_sprites[w2.magSprite], "own magazine is listed for the magazine patch")
+eq(w3.magSprite, "ppshMag", "magazine by game name")
+check(not __qm_mag_sprites.ppshMag, "a game magazine needs no listing")
 check(__qm_sound_by_tag and __qm_sound_by_tag.m1, "m1 reskin sound is used over the tag-picked Garand sound")
 check(__qm_sound_by_tag and not __qm_sound_by_tag.pps43, "new weapons don't need the tag-sound check")
 

@@ -972,7 +972,14 @@ impl<'a> Checker<'a> {
                     None,
                     self.file(&format!("{label}.mag_sprite"), m, vanilla::IMAGE_EXTS),
                 ),
-                Some(m) if is_identifier(m) => (Some(m.clone()), None),
+                Some(m) if is_identifier(m) => {
+                    if !vanilla::is_magazine(m) && !f.sprites.contains_key(m) {
+                        self.warn(format!(
+                            "{label}.mag_sprite: \"{m}\" is not one of the game's magazines and not in [sprites]. If the game has no sprite of that name, the weapon keeps its base magazine."
+                        ));
+                    }
+                    (Some(m.clone()), None)
+                }
                 Some(m) => {
                     self.error(format!(
                         "{label}.mag_sprite: \"{m}\" is neither a game sprite name nor an image file."
