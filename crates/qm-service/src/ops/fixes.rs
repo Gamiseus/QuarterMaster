@@ -2190,10 +2190,6 @@ impl ViewCtx<'_> {
                         "A load order change cannot be saved as a compatibility patch.".to_string(),
                     ),
                 ),
-                (FixChange::AssetChoice { .. }, _) => (
-                    false,
-                    Some("An asset choice cannot be saved as a compatibility patch.".to_string()),
-                ),
                 (_, FixStatus::Waiting { .. }) => (
                     false,
                     Some("Turn on the mods this fix changes first.".to_string()),

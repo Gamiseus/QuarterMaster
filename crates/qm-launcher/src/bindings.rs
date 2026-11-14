@@ -131,6 +131,15 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             launcher_update_rollback,
             jobs_list,
             job_cancel,
+            mod_color_set,
+            window_settings_set,
+            mods_source_set,
+            leftover_backups_list,
+            leftover_backup_delete,
+            game_dump_full,
+            file_view,
+            conflict_dismiss,
+            mod_version_set,
         ])
         .events(collect_events![QmEventPayload])
 }

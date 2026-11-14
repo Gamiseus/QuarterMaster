@@ -78,6 +78,7 @@ fn ledger(
         factions,
         listing,
         choices: &choices,
+        compat: &BTreeMap::new(),
         last_run: &BTreeMap::new(),
     })
 }
@@ -382,6 +383,7 @@ fn the_last_runs_winner_is_shown_when_it_differs() {
             factions: &[],
             listing: Some(&listing),
             choices: &BTreeMap::new(),
+            compat: &BTreeMap::new(),
             last_run: &BTreeMap::from([("sounds/garand1".to_string(), winner.to_string())]),
         })
     };
@@ -417,4 +419,49 @@ fn manifests_follow_the_order_of_their_blocks_in_main_lua() {
     // With it: the order of the blocks; a block that did not land loads nothing.
     let text = format!("{}\n{}\nsetOptionVolume()\n", payloads[2], payloads[0]);
     assert_eq!(ids(manifests_in_run_order(&table, Some(&text))), ["third", "first"]);
+}
+
+/// A compatibility mod's choice decides a slot where the profile chose nothing for it or
+/// its group, and `slot_exclusions` splits a choice by file.
+#[test]
+fn a_compat_choice_counts_until_the_profile_chooses() {
+    let d = Path::new("D:/Mods");
+    let listing = game(&["sounds/garand1.wav", "sounds/garand2.wav"]);
+    let ms = [
+        manifest("a", d, &["assets/sounds/garand1.wav", "assets/sounds/garand2.wav"]),
+        manifest("b", d, &["assets/sounds/garand1.wav", "assets/sounds/garand2.wav"]),
+    ];
+    let compat = BTreeMap::from([("sounds/garand1".to_string(), ("a".to_string(), "compat_a_b".to_string()))]);
+    let run = |choices: &[(&str, &str)]| {
+        let choices: BTreeMap<String, String> =
+            choices.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
+        build(&LedgerInput {
+            manifests: &ms,
+            factions: &[],
+            listing: Some(&listing),
+            choices: &choices,
+            compat: &compat,
+            last_run: &BTreeMap::new(),
+        })
+    };
+    let l = run(&[]);
+    let s = l.slot("sounds/garand1").unwrap();
+    assert_eq!((s.winner.as_str(), s.chosen_by.as_deref()), ("a", Some("compat_a_b")));
+    assert_eq!(l.slot("sounds/garand2").unwrap().winner, "b", "the last loaded source");
+    // Nothing of a compat choice goes into the profile's plan.
+    assert!(exclusions(&l).is_empty());
+
+    for key in ["sounds/garand1", "sounds/garand#"] {
+        let l = run(&[(key, "b")]);
+        let s = l.slot("sounds/garand1").unwrap();
+        assert_eq!((s.winner.as_str(), s.chosen_by.as_deref()), ("b", None), "{key}");
+    }
+
+    let l = run(&[("sounds/garand#", "a"), ("sounds/garand2", "b")]);
+    let by_slot = slot_exclusions(&l, "sounds/garand#");
+    assert_eq!(by_slot.len(), 1, "garand2 has its own choice");
+    assert_eq!(by_slot[0].slot, "sounds/garand1");
+    assert_eq!(by_slot[0].group, "sounds/garand#");
+    assert_eq!(by_slot[0].leaves_out["b"], ["assets/sounds/garand1.wav"]);
+    assert_eq!(slot_exclusions(&l, "sounds/garand2")[0].leaves_out["a"], ["assets/sounds/garand2.wav"]);
 }

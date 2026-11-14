@@ -9,6 +9,8 @@ import { toasts } from "./toasts.svelte";
 
 /** Automatic checks while the launcher is open (the service checks once at startup). */
 export const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
+/** How long the "updates are ready" toast stays before it closes by itself. */
+export const READY_TOAST_MS = 15_000;
 const LIBRARY_JOBS: ReadonlySet<JobKind> = new Set<JobKind>(["mod_import", "catalog_install", "mod_update_install", "workspace_sync", "modpack_import"]);
 
 /** A mod's own automatic update choice: `default` follows the global setting. */
@@ -90,10 +92,16 @@ class UpdatesStore {
   #offer(ids: string[]): void {
     if (this.#readyToast !== null) toasts.dismiss(this.#readyToast);
     const n = ids.length;
-    this.#readyToast = toasts.notice(n === 1 ? "1 mod update is ready." : `${n} mod updates are ready.`, [
-      { label: "Install", run: () => void this.installMods(ids) },
-      { label: "Review", run: () => this.onReview?.() },
-    ]);
+    // It closes by itself: the update stays on the Mods screen ("Update all", the Updates
+    // filter), and a toast left open covers the corner of whatever is under it.
+    this.#readyToast = toasts.notice(
+      n === 1 ? "1 mod update is ready." : `${n} mod updates are ready.`,
+      [
+        { label: "Install", run: () => void this.installMods(ids) },
+        { label: "Review", run: () => this.onReview?.() },
+      ],
+      READY_TOAST_MS,
+    );
   }
 
   /** Checks again (the mod index, then github.com for mods it does not list); failures offer Retry. */

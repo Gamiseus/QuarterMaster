@@ -19,13 +19,22 @@ impl Service {
         let Some(mods) = self.inner.caches.mods.get() else {
             return Loadable::Loading;
         };
-        let enabled = self
+        let (enabled, pins) = self
             .active_profile()
-            .map(|p| p.enabled_mods)
+            .map(|p| (p.enabled_mods, p.pinned_versions))
             .unwrap_or_default();
         Loadable::Ready(
             mods.iter()
-                .map(|m| ModSummary::new(m, enabled.contains(&m.manifest.id)))
+                .map(|m| {
+                    let mut s = ModSummary::new(m, enabled.contains(&m.manifest.id));
+                    // The version this profile uses, when it is not the newest.
+                    if let Some(v) = pins.get(&m.manifest.id) {
+                        if m.installed_versions.contains(v) {
+                            s.version = v.clone();
+                        }
+                    }
+                    s
+                })
                 .collect(),
         )
     }
@@ -220,10 +229,13 @@ impl Service {
             let _install = svc.lock_install();
             svc.ensure_not_running()?;
             ctx.progress(0.1, "Syncing workspace mods");
-            let synced = svc
-                .paths()
-                .sync_workspace_mods(&ws)
-                .or_kind(ErrorKind::Io)?;
+            // Workspace mode links the folders; the library gets copies.
+            let synced = if svc.paths().workspace_mode {
+                svc.paths().link_workspace_mods(&ws)
+            } else {
+                svc.paths().sync_workspace_mods(&ws)
+            }
+            .or_kind(ErrorKind::Io)?;
             let ids: Vec<String> = synced.iter().map(|m| m.manifest.id.clone()).collect();
             ctx.progress(0.9, "Updating mod index");
             svc.after_mod_import(&ids)?;
@@ -282,6 +294,12 @@ impl Service {
                 format!("Mod '{id}' is not installed."),
             ));
         }
+        if self.installed_mod(id).is_ok_and(|m| m.is_workspace_linked) {
+            return Err(QmError::new(
+                ErrorKind::Conflict,
+                "This mod is a folder in the workspace mods folder. Remove it there.",
+            ));
+        }
         let was_enabled = self
             .active_profile()
             .is_ok_and(|p| p.enabled_mods.iter().any(|m| m == id));
@@ -303,17 +321,34 @@ impl Service {
         self.refresh(JobKind::WarmMods)
     }
 
-    /// One `WarmMods` pass: sync the workspace into an empty library, then index the library.
+    /// One `WarmMods` pass: seed an empty library from the workspace (once per workspace
+    /// folder), then index the library.
     pub(crate) fn warm_mods_pass(&self, ctx: &JobCtx) -> QmResult<Option<String>> {
         let gen = self.generations().mods;
         let settings = self.paths().load_settings();
         if let Some(ws) = settings.workspace_mods_dir.as_deref() {
-            if library_is_empty(&self.paths().library_dir) {
-                ctx.progress(0.2, "Syncing workspace mods");
-                // A failed sync must not leave the index empty: log it and index what is there.
-                if let Err(e) = self.paths().sync_workspace_mods(ws) {
-                    tracing::warn!("workspace mod sync from {} failed: {e}", ws.display());
+            ctx.progress(0.2, "Checking workspace mods");
+            // Once per workspace folder: after that an emptied library stays empty. A failed
+            // sync must not leave the index empty: log it and index what is there.
+            let done = if self.paths().workspace_mode {
+                // The workspace folder is the mod list: its folders are linked on every pass.
+                let before = self.paths().linked_workspace_versions();
+                let linked = self.paths().link_workspace_mods(ws).map(drop);
+                // A folder that came, went or changed its version: the profile's staged links
+                // point at the old set until it is staged again.
+                if before != self.paths().linked_workspace_versions()
+                    && self.ensure_not_running().is_ok()
+                {
+                    if let Err(e) = self.stage_profile(&settings.active_profile_id) {
+                        tracing::warn!("staging after a workspace change failed: {}", e.message);
+                    }
                 }
+                linked
+            } else {
+                self.paths().seed_library_from_workspace(ws).map(drop)
+            };
+            if let Err(e) = done {
+                tracing::warn!("workspace mod sync from {} failed: {e}", ws.display());
             }
         }
         ctx.progress(0.5, "Scanning mod library");
@@ -393,13 +428,6 @@ impl Service {
         }
         Ok(())
     }
-}
-
-fn library_is_empty(dir: &Path) -> bool {
-    std::fs::read_dir(dir).map_or(true, |rd| {
-        !rd.filter_map(Result::ok)
-            .any(|e| e.path().is_dir() && !e.file_name().to_string_lossy().starts_with('.'))
-    })
 }
 
 pub(crate) fn is_plain_id(id: &str) -> bool {

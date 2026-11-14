@@ -129,10 +129,16 @@
 </div>
 
 <style>
+  /* As many columns of options as fit. */
   .options {
-    display: flex;
-    flex-direction: column;
-    gap: var(--qm-space-3);
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, calc(var(--qm-text-13) * 26)), 1fr));
+    gap: var(--qm-space-3) var(--qm-space-6);
+    align-items: start;
+  }
+
+  .options > :is(p, .actions) {
+    grid-column: 1 / -1;
   }
 
   .field {

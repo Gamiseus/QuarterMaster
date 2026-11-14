@@ -3,6 +3,7 @@ import { emitMock } from "../events";
 import { mods as fixtureMods, profileDocs, settings, soundSwap } from "./fixtures";
 import { handlers as app } from "./handlers/app";
 import { handlers as diagnostics } from "./handlers/diagnostics";
+import { handlers as extras } from "./handlers/extras";
 import { handlers as install } from "./handlers/install";
 import { handlers as mods } from "./handlers/mods";
 import { handlers as profiles } from "./handlers/profiles";
@@ -17,7 +18,7 @@ import { fail, log, restoreProfiles, state, type Handlers } from "./state";
 export type { MockInit, MockLog } from "./state";
 
 const all = new Map<string, Handlers[string]>(
-  [app, settingsHandlers, profiles, savesHandlers, mods, install, updates, diagnostics].flatMap((h) => Object.entries(h)),
+  [app, settingsHandlers, profiles, savesHandlers, mods, install, updates, diagnostics, extras].flatMap((h) => Object.entries(h)),
 );
 
 function handle(cmd: string, args: Record<string, unknown> | undefined): unknown {
@@ -33,6 +34,10 @@ function applyInit(): void {
   const init = window.__qmMockInit ?? {};
   state.init = { ...init, dialog: init.dialog ? [...init.dialog] : undefined };
   if (init.firstRun) settings.first_run_completed = false;
+  if (init.twoVersions) {
+    const gcore = fixtureMods.find((m) => m.id === "gcore");
+    if (gcore) gcore.installed_versions = [gcore.version, "1.0.0"];
+  }
   // Profiles saved by `?mockPersist=1` already carry the starting state.
   const restored = restoreProfiles();
   const active = restored ? undefined : profileDocs[settings.active_profile_id];

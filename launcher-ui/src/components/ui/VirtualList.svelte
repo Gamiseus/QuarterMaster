@@ -16,6 +16,8 @@
     fallbackViewport?: number;
     class?: string;
     onkeydown?: (e: KeyboardEvent) => void;
+    /** How many rows tall an item is (wrapped text); every item is one row without it. */
+    rowSpan?: (item: T, index: number) => number;
   }
 
   let {
@@ -28,6 +30,7 @@
     fallbackViewport = 600,
     class: className = "",
     onkeydown,
+    rowSpan,
   }: Props = $props();
 
   let viewport: HTMLDivElement | undefined = $state();
@@ -39,9 +42,31 @@
   // Row height comes from the `--vl-row-h` the caller sets (a token, so it follows the text size).
   const h = $derived(rowH > 0 ? rowH : fallbackRowHeight);
   const vh = $derived(viewH > 0 ? viewH : fallbackViewport);
-  const first = $derived(Math.max(0, Math.floor(scrollTop / h) - overscan));
-  const last = $derived(Math.min(items.length, Math.ceil((scrollTop + vh) / h) + overscan));
+  /** With `rowSpan`: the row each item starts at, and one more entry for the end. */
+  const starts = $derived.by(() => {
+    if (!rowSpan) return null;
+    const out = new Array<number>(items.length + 1);
+    out[0] = 0;
+    for (let i = 0; i < items.length; i++) out[i + 1] = out[i] + Math.max(1, Math.round(rowSpan(items[i], i)));
+    return out;
+  });
+  const startOf = (i: number) => (starts ? starts[i] : i);
+  /** The item that covers row `r`. */
+  function itemAt(r: number): number {
+    if (!starts) return Math.floor(r);
+    let lo = 0;
+    let hi = items.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (starts[mid + 1] <= r) lo = mid + 1;
+      else hi = mid;
+    }
+    return lo;
+  }
+  const first = $derived(Math.max(0, itemAt(scrollTop / h) - overscan));
+  const last = $derived(Math.min(items.length, itemAt((scrollTop + vh) / h) + 1 + overscan));
   const shown = $derived(items.slice(first, last));
+  const NO_VARS: Record<string, string> = {};
 
   $effect(() => {
     if (!viewport || !probe) return;
@@ -59,7 +84,7 @@
   /** Scrolls so row `index` sits in the middle of the view. */
   export function scrollToIndex(index: number) {
     if (!viewport) return;
-    const target = Math.max(0, index * h - (vh - h) / 2);
+    const target = Math.max(0, startOf(index) * h - (vh - h) / 2);
     viewport.scrollTop = target;
     // jsdom and some layouts clamp or ignore it; keep the window right either way.
     scrollTop = viewport.scrollTop || target;
@@ -78,10 +103,16 @@
   {onkeydown}
 >
   <div class="probe" bind:this={probe} aria-hidden="true"></div>
-  <div class="spacer" use:cssVars={{ "--vl-total": `${items.length * h}px`, "--vl-offset": `${first * h}px` }}>
+  <div class="spacer" use:cssVars={{ "--vl-total": `${startOf(items.length) * h}px`, "--vl-offset": `${startOf(first) * h}px` }}>
     <div class="window">
       {#each shown as item, k (key(item, first + k))}
-        <div class="vl-row" data-index={first + k}>{@render row(item, first + k)}</div>
+        <div
+          class="vl-row"
+          data-index={first + k}
+          use:cssVars={starts ? { "--vl-span": String(starts[first + k + 1] - starts[first + k]) } : NO_VARS}
+        >
+          {@render row(item, first + k)}
+        </div>
       {/each}
     </div>
   </div>
@@ -106,8 +137,10 @@
     height: var(--vl-row-h, var(--qm-row-h));
   }
 
+  /* `--vl-min-w` (set by the caller) makes the rows wider than the view, so it scrolls sideways. */
   .spacer {
     position: relative;
+    min-width: var(--vl-min-w, 0);
     height: var(--vl-total);
   }
 
@@ -119,7 +152,7 @@
   }
 
   .vl-row {
-    height: var(--vl-row-h, var(--qm-row-h));
+    height: calc(var(--vl-row-h, var(--qm-row-h)) * var(--vl-span, 1));
     overflow: hidden;
   }
 </style>

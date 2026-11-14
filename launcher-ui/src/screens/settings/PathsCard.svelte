@@ -12,7 +12,21 @@
   ];
 
   let syncing = $state(false);
+  let dumping = $state(false);
   const workspace = $derived(app.settings?.workspace_mods_dir ?? null);
+  /** The launcher is running on the workspace's mods: the folder cannot change under it. */
+  const workspaceMode = $derived(app.settings?.workspace_mode ?? false);
+
+  async function dump() {
+    dumping = true;
+    try {
+      await app.dumpGame();
+    } catch {
+      // call() or jobs.track already reported it.
+    } finally {
+      dumping = false;
+    }
+  }
   const syncBlocked = $derived(installs.blockReason());
 
   // A game change while the game runs is refused by the backend; call() shows the banner.
@@ -53,23 +67,44 @@
       label="Workspace mods folder"
       kind="dir"
       value={workspace}
-      disabled={!app.startupDone}
+      disabled={!app.startupDone || workspaceMode}
       onchange={(p) => save("workspace_mods_dir", p)}
     >
       {#snippet actions()}
         <Button
           size="sm"
           variant="ghost"
-          disabled={!app.startupDone || workspace === null}
+          disabled={!app.startupDone || workspace === null || workspaceMode}
           onclick={() => app.updateSettings({ clear_workspace_mods_dir: true }).catch(() => {})}
         >
           Clear
         </Button>
         <Button size="sm" disabled={workspace === null || syncBlocked !== null || syncing} onclick={sync}>Sync now</Button>
+        <Button size="sm" variant="ghost" disabled={workspace === null} aria-label="Open the workspace mods folder" onclick={() => app.reveal("workspace").catch(() => {})}>Open</Button>
+        <Button
+          size="sm"
+          variant="ghost"
+          disabled={workspace === null || dumping || !app.startupDone}
+          title="Writes every file of the game (code, images, sounds, fonts) into _game_dump in this folder, to read while you make mods."
+          onclick={dump}
+        >
+          Write the game's files here
+        </Button>
       {/snippet}
     </PathField>
   </div>
-  <p class="qm-muted note">Your own mods folder for mod making. Sync now copies its mods into the library.</p>
+  <p class="qm-muted note">
+    {#if workspace === null}
+      Optional, for mod making: a folder where each subfolder is a mod you are working on. Pick a folder (a new one
+      is made if it is not there yet) to get the Library and Workspace switch beside the profile picker.
+    {:else if workspaceMode}
+      The launcher is using this folder's mods as they are, with their own profiles. Sync now reads the folder again.
+      Switch back to Library beside the profile picker to change or clear the folder.
+    {:else}
+      Your own mods folder for mod making. Sync now copies its mods into the library. To run the folder's mods as
+      they are, apart from your installed mods, switch to Workspace beside the profile picker.
+    {/if}
+  </p>
 </Panel>
 
 <style>

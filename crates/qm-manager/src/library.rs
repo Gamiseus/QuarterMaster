@@ -183,7 +183,9 @@ impl QuarterMasterPaths {
                 if !ver_path.is_dir() || ver_entry.file_name().to_string_lossy().starts_with('.') {
                     continue;
                 }
-                if let Ok(installed) = inspect_mod_directory(&ver_path, false) {
+                // A link is a workspace mod (workspace mode).
+                let linked = crate::profiles::is_reparse_point(&ver_path);
+                if let Ok(installed) = inspect_mod_directory(&ver_path, linked) {
                     by_id
                         .entry(installed.manifest.id.clone())
                         .or_default()
@@ -277,6 +279,135 @@ impl QuarterMasterPaths {
             }
         }
         Ok(synced)
+    }
+
+    /// The `(mod id, version)` of every library entry that is a link to a workspace folder.
+    pub fn linked_workspace_versions(&self) -> std::collections::BTreeSet<(String, String)> {
+        let mut out = std::collections::BTreeSet::new();
+        let Ok(mod_dirs) = fs::read_dir(&self.library_dir) else {
+            return out;
+        };
+        for mod_dir in mod_dirs.filter_map(|e| e.ok()) {
+            let Ok(versions) = fs::read_dir(mod_dir.path()) else {
+                continue;
+            };
+            for ver in versions.filter_map(|e| e.ok()) {
+                if crate::profiles::is_reparse_point(&ver.path()) {
+                    out.insert((
+                        mod_dir.file_name().to_string_lossy().to_string(),
+                        ver.file_name().to_string_lossy().to_string(),
+                    ));
+                }
+            }
+        }
+        out
+    }
+
+    /// Workspace mode: makes the library a set of links to the workspace's mod folders, so the
+    /// game runs the files being edited. Old links are removed first; a mod installed into
+    /// this library as a real copy is left alone and wins over a workspace folder of the
+    /// same id and version. Nothing in the workspace folder is changed.
+    pub fn link_workspace_mods(&self, workspace_mods_dir: &Path) -> Result<Vec<InstalledMod>, String> {
+        let _ = fs::create_dir_all(&self.library_dir);
+        let plain =
+            |s: &str| !s.is_empty() && !s.starts_with('.') && !s.contains(['/', '\\', ':']);
+        // What the folder holds now: (id, version) -> the mod's folder.
+        let mut wanted: Vec<(String, String, PathBuf, InstalledMod)> = Vec::new();
+        if let Ok(entries) = fs::read_dir(workspace_mods_dir) {
+            for path in entries.filter_map(|e| e.ok()).map(|e| e.path()) {
+                let dir_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                if !path.is_dir() || dir_name.starts_with(['.', '_']) || dir_name == "qm" {
+                    continue;
+                }
+                let is_mod = path.join("qm.toml").is_file()
+                    || path.join("mod.json").is_file()
+                    || qm_schema::faction::has_faction_file(&path)
+                    || has_supported_assets_dir(&path);
+                if !is_mod {
+                    continue;
+                }
+                let Ok(inst) = inspect_mod_directory(&path, true) else {
+                    continue;
+                };
+                let id = inst.manifest.id.clone();
+                if !plain(&id) || wanted.iter().any(|w| w.0 == id) {
+                    continue;
+                }
+                let version = if plain(&inst.manifest.version) {
+                    inst.manifest.version.clone()
+                } else {
+                    "0.0.0".to_string()
+                };
+                wanted.push((id, version, path, inst));
+            }
+        }
+        let same_dir = |a: &Path, b: &Path| {
+            dunce::canonicalize(a).is_ok_and(|a| dunce::canonicalize(b).is_ok_and(|b| a == b))
+        };
+        // Links that no longer match go; a link that is still right is left as it is, so
+        // nothing that reads through it (the staged profile, a running check) loses it.
+        if let Ok(mod_dirs) = fs::read_dir(&self.library_dir) {
+            for mod_dir in mod_dirs.filter_map(|e| e.ok()).map(|e| e.path()) {
+                let Ok(versions) = fs::read_dir(&mod_dir) else {
+                    continue;
+                };
+                let id = mod_dir.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                for ver in versions.filter_map(|e| e.ok()).map(|e| e.path()) {
+                    if !crate::profiles::is_reparse_point(&ver) {
+                        continue;
+                    }
+                    let version = ver.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                    let keep = wanted
+                        .iter()
+                        .any(|w| w.0 == id && w.1 == version && same_dir(&ver, &w.2));
+                    if !keep {
+                        crate::profiles::remove_junction_or_dir(&ver)?;
+                    }
+                }
+                // Only an emptied folder goes.
+                let _ = fs::remove_dir(&mod_dir);
+            }
+        }
+        let mut linked = Vec::new();
+        for (id, version, path, mut inst) in wanted {
+            let link = self.library_dir.join(&id).join(&version);
+            if fs::symlink_metadata(&link).is_err() {
+                crate::profiles::create_dir_junction_or_copy(&path, &link)?;
+            } else if !crate::profiles::is_reparse_point(&link) {
+                // A real copy installed into this library wins over the folder.
+                continue;
+            }
+            inst.install_path = link;
+            linked.push(inst);
+        }
+        Ok(linked)
+    }
+
+    /// Fills an empty library from the workspace mods folder, once per folder.
+    ///
+    /// The folder that last seeded the library is noted in `library/.workspace-seeded`. With
+    /// that note in place an empty library stays empty: the user uninstalled everything, and
+    /// the mods must not come back by themselves ("Sync now" still copies them). A library
+    /// that already has mods is noted as seeded without a copy. Returns whether mods were
+    /// copied.
+    pub fn seed_library_from_workspace(&self, workspace_mods_dir: &Path) -> Result<bool, String> {
+        let note = self.library_dir.join(WORKSPACE_SEEDED_NOTE);
+        let folder = workspace_mods_dir.to_string_lossy().to_string();
+        if fs::read_to_string(&note).is_ok_and(|seeded| seeded.trim() == folder) {
+            return Ok(false);
+        }
+        let empty = fs::read_dir(&self.library_dir).map_or(true, |rd| {
+            !rd.filter_map(Result::ok)
+                .any(|e| e.path().is_dir() && !e.file_name().to_string_lossy().starts_with('.'))
+        });
+        let copied = if empty {
+            !self.sync_workspace_mods(workspace_mods_dir)?.is_empty()
+        } else {
+            false
+        };
+        let _ = fs::create_dir_all(&self.library_dir);
+        let _ = fs::write(&note, &folder);
+        Ok(copied)
     }
 
     /// Inspects a `.zip` archive or folder before importing to discover all contained mods
@@ -454,6 +585,7 @@ impl QuarterMasterPaths {
         let mut cas_deduplicated_files = 0usize;
         let cas_root = self.library_dir.join(".cas");
         let _ = fs::create_dir_all(&cas_root);
+        separate_cas_blobs(&cas_root);
 
         for mod_root in mod_roots {
             let default_folder = mod_root
@@ -518,9 +650,10 @@ impl QuarterMasterPaths {
                     if cas_blob.is_file() {
                         cas_deduplicated_files += 1;
                     } else if file_in_mod.is_file() {
+                        // A copy of its own: a hard link would change with the installed
+                        // file, and then there is nothing to repair it from.
                         let _ = fs::create_dir_all(&shard_dir);
-                        let _ = fs::hard_link(&file_in_mod, &cas_blob)
-                            .or_else(|_| fs::copy(&file_in_mod, &cas_blob).map(|_| ()));
+                        let _ = fs::copy(&file_in_mod, &cas_blob);
                     }
                 }
             }
@@ -639,6 +772,9 @@ impl QuarterMasterPaths {
     pub fn verify_library(&self) -> Vec<(String, String, IntegrityVerifyResult)> {
         let mut results = Vec::new();
         let cas_root = self.library_dir.join(".cas");
+        if cas_root.is_dir() {
+            separate_cas_blobs(&cas_root);
+        }
         for m in self.list_installed_mods() {
             let mut verify = m.integrity.verify_directory(&m.install_path);
             if !verify.is_pristine && cas_root.is_dir() {
@@ -646,7 +782,10 @@ impl QuarterMasterPaths {
                     if let Some(sha) = m.integrity.files.get(rel_file) {
                         if sha.len() >= 4 {
                             let cas_blob = cas_root.join(&sha[..2]).join(sha);
-                            if cas_blob.is_file() {
+                            // Only a stored copy that still has its content is used.
+                            let intact = fs::read(&cas_blob)
+                                .is_ok_and(|b| sha256_hex(&b).eq_ignore_ascii_case(sha));
+                            if intact {
                                 let dest = m.install_path.join(rel_file);
                                 if let Some(p) = dest.parent() {
                                     let _ = fs::create_dir_all(p);
@@ -677,8 +816,8 @@ impl QuarterMasterPaths {
         if !dir.is_dir() {
             return Err(format!("Mod '{mod_id}' is not installed"));
         }
-        fs::remove_dir_all(&dir)
-            .map_err(|e| format!("Failed to delete {}: {e}", dir.display()))?;
+        // A version that is a link (a workspace mod) is unlinked; its folder is not touched.
+        crate::profiles::remove_junction_or_dir(&dir)?;
 
         for mut profile in self.list_profiles() {
             let before = serde_json::to_string(&profile).unwrap_or_default();
@@ -693,6 +832,57 @@ impl QuarterMasterPaths {
             }
         }
         Ok(())
+    }
+}
+
+/// In the library folder: the workspace mods folder that seeded it (see
+/// `seed_library_from_workspace`).
+const WORKSPACE_SEEDED_NOTE: &str = ".workspace-seeded";
+
+/// Written into `.cas` once its files are copies of their own.
+const CAS_COPIES_MARKER: &str = ".copies";
+
+/// Earlier versions hard-linked each installed file into `.cas`, so both names were one file
+/// on disk. Once per library, every stored file is written anew, which gives it its own
+/// content. A stored file that no longer has the content its name says (it was edited
+/// through the link) is removed. Best effort: a file that cannot be rewritten is left, and
+/// the next call tries again.
+fn separate_cas_blobs(cas_root: &Path) {
+    let marker = cas_root.join(CAS_COPIES_MARKER);
+    if marker.is_file() {
+        return;
+    }
+    let mut all_done = true;
+    for entry in WalkDir::new(cas_root)
+        .min_depth(2)
+        .max_depth(2)
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().is_file())
+    {
+        let blob = entry.path();
+        let name = entry.file_name().to_string_lossy().to_string();
+        if name.ends_with(".tmp") {
+            let _ = fs::remove_file(blob);
+            continue;
+        }
+        let Ok(bytes) = fs::read(blob) else {
+            all_done = false;
+            continue;
+        };
+        if !sha256_hex(&bytes).eq_ignore_ascii_case(&name) {
+            let _ = fs::remove_file(blob);
+            continue;
+        }
+        let tmp = blob.with_extension("tmp");
+        let rewritten = fs::write(&tmp, &bytes).and_then(|()| fs::rename(&tmp, blob));
+        if rewritten.is_err() {
+            let _ = fs::remove_file(&tmp);
+            all_done = false;
+        }
+    }
+    if all_done {
+        let _ = fs::write(&marker, b"");
     }
 }
 
@@ -742,6 +932,8 @@ pub fn extract_zip_safely(zip_path: &Path, dest_dir: &Path) -> Result<(), String
     }
 
     let mut total_uncompressed: u64 = 0;
+    // What was really written: an entry's header can understate its size.
+    let mut total_written: u64 = 0;
 
     for i in 0..archive.len() {
         let mut entry = archive
@@ -795,8 +987,12 @@ pub fn extract_zip_safely(zip_path: &Path, dest_dir: &Path) -> Result<(), String
         limited_reader
             .read_to_end(&mut buf)
             .map_err(|e| format!("Failed to extract '{}': {e}", raw_name))?;
-        if buf.len() as u64 > MAX_ARCHIVE_TOTAL_BYTES {
-            return Err("Archive entry exceeded size limit during stream read".to_string());
+        total_written = total_written.saturating_add(buf.len() as u64);
+        if total_written > MAX_ARCHIVE_TOTAL_BYTES {
+            return Err(format!(
+                "Archive exceeds maximum uncompressed size limit ({} MB)",
+                MAX_ARCHIVE_TOTAL_BYTES / (1024 * 1024)
+            ));
         }
         fs::write(&out_path, &buf)
             .map_err(|e| format!("Failed to write '{}': {e}", out_path.display()))?;
@@ -1081,6 +1277,53 @@ mod tests {
         assert!(!paths.library_dir.join("fine").exists());
     }
 
+    /// The content store keeps copies of its own, so an installed file edited in place is
+    /// repaired; a store made with hard links by an earlier version is separated first.
+    #[test]
+    fn verify_library_repairs_a_file_edited_in_place() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let paths = QuarterMasterPaths::resolve(Some(temp.path()));
+        let src = temp.path().join("downloads/ExampleMod");
+        fs::create_dir_all(&src).unwrap();
+        fs::write(src.join("mod.json"), r#"{"id": "example_mod", "name": "Example Mod", "version": "1.0.0"}"#).unwrap();
+        fs::write(src.join("qm.toml"), "[manifest]\nversion = \"1.0.0\"\n").unwrap();
+        fs::write(src.join("code.lua"), "return 1\n").unwrap();
+        let imported = paths.import_mod_from_path(&src, None, false).unwrap();
+        let installed = imported.imported_mods[0].install_path.join("code.lua");
+
+        // Written through the same file, as an editor that saves in place does.
+        let edit = |text: &str| {
+            use std::io::Write;
+            let mut f = fs::OpenOptions::new().write(true).truncate(true).open(&installed).unwrap();
+            f.write_all(text.as_bytes()).unwrap();
+        };
+        edit("return 2\n");
+        let results = paths.verify_library();
+        assert!(results.iter().all(|(_, _, r)| r.is_pristine), "{results:?}");
+        assert_eq!(fs::read_to_string(&installed).unwrap(), "return 1\n");
+
+        // A store from an earlier version: the stored file is a hard link to the installed one.
+        let sha = sha256_hex(b"return 1\n");
+        let cas = paths.library_dir.join(".cas");
+        let blob = cas.join(&sha[..2]).join(&sha);
+        fs::remove_file(&blob).unwrap();
+        fs::hard_link(&installed, &blob).unwrap();
+        fs::remove_file(cas.join(CAS_COPIES_MARKER)).unwrap();
+        separate_cas_blobs(&cas);
+        assert!(cas.join(CAS_COPIES_MARKER).is_file());
+        edit("return 3\n");
+        assert_eq!(fs::read_to_string(&blob).unwrap(), "return 1\n", "the stored copy is its own file");
+        let results = paths.verify_library();
+        assert!(results.iter().all(|(_, _, r)| r.is_pristine), "{results:?}");
+
+        // A stored file that was already changed through its link is not used for repair.
+        fs::write(&blob, "return 9\n").unwrap();
+        edit("return 4\n");
+        let results = paths.verify_library();
+        assert!(results.iter().any(|(_, _, r)| !r.is_pristine));
+        assert_eq!(fs::read_to_string(&installed).unwrap(), "return 4\n");
+    }
+
     #[test]
     fn safe_segment_rules() {
         assert!(is_safe_segment("gcore"));
@@ -1091,6 +1334,30 @@ mod tests {
         ] {
             assert!(!is_safe_segment(bad), "{bad:?}");
         }
+    }
+
+    #[test]
+    fn an_emptied_library_is_not_seeded_from_the_same_workspace_again() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let paths = QuarterMasterPaths::resolve(Some(temp.path()));
+        let ws_mods = temp.path().join("ws_mods");
+        fs::create_dir_all(ws_mods.join("SoundPack/assets/sounds")).unwrap();
+        fs::write(ws_mods.join("SoundPack/assets/sounds/shot.wav"), b"RIFF").unwrap();
+
+        assert!(paths.seed_library_from_workspace(&ws_mods).unwrap());
+        assert_eq!(paths.list_installed_mods().len(), 1);
+
+        // The user uninstalls everything: the next start must leave the library empty.
+        paths.uninstall_mod("soundpack").unwrap();
+        assert!(!paths.seed_library_from_workspace(&ws_mods).unwrap());
+        assert!(paths.list_installed_mods().is_empty());
+
+        // Another workspace folder seeds the empty library.
+        let other = temp.path().join("other_ws");
+        fs::create_dir_all(other.join("MusicPack/assets/music")).unwrap();
+        fs::write(other.join("MusicPack/assets/music/theme.mp3"), b"ID3").unwrap();
+        assert!(paths.seed_library_from_workspace(&other).unwrap());
+        assert_eq!(paths.list_installed_mods().len(), 1);
     }
 
     #[test]

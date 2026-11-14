@@ -30,6 +30,8 @@ use zip::ZipArchive;
 struct IntermediatePatch {
     pub path: PathBuf,
     pub content: String,
+    /// The file parsed, once; an error fails the mod when it is loaded.
+    pub parsed: Result<PatchFile>,
     /// Preloaded source files referenced by module/copy patches (relative path -> content)
     pub sources: HashMap<PathBuf, String>,
 }
@@ -1068,7 +1070,7 @@ setmetatable(_G, {
     if pool and #pool > 0 then
       return pool[math.random(1, #pool)]
     end
-    if type(k) == "string" then
+    if type(k) == "string" and next(__qm_pools_by_prefix) ~= nil then
       local direct_pool = __qm_pools_by_prefix[k] or __qm_pools_by_prefix[k .. "_"]
       if direct_pool and #direct_pool > 0 then
         return direct_pool[math.random(1, #direct_pool)]
@@ -1504,6 +1506,8 @@ pub fn build_sprite_rules_patch(
         return (None, warnings);
     }
     let escaped_id = mod_id.replace('\\', "\\\\").replace('"', "\\\"");
+    // In a comment line: an id with a line break would end the comment.
+    let mod_id = &mod_id.replace(['\r', '\n'], " ");
     let payload = format!(
         "-- QuarterMaster sprite sizes ({mod_id}: {count})\nif _G.__qm_sprite_rules then\n  _G.__qm_sprite_rules(\"{escaped_id}\", {table})\nend"
     );
@@ -1602,7 +1606,7 @@ fn auto_asset_texts(mod_id: &str, dir: &str, assets: &[DiscoveredAsset]) -> (Str
     }
     let eqs = "=".repeat(eq_len);
     let payload = format!(
-        "-- QuarterMaster Auto-Asset Patch ({mod_id}: {} files)\nif _G.__qm_auto_asset_manifest then\n  _G.__qm_auto_asset_manifest(\"{escaped_dir}\", [{eqs}[\n{manifest_body}]{eqs}], \"{escaped_id}\")\nend",
+        "-- QuarterMaster Auto-Asset Patch ({escaped_id}: {} files)\nif _G.__qm_auto_asset_manifest then\n  _G.__qm_auto_asset_manifest(\"{escaped_dir}\", [{eqs}[\n{manifest_body}]{eqs}], \"{escaped_id}\")\nend",
         assets.len()
     );
     (
@@ -1828,7 +1832,10 @@ fn discover_zip_assets(zip_file: &Path) -> Result<(PathBuf, Vec<DiscoveredAsset>
                 }
                 let mut buf = Vec::new();
                 if entry.read_to_end(&mut buf).is_ok() {
-                    let _ = fs::write(&out_path, &buf);
+                    // Written only when it differs from the copy of the last launch.
+                    if fs::read(&out_path).ok().as_deref() != Some(buf.as_slice()) {
+                        let _ = fs::write(&out_path, &buf);
+                    }
                     discovered.push(asset);
                 }
             }
@@ -1940,6 +1947,22 @@ pub fn resolve_mod_dir_root(dir: &Path) -> PathBuf {
     dir.to_path_buf()
 }
 
+/// Whether a module or copy `source` stays inside its mod folder: a relative path with no
+/// `..` step.
+fn stays_inside(source: &Path) -> bool {
+    source
+        .components()
+        .all(|c| matches!(c, std::path::Component::Normal(_) | std::path::Component::CurDir))
+}
+
+fn outside_source(source: &Path, toml_path: &Path) -> String {
+    format!(
+        "Error at patch file {}:\nThe source {:?} is outside the mod's folder; a source is a path inside it",
+        toml_path.display(),
+        source
+    )
+}
+
 /// Load patch files from the specified mod directory.
 fn get_dir_patches(mod_dir: &Path) -> Result<(PathBuf, Vec<IntermediatePatch>)> {
     let toml_files = dir_patch_files(mod_dir);
@@ -1953,10 +1976,14 @@ fn get_dir_patches(mod_dir: &Path) -> Result<(PathBuf, Vec<IntermediatePatch>)> 
             // Parse TOML to find referenced sources and preload them
             let mut sources: HashMap<PathBuf, String> = HashMap::new();
             let file_identifier = format!("{:?}", toml_path);
-            if let Ok(patch_file) = parse_patch_file(&content, &file_identifier, mod_dir) {
+            let parsed = parse_patch_file(&content, &file_identifier, mod_dir);
+            if let Ok(patch_file) = &parsed {
                 for patch in &patch_file.patches {
                     match patch {
                         Patch::Module(x) => {
+                            if !stays_inside(&x.source) {
+                                bail!("{}", outside_source(&x.source, &toml_path));
+                            }
                             let full_path = if mod_dir.join(&x.source).is_file() {
                                 mod_dir.join(&x.source)
                             } else if let Some(parent) = toml_path.parent() {
@@ -1971,6 +1998,9 @@ fn get_dir_patches(mod_dir: &Path) -> Result<(PathBuf, Vec<IntermediatePatch>)> 
                         Patch::Copy(x) => {
                             let Some(ref copy_sources) = x.sources else { continue };
                             for source in copy_sources {
+                                if !stays_inside(source) {
+                                    bail!("{}", outside_source(source, &toml_path));
+                                }
                                 let full_path = if mod_dir.join(source).is_file() {
                                     mod_dir.join(source)
                                 } else if let Some(parent) = toml_path.parent() {
@@ -1991,6 +2021,7 @@ fn get_dir_patches(mod_dir: &Path) -> Result<(PathBuf, Vec<IntermediatePatch>)> 
             Ok(IntermediatePatch {
                 path: toml_path,
                 content,
+                parsed,
                 sources,
             })
         })
@@ -2061,7 +2092,7 @@ fn zip_patches(
     });
 
     // First pass: read all TOML files and parse them to find referenced sources
-    let mut toml_contents: Vec<(String, String)> = Vec::new();
+    let mut toml_contents: Vec<(String, String, Result<PatchFile>)> = Vec::new();
     let mut source_paths: HashSet<String> = HashSet::new();
 
     for toml_path in &toml_paths {
@@ -2076,7 +2107,8 @@ fn zip_patches(
 
         // Parse TOML to find referenced module/copy sources
         let file_identifier = format!("{} from zip {:?}", toml_path, zip_file);
-        if let Ok(patch_file) = parse_patch_file(&content, &file_identifier, zip_file) {
+        let parsed = parse_patch_file(&content, &file_identifier, zip_file);
+        if let Ok(patch_file) = &parsed {
             for patch in &patch_file.patches {
                 match patch {
                     Patch::Module(x) => {
@@ -2096,7 +2128,7 @@ fn zip_patches(
             }
         }
 
-        toml_contents.push((toml_path.clone(), content));
+        toml_contents.push((toml_path.clone(), content, parsed));
     }
 
     // Second pass: read all referenced source files from zip
@@ -2114,7 +2146,7 @@ fn zip_patches(
     // Build IntermediatePatches with preloaded sources
     let intermediate_patches = toml_contents
         .into_iter()
-        .map(|(toml_path, content)| {
+        .map(|(toml_path, content, parsed)| {
             // Create intermediate path: zip_file/relative_path_from_mod_root
             // (every toml and source path starts with mod_root; it was built that way)
             let relative_path = toml_path.get(mod_root.len()..).unwrap_or_default();
@@ -2130,6 +2162,7 @@ fn zip_patches(
             IntermediatePatch {
                 path: intermediate_path,
                 content,
+                parsed,
                 sources,
             }
         })
@@ -2207,6 +2240,7 @@ struct LoadedMod {
     faction: Option<crate::patch::faction::LoadedFaction>,
     config: Option<crate::patch::menu::LoadedModConfig>,
     overrides: Vec<Lenient<Override>>,
+    asset_choices: Vec<Lenient<crate::patch::compat::AssetChoiceEntry>>,
 }
 
 /// What requirer skipping reads of a loaded mod.
@@ -2348,6 +2382,7 @@ fn read_mods_with(
         let text = fs::read_to_string(blacklist_file).context("Could not read blacklist")?;
         blacklist.extend(
             text.lines()
+                .map(str::trim)
                 .filter(|line| !line.is_empty() && !line.starts_with('#'))
                 .map(|line| line.to_string()),
         );
@@ -2573,6 +2608,7 @@ fn read_mods_with(
                 config,
                 warnings: mod_warnings,
                 overrides,
+                asset_choices,
             }) => {
                 warnings.extend(mod_warnings);
                 let mut meta = ModMeta {
@@ -2589,6 +2625,7 @@ fn read_mods_with(
                     faction,
                     config,
                     overrides,
+                    asset_choices,
                 })
             }
             Err(e) => {
@@ -2629,6 +2666,8 @@ fn read_mods_with(
         raw.factions.extend(m.faction);
         raw.configs.extend(m.config);
         raw.overrides.extend(m.overrides.into_iter().map(|o| (ix, o)));
+        raw.asset_choices
+            .extend(m.asset_choices.into_iter().map(|c| (ix, c)));
     }
     Ok(raw)
 }
@@ -2654,8 +2693,10 @@ pub(crate) fn extra_mod(
         return Err(format!("a mod with the id '{mod_id}' is already loaded"));
     }
     let base_path = raw.mod_dir.join(&mod_id);
+    let toml_path = base_path.join("qm.toml");
     let ip = IntermediatePatch {
-        path: base_path.join("qm.toml"),
+        parsed: parse_patch_file(qm_toml, &format!("{toml_path:?}"), &base_path),
+        path: toml_path,
         content: qm_toml.to_string(),
         sources: HashMap::new(),
     };
@@ -2710,6 +2751,12 @@ pub(crate) fn extra_mod(
     let at = out.overrides.iter().take_while(|(i, _)| *i < ix).count();
     let new_overrides = load.overrides.into_iter().map(|o| (ix, o));
     out.overrides.splice(at..at, new_overrides);
+    for (i, _) in &mut out.asset_choices {
+        *i = shift(*i);
+    }
+    let at = out.asset_choices.iter().take_while(|(i, _)| *i < ix).count();
+    let new_choices = load.asset_choices.into_iter().map(|c| (ix, c));
+    out.asset_choices.splice(at..at, new_choices);
     out.warnings.extend(load.warnings);
     Ok(out)
 }
@@ -2723,6 +2770,8 @@ struct ModLoad {
     warnings: Vec<String>,
     /// Its `[[overrides]]` entries, in file order (§3.10).
     overrides: Vec<Lenient<Override>>,
+    /// Its `[[asset_choices]]` entries, in file order.
+    asset_choices: Vec<Lenient<crate::patch::compat::AssetChoiceEntry>>,
 }
 
 /// Loads one enabled mod: its auto-asset patch, its faction, every patch in its toml files,
@@ -2739,14 +2788,13 @@ fn load_mod(
     let mut patches: Vec<plan::RawPatch> = Vec::new();
     let mut warnings: Vec<String> = Vec::new();
     let mut overrides: Vec<Lenient<Override>> = Vec::new();
+    let mut asset_choices = Vec::new();
     let mut faction = None;
     // Determine mod-level base priority for synthesized auto-asset patches
-    let first_toml_prio = ips.first().and_then(|ip| {
-        let fid = format!("{:?}", ip.path);
-        parse_patch_file(&ip.content, &fid, ctx.base_path)
-            .ok()
-            .map(|pf| pf.manifest.priority)
-    });
+    let first_toml_prio = ips
+        .first()
+        .and_then(|ip| ip.parsed.as_ref().ok())
+        .map(|pf| pf.manifest.priority);
     let mut mod_base_priority = ctx
         .manifest_meta
         .map(|m| m.load_priority)
@@ -2807,10 +2855,8 @@ fn load_mod(
     let mut sprite_files = 0usize;
 
     for ip in ips {
-        let file_identifier = format!("{:?}", ip.path);
         let comment_names = extract_patch_comments(&ip.content);
-        let mut patch_file: PatchFile =
-            parse_patch_file(&ip.content, &file_identifier, ctx.base_path)?;
+        let mut patch_file: PatchFile = ip.parsed?;
 
         // [sprites] becomes one more patch of this file.
         if !patch_file.sprites.is_empty() {
@@ -2900,6 +2946,7 @@ fn load_mod(
 
         let vars = patch_file.vars;
         overrides.extend(patch_file.overrides);
+        asset_choices.extend(patch_file.asset_choices);
 
         // mod_relative_path: path relative to top-level mod_dir
         let mod_relative_path = ip.path.strip_prefix(ctx.mod_dir).with_context(|| {
@@ -2977,6 +3024,7 @@ fn load_mod(
         config,
         warnings,
         overrides,
+        asset_choices,
     })
 }
 
@@ -3234,8 +3282,53 @@ fn parse_patch_file(content: &str, file_identifier: &str, mod_dir: &Path) -> Res
         warn!("Unknown key `{key}` found in patch file {file_identifier}, ignoring it");
     };
 
-    serde_ignored::deserialize(toml::Deserializer::new(&content), ignored_key_callback)
-        .with_context(|| format!("Failed to parse patch file {file_identifier}"))
+    let parsed: std::result::Result<PatchFile, toml::de::Error> =
+        serde_ignored::deserialize(toml::Deserializer::new(&content), ignored_key_callback);
+    parsed.map_err(|e| {
+        // The parser points at the second key only, which reads like a clash of patch ids.
+        let hint = if e.message().contains("duplicate key") {
+            concat!(
+                "\n",
+                "The same key is written twice in one patch. This is not about two patches sharing an id: ",
+                "most often the lines that start the next patch (`[[patches]]` and `[patches.<type>]`) ",
+                "are missing above this line, so its keys landed in the patch before it."
+            )
+        } else {
+            ""
+        };
+        anyhow::anyhow!("{}{hint}", e.to_string().trim_end())
+            .context(format!("Failed to parse patch file {file_identifier}"))
+    })
+}
+
+#[cfg(test)]
+mod duplicate_key_tests {
+    use super::*;
+
+    /// Two patches with the header of the second left out: the error says what happened.
+    #[test]
+    fn a_key_written_twice_explains_the_missing_patch_header() {
+        let toml = "[manifest]
+version = \"1.0.0\"
+
+[[patches]]
+[patches.pattern]
+id = \"a:one\"
+target = \"main.lua\"
+pattern = \"x\"
+position = \"after\"
+payload = \"y\"
+id = \"a:two\"
+";
+        let err = parse_patch_file(toml, "qm.toml", Path::new(".")).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("duplicate key"), "{msg}");
+        assert!(msg.contains("not about two patches sharing an id"), "{msg}");
+        assert!(msg.contains("[[patches]]"), "{msg}");
+        // Another parse error gets no such note.
+        let err = parse_patch_file("[manifest", "qm.toml", Path::new(".")).unwrap_err();
+        assert!(!format!("{err:#}").contains("written twice"));
+    }
 }
 
 
@@ -3324,6 +3417,24 @@ sources = ["inject.lua"]
 
         assert_eq!(patches.len(), 1);
         assert_eq!(patches[0].sources.get(Path::new("inject.lua")).unwrap(), "-- injected");
+    }
+
+    /// A source names a file inside the mod's folder: a path that leaves it, or an absolute
+    /// one, fails the mod instead of reading whatever is there.
+    #[test]
+    fn a_source_outside_the_mod_folder_fails_the_mod() {
+        let temp = TempDir::new().unwrap();
+        let mod_dir = temp.path().join("mod");
+        fs::create_dir_all(&mod_dir).unwrap();
+        fs::write(temp.path().join("inject.lua"), "-- outside").unwrap();
+        let abs = temp.path().join("inject.lua").to_string_lossy().replace('\\', "/");
+        for source in ["../inject.lua", "sub/../../inject.lua", abs.as_str()] {
+            let toml = PATCH_TOML.replace("inject.lua", source);
+            fs::write(mod_dir.join("qm.toml"), toml).unwrap();
+            let err = get_dir_patches(&mod_dir).unwrap_err().to_string();
+            assert!(err.contains("outside the mod's folder"), "{source}: {err}");
+        }
+        assert!(stays_inside(Path::new("lua/./inject.lua")));
     }
 
     #[test]

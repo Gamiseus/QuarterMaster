@@ -6,7 +6,7 @@
   import { Badge, Button, Callout, Checkbox, Dialog, Skeleton, Tooltip } from "../../../components/ui";
   import { call } from "../../../lib/api";
   import { commands, type InferredEdge, type OrderRule, type PatchDetail, type PreviewResult } from "../../../lib/bindings";
-  import { assignModColours } from "../../../lib/patches/colors";
+  import { modColours } from "../../../lib/stores/modcolours.svelte";
   import { edgeLanes, laneSegments } from "../../../lib/patches/groups";
   import { authorEdges, crossedEdges, moveToRule, type AuthorEdge, type OrderItem } from "../../../lib/patches/order";
   import ImpactNotes from "./ImpactNotes.svelte";
@@ -44,7 +44,7 @@
   const list = $derived(rows ?? []);
   const items = $derived(list.map((r) => r.item));
   const edges = $derived(authorEdges(items));
-  const colours = $derived(assignModColours(list.map((r) => r.item.mod)));
+  const colours = $derived(modColours(list.map((r) => r.item.mod)));
   const nameOf = (id: string) => list.find((r) => r.id === id)?.item.name ?? id;
   /** Inferred edges by row; while a row is dragged they are hidden, as the rows move. */
   const lanes = $derived(dragItems ? [] : edgeLanes(list.map((r) => r.id), inferred, nameOf));

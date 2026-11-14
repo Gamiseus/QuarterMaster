@@ -1,6 +1,6 @@
 [package]
 name = "qm-cli"
-version = "1.8.1"
+version = "1.8.2"
 edition = "2021"
 description = "Headless CLI and URL protocol handler for QuarterMaster Mod Launcher"
 authors = ["QuarterMaster Team"]

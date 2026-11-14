@@ -48,6 +48,13 @@ export function groupWinner(g: AssetGroup): string | null {
   return winners.size === 1 ? [...winners][0] : null;
 }
 
+/** The compatibility mod whose choices decide the group's files, when it is one mod and the profile chose nothing. */
+export function groupChosenBy(g: AssetGroup): string | null {
+  if (g.choice) return null;
+  const by = new Set(g.slots.flatMap((s) => (s.chosen_by ? [s.chosen_by] : [])));
+  return by.size === 1 ? [...by][0] : null;
+}
+
 /** "garand1: SoundSwap, then VoicePack" - a slot's sources in load order. */
 export function slotSources(s: AssetSlot, modName: (id: string) => string): string {
   return s.claims.map((c) => sourceName(c.source, modName)).join(", then ");

@@ -75,8 +75,11 @@ fn main() -> ExitCode {
             let paths = QuarterMasterPaths::resolve(None);
             match paths.import_qmpack_file(Path::new(pack_path)) {
                 Ok(preview) => {
-                    let id = preview.manifest.name.to_lowercase().replace(' ', "_");
-                    let _ = paths.apply_modpack_as_profile(&preview.manifest, &id);
+                    let id = paths.free_profile_id(&preview.manifest.name);
+                    if let Err(e) = paths.apply_modpack_as_profile(&preview.manifest, &id) {
+                        eprintln!("Failed to import .qmpack: {e}");
+                        return ExitCode::FAILURE;
+                    }
                     println!("Imported .qmpack '{}' as profile '{}'", pack_path, id);
                     return ExitCode::SUCCESS;
                 }
@@ -91,11 +94,9 @@ fn main() -> ExitCode {
     let paths = QuarterMasterPaths::resolve(None);
     let settings = paths.load_settings();
 
-    // Auto-seed library from workspace MnB-Mods if library is empty
-    if paths.list_installed_mods().is_empty() {
-        if let Some(ref ws_mods) = settings.workspace_mods_dir {
-            let _ = paths.sync_workspace_mods(ws_mods);
-        }
+    // Seed an empty library from the workspace mods folder, once per folder.
+    if let Some(ref ws_mods) = settings.workspace_mods_dir {
+        let _ = paths.seed_library_from_workspace(ws_mods);
     }
 
     let cmd = args[0].as_str();
@@ -139,7 +140,18 @@ fn handle_url_scheme(url: &str) -> ExitCode {
     if let Some(code_rest) = url.strip_prefix("qm://import-profile?code=") {
         match decode_profile_code(code_rest) {
             Ok(pack) => {
-                let id = pack.name.to_lowercase().replace(' ', "_");
+                // A link on a web page can open this handler: nothing is made until the
+                // person at the keyboard says so.
+                println!("{}", profile_link_summary(&pack));
+                print!("Add this profile? [y/N] ");
+                let _ = std::io::Write::flush(&mut std::io::stdout());
+                let mut answer = String::new();
+                let read = std::io::stdin().read_line(&mut answer);
+                if read.is_err() || !is_yes(&answer) {
+                    println!("Nothing was added.");
+                    return ExitCode::SUCCESS;
+                }
+                let id = paths.free_profile_id(&pack.name);
                 match paths.apply_modpack_as_profile(&pack, &id) {
                     Ok(p) => {
                         println!("Imported profile '{}' (id: {})", p.name, p.id);
@@ -158,24 +170,51 @@ fn handle_url_scheme(url: &str) -> ExitCode {
         }
     }
     if let Some(install_url) = url.strip_prefix("qm://install?url=") {
-        let p = Path::new(install_url);
-        if p.exists() {
-            match paths.import_mod_from_path(p, Some(install_url.to_string()), false) {
-                Ok(sum) => {
-                    println!("Installed {} mod(s) from URL.", sum.imported_mods.len());
-                    return ExitCode::SUCCESS;
-                }
-                Err(e) => {
-                    eprintln!("Failed to install from URL: {e}");
-                    return ExitCode::FAILURE;
-                }
-            }
+        // A link on a web page can open this handler, so the address is never used as a
+        // file path: a local or network path here would install whatever it names (and
+        // looking at a network path alone hands out the Windows login).
+        if !install_url.starts_with("https://") {
+            eprintln!("Only https:// addresses can be installed from a link. Use `qm import <path>` for a file on this computer.");
+            return ExitCode::FAILURE;
         }
         println!("Queued remote install URL for QuarterMaster: {install_url}");
         return ExitCode::SUCCESS;
     }
     println!("URL recorded for QuarterMaster Launcher.");
     ExitCode::SUCCESS
+}
+
+/// Only a clear yes counts; anything else, also no input at all, is a no.
+fn is_yes(answer: &str) -> bool {
+    matches!(answer.trim().to_ascii_lowercase().as_str(), "y" | "yes")
+}
+
+/// `s` on one line with control characters dropped, at most `max` characters: text from a
+/// link is shown in the console as it is otherwise.
+fn shown(s: &str, max: usize) -> String {
+    let clean: String = s.chars().filter(|c| !c.is_control()).collect();
+    let mut out: String = clean.chars().take(max).collect();
+    if clean.chars().count() > max {
+        out.push_str("...");
+    }
+    out
+}
+
+/// What a profile link would add, for the question before it is added.
+fn profile_link_summary(pack: &qm_manager::devtools::ModpackManifest) -> String {
+    let mut out = format!(
+        "A link wants to add the profile \"{}\" with {} mod(s):",
+        shown(&pack.name, 64),
+        pack.mods.len()
+    );
+    for m in pack.mods.iter().take(20) {
+        out.push_str(&format!("\n  - {} {}", shown(&m.name, 48), shown(&m.version, 16)));
+    }
+    if pack.mods.len() > 20 {
+        out.push_str(&format!("\n  ... and {} more", pack.mods.len() - 20));
+    }
+    out.push_str("\nIt only makes the profile. No mod is downloaded or installed.");
+    out
 }
 
 fn cmd_ui(args: &[String]) -> Result<(), String> {
@@ -1138,6 +1177,20 @@ fn cmd_watch(paths: &QuarterMasterPaths, args: &[String]) -> Result<(), String> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A profile link is acted on only after a clear yes, and what it shows of the link's
+    /// own text has no control characters.
+    #[test]
+    fn a_profile_link_needs_a_clear_yes() {
+        for yes in ["y", "Y", " yes \r\n", "YES"] {
+            assert!(is_yes(yes), "{yes:?}");
+        }
+        for no in ["", "\n", "n", "no", "yep", "y es", "1"] {
+            assert!(!is_yes(no), "{no:?}");
+        }
+        assert_eq!(shown("Pack\u{1b}[2J\r\nName", 64), "Pack[2JName");
+        assert_eq!(shown("abcdef", 3), "abc...");
+    }
 
     fn conflict(severity: &str, suggestions: Vec<ConflictResolutionSuggestion>) -> DetectedConflict {
         DetectedConflict {

@@ -16,7 +16,7 @@
 //! wins over it, and it wins over the author (D13). Among compat mods the later one in loader
 //! order wins each change. Every entry is reported, applied or not.
 
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 
@@ -136,19 +136,220 @@ pub fn overrides_toml(entries: &[(String, Override)]) -> Result<String, String> 
     }
     let mut out = String::new();
     for (comment, o) in entries {
-        for line in comment.lines().map(str::trim) {
-            out.push('#');
-            if !line.is_empty() {
-                out.push(' ');
-                out.push_str(line);
-            }
-            out.push('\n');
-        }
+        push_comment(&mut out, comment);
         let text = toml::to_string(&One { overrides: [o] }).map_err(|e| e.to_string())?;
         out.push_str(&text);
         out.push('\n');
     }
     Ok(out)
+}
+
+/// One `[[asset_choices]]` entry: which source's file is used for one sound, image or font
+/// two sources replace (Phase E D78). It applies only when the compat mod `requires` the
+/// winner's mod and every mod it leaves files out of (D12). A choice the profile made for
+/// the same file, or for its group, wins over it (D13). Unknown keys make the entry invalid.
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct AssetChoiceEntry {
+    /// The file: lowercase `folder/stem`, as the Assets view names it (`sounds/garand1`).
+    pub key: String,
+    /// The group the file belongs to (`sounds/garand#`, or its folder).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group: Option<String>,
+    /// A mod id, `faction:<id>`, or `vanilla` for the game's own file.
+    pub winner: String,
+    /// Source -> what it does not load: a mod's `assets/...` files, or for `faction:<id>`
+    /// the game names it leaves alone.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub leaves_out: BTreeMap<String, Vec<String>>,
+}
+
+/// The winner that means the game's own file.
+pub const ASSET_VANILLA: &str = "vanilla";
+const ASSET_CHOICE: &str = "asset_choice";
+const FACTION_PREFIX: &str = "faction:";
+
+/// `entries` as `[[asset_choices]]` qm.toml text, each after its comment lines.
+pub fn asset_choices_toml(entries: &[(String, AssetChoiceEntry)]) -> Result<String, String> {
+    #[derive(Serialize)]
+    struct One<'a> {
+        asset_choices: [&'a AssetChoiceEntry; 1],
+    }
+    let mut out = String::new();
+    for (comment, e) in entries {
+        push_comment(&mut out, comment);
+        let text = toml::to_string(&One { asset_choices: [e] }).map_err(|e| e.to_string())?;
+        out.push_str(&text);
+        out.push('\n');
+    }
+    Ok(out)
+}
+
+fn push_comment(out: &mut String, comment: &str) {
+    for line in comment.lines().map(str::trim) {
+        out.push('#');
+        if !line.is_empty() {
+            out.push(' ');
+            out.push_str(line);
+        }
+        out.push('\n');
+    }
+}
+
+/// A compat mod's asset choice that applies.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CompatAssetChoice {
+    /// The compat mod's id.
+    pub from: String,
+    pub key: String,
+    pub winner: String,
+}
+
+/// What the loaded mods' `[[asset_choices]]` entries do.
+#[derive(Clone, Debug, Default)]
+pub struct AssetChoiceLayer {
+    /// The entries that apply, one per file.
+    pub applied: Vec<CompatAssetChoice>,
+    /// Source -> what it leaves out, from the entries that apply. Sorted, without repeats.
+    pub exclusions: BTreeMap<String, Vec<String>>,
+    /// One report per entry.
+    pub reports: Vec<OverrideReport>,
+}
+
+/// Builds the asset choice layer. `chosen` holds the group and slot keys the profile made a
+/// choice for. Among compat mods the later one in loader order wins a file. Pure.
+pub fn asset_choice_layer(raw: &RawLoad, chosen: &BTreeSet<String>) -> AssetChoiceLayer {
+    let mut out = AssetChoiceLayer::default();
+    if raw.asset_choices.is_empty() {
+        return out;
+    }
+    let graph = ModGraph::build(&raw.mods);
+    // The mod a source belongs to; None for a faction no loaded mod has.
+    let mod_of = |source: &str| -> Option<String> {
+        match source.strip_prefix(FACTION_PREFIX) {
+            Some(id) => raw
+                .factions
+                .iter()
+                .find(|lf| lf.faction.id == id)
+                .map(|lf| lf.mod_id.to_lowercase()),
+            None => Some(graph.resolve(source)),
+        }
+    };
+    let loaded = |m: &str| raw.mods.iter().any(|x| x.id == m);
+    // Per file key, the index in `live` of the entry that applies so far.
+    let mut by_key: HashMap<String, usize> = HashMap::new();
+    // (report index, entry), for the entries that passed every check.
+    let mut live: Vec<(usize, String, &AssetChoiceEntry)> = Vec::new();
+    for (mod_ix, entry) in &raw.asset_choices {
+        let mod_ix = *mod_ix as usize;
+        let from = raw.mods.get(mod_ix).map(|m| m.id.clone()).unwrap_or_default();
+        let c = mod_label(&raw.mods, &from);
+        let e = match entry {
+            Lenient::Ok(e) => e,
+            Lenient::Invalid { raw: v, error } => {
+                let key = v.get("key").and_then(|k| k.as_str()).unwrap_or_default();
+                out.reports.push(report(
+                    &from,
+                    key,
+                    ASSET_CHOICE,
+                    "invalid",
+                    format!("{c}: an asset choice could not be read and is skipped: {error}"),
+                ));
+                continue;
+            }
+        };
+        let key = e.key.trim().to_lowercase();
+        let winner = e.winner.trim();
+        let fail = |status: &str, detail: String| report(&from, &key, ASSET_CHOICE, status, detail);
+        if key.is_empty() || winner.is_empty() {
+            let detail = format!("{c}: an asset choice needs a `key` and a `winner`; it is skipped");
+            out.reports.push(fail("invalid", detail));
+            continue;
+        }
+
+        // The gate (D12): the winner's mod and every mod it leaves files out of.
+        let mut allowed: BTreeSet<String> = graph.requires_resolved(&from);
+        if let Some(m) = raw.mods.get(mod_ix) {
+            allowed.extend(m.requires.iter().map(|r| graph.resolve(r)));
+        }
+        allowed.insert(from.clone());
+        let sources = std::iter::once(winner)
+            .filter(|w| *w != ASSET_VANILLA)
+            .chain(e.leaves_out.keys().map(String::as_str));
+        let mut missing: Option<String> = None;
+        let mut refused: Option<String> = None;
+        for source in sources {
+            match mod_of(source) {
+                None => missing = missing.or_else(|| Some(source.to_string())),
+                Some(m) if !allowed.contains(&m) => refused = refused.or(Some(m)),
+                // Only the winner must be loaded: a source that is off loads nothing anyway.
+                Some(m) if source == winner && !loaded(&m) => missing = missing.or(Some(m)),
+                Some(_) => {}
+            }
+        }
+        if let Some(m) = refused {
+            let ml = mod_label(&raw.mods, &m);
+            let detail = format!(
+                "{c} lists an asset choice for {key} that refers to {ml} but does not require {ml}; QuarterMaster ignores it"
+            );
+            out.reports.push(fail("rejected_not_required", detail));
+            continue;
+        }
+        if let Some(m) = missing {
+            let ml = mod_label(&raw.mods, &m);
+            let detail =
+                format!("Waiting for {ml}: {c}'s asset choice for {key} does nothing while {ml} is off");
+            out.reports.push(fail("waiting", detail));
+            continue;
+        }
+        let by_profile = chosen.contains(&key)
+            || e.group
+                .as_deref()
+                .is_some_and(|g| chosen.contains(&g.trim().to_lowercase()));
+        if by_profile {
+            let detail = format!("Your profile's choice for {key} wins over {c}'s");
+            out.reports.push(fail("superseded_by_profile", detail));
+            continue;
+        }
+        let who = if winner == ASSET_VANILLA {
+            "the game's own file".to_string()
+        } else {
+            mod_of(winner).map_or_else(|| winner.to_string(), |m| mod_label(&raw.mods, &m))
+        };
+        if let Some(&old) = by_key.get(&key) {
+            if let Some((n, _, _)) = live.get(old) {
+                if let Some(r) = out.reports.get_mut(*n) {
+                    r.status = "superseded".to_string();
+                    r.detail = format!("{c} also has an asset choice for {key}, and it loads later");
+                }
+            }
+        }
+        by_key.insert(key.clone(), live.len());
+        live.push((out.reports.len(), from.clone(), e));
+        out.reports
+            .push(fail("applied", format!("{c}: {who} is used for {key}")));
+    }
+
+    let mut sets: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    for (i, (_, from, e)) in live.iter().enumerate() {
+        let key = e.key.trim().to_lowercase();
+        if by_key.get(&key) != Some(&i) {
+            continue;
+        }
+        for (source, files) in &e.leaves_out {
+            sets.entry(source.clone()).or_default().extend(files.iter().cloned());
+        }
+        out.applied.push(CompatAssetChoice {
+            from: from.clone(),
+            key,
+            winner: e.winner.trim().to_string(),
+        });
+    }
+    out.exclusions = sets
+        .into_iter()
+        .map(|(k, v)| (k, v.into_iter().collect()))
+        .collect();
+    out
 }
 
 /// The raw patches the profile layer changes, so its fixes win (D13).

@@ -1,6 +1,6 @@
 [package]
 name = "qm-schema"
-version = "1.8.1"
+version = "1.8.2"
 edition = "2021"
 description = "Metadata schemas, version comparator, save parser, config parser, and security linter for QuarterMaster"
 authors = ["QuarterMaster Team"]

@@ -46,7 +46,7 @@
   });
 </script>
 
-{#snippet none()}<p class="qm-muted none">No differences.</p>{/snippet}
+{#snippet none()}<p class="qm-muted none">None.</p>{/snippet}
 
 <Dialog bind:open title="Compare profiles" size="lg">
   <div class="pick">
@@ -60,39 +60,51 @@
   {:else if !diff}
     <div aria-busy="true" aria-label="Comparing profiles"><Skeleton lines={5} /></div>
   {:else}
+    {@const d = diff}
     <div class="sections">
-      <Section title="Mods only in {nameOf(a)}">
-        {#if diff.only_in_a.length === 0}{@render none()}{:else}
-          <ul class="list" aria-label="Mods only in {nameOf(a)}">
-            {#each diff.only_in_a as id (id)}<li>{modName(id)}</li>{/each}
-          </ul>
-        {/if}
-      </Section>
-      <Section title="Mods only in {nameOf(b)}">
-        {#if diff.only_in_b.length === 0}{@render none()}{:else}
-          <ul class="list" aria-label="Mods only in {nameOf(b)}">
-            {#each diff.only_in_b as id (id)}<li>{modName(id)}</li>{/each}
-          </ul>
-        {/if}
-      </Section>
-      <Section title="Priority differences">
-        {#if diff.priority_diffs.length === 0}{@render none()}{:else}
+      <!-- Each profile's own mods sit under its picker; a kind of difference with nothing in it
+           takes one line, not a section. -->
+      <div class="pair">
+        <Section title="Mods only in {nameOf(a)}">
+          {#if d.only_in_a.length === 0}{@render none()}{:else}
+            <ul class="list" aria-label="Mods only in {nameOf(a)}">
+              {#each d.only_in_a as id (id)}<li>{modName(id)}</li>{/each}
+            </ul>
+          {/if}
+        </Section>
+        <Section title="Mods only in {nameOf(b)}">
+          {#if d.only_in_b.length === 0}{@render none()}{:else}
+            <ul class="list" aria-label="Mods only in {nameOf(b)}">
+              {#each d.only_in_b as id (id)}<li>{modName(id)}</li>{/each}
+            </ul>
+          {/if}
+        </Section>
+      </div>
+      {#if d.priority_diffs.length > 0}
+        <Section title="Priority differences">
           <ul class="list" aria-label="Priority differences">
-            {#each diff.priority_diffs as [id, pa, pb] (id)}
+            {#each d.priority_diffs as [id, pa, pb] (id)}
               <li><span>{modName(id)}</span><span class="mono">{pa} / {pb}</span></li>
             {/each}
           </ul>
-        {/if}
-      </Section>
-      <Section title="Setting differences">
-        {#if diff.setting_diffs.length === 0}{@render none()}{:else}
+        </Section>
+      {/if}
+      {#if d.setting_diffs.length > 0}
+        <Section title="Setting differences">
           <ul class="list" aria-label="Setting differences">
-            {#each diff.setting_diffs as [id, option, va, vb] (`${id}:${option}`)}
+            {#each d.setting_diffs as [id, option, va, vb] (`${id}:${option}`)}
               <li><span>{modName(id)}: {option}</span><span class="mono">{va} / {vb}</span></li>
             {/each}
           </ul>
-        {/if}
-      </Section>
+        </Section>
+      {/if}
+      {#if d.priority_diffs.length === 0 && d.setting_diffs.length === 0}
+        <p class="qm-muted none">No priority or setting differences.</p>
+      {:else if d.priority_diffs.length === 0}
+        <p class="qm-muted none">No priority differences.</p>
+      {:else if d.setting_diffs.length === 0}
+        <p class="qm-muted none">No setting differences.</p>
+      {/if}
     </div>
   {/if}
 </Dialog>
@@ -109,6 +121,20 @@
     display: flex;
     flex-direction: column;
     gap: var(--qm-gap-group);
+  }
+
+  /* Side by side, the second section needs no line above it. */
+  .pair > :global(.qm-section + .qm-section) {
+    padding-top: 0;
+    border-top: 0;
+  }
+
+  /* The same two columns as the pickers above. */
+  .pair {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: start;
+    gap: var(--qm-space-3);
   }
 
   .list {

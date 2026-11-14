@@ -240,6 +240,42 @@
   },
   "description": "In-memory Lua patch definitions for QuarterMaster.",
   "properties": {
+    "asset_choices": {
+      "description": "Which source's file is used where two mods this mod requires replace the same sound, image or font. One entry per file.",
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "group": {
+            "description": "The group the file is listed under in the launcher's Assets view: its numbered set ('sounds/garand#') or its folder.",
+            "type": "string"
+          },
+          "key": {
+            "description": "The file: its folder and name in lowercase, without the extension (e.g. 'sounds/garand1').",
+            "type": "string"
+          },
+          "leaves_out": {
+            "additionalProperties": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "description": "For each other source (a mod id or 'faction:<faction id>'), what it does not load: a mod's 'assets/...' files, or the game names a faction leaves alone.",
+            "type": "object"
+          },
+          "winner": {
+            "description": "A mod id, 'faction:<faction id>', or 'vanilla' for the game's own file.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "winner"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
     "manifest": {
       "properties": {
         "dump_lua": {

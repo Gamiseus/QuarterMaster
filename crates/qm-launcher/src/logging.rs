@@ -4,6 +4,11 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_appender::rolling::{Builder, InitError, RollingFileAppender, Rotation};
+use tracing_log::NormalizeEvent;
+use tracing_subscriber::filter::LevelFilter;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
+use tracing_subscriber::Layer;
 
 const LOG_FILE: &str = "launcher.log";
 /// Size at which the log is moved to `launcher.log.1` at startup.
@@ -46,6 +51,22 @@ pub fn open_appender(logs_dir: &Path) -> Result<RollingFileAppender, InitError> 
         .build(logs_dir)
 }
 
+/// Drops the patch engine's lines below a warning. They come through the `log` crate, so the
+/// module they are from is only known once the event is normalized.
+struct QuietPatches;
+
+impl<S: tracing::Subscriber> Layer<S> for QuietPatches {
+    fn event_enabled(
+        &self,
+        event: &tracing::Event<'_>,
+        _ctx: tracing_subscriber::layer::Context<'_, S>,
+    ) -> bool {
+        let normalized = event.normalized_metadata();
+        let meta = normalized.as_ref().unwrap_or_else(|| event.metadata());
+        !(meta.target().starts_with("qm_core::patch") && *meta.level() > tracing::Level::WARN)
+    }
+}
+
 /// Appends to the fixed `<logs_dir>/launcher.log`, rotated once at startup. Keep the guard alive.
 pub fn init(logs_dir: &Path) -> WorkerGuard {
     if let Err(e) = std::fs::create_dir_all(logs_dir) {
@@ -59,10 +80,17 @@ pub fn init(logs_dir: &Path) -> WorkerGuard {
             tracing_appender::non_blocking(std::io::sink())
         }
     };
-    let installed = tracing_subscriber::fmt()
-        .with_writer(writer)
-        .with_ansi(false)
-        .with_max_level(tracing::Level::INFO)
+    // The patch engine reports every patch it applies. In the game that is the log; here each
+    // check of a profile applies every patch several times, which filled the file with
+    // megabytes of them and slowed the checks down. `QuietPatches` keeps its warnings and errors.
+    let installed = tracing_subscriber::registry()
+        .with(LevelFilter::INFO)
+        .with(QuietPatches)
+        .with(
+            tracing_subscriber::fmt::layer()
+                .with_writer(writer)
+                .with_ansi(false),
+        )
         .try_init();
     if let Err(e) = installed {
         eprintln!("tracing subscriber not installed: {e}");

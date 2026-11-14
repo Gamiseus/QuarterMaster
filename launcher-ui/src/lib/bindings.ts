@@ -1011,6 +1011,82 @@ async jobCancel(id: JobId) : Promise<Result<null, QmError>> {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
+},
+async modColorSet(modId: string, color: number | null) : Promise<Result<SettingsView, QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("mod_color_set", { modId, color }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async windowSettingsSet(window: WindowSettings) : Promise<Result<SettingsView, QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("window_settings_set", { window }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Stores the mods source and starts the launcher again, so it opens on the other set of
+ * mods and profiles.
+ */
+async modsSourceSet(source: ModsSource) : Promise<Result<null, QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("mods_source_set", { source }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async leftoverBackupsList() : Promise<Result<LeftoverBackup[], QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("leftover_backups_list") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async leftoverBackupDelete(name: string) : Promise<Result<null, QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("leftover_backup_delete", { name }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async gameDumpFull() : Promise<Result<JobId, QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("game_dump_full") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async fileView(source: string, path: string) : Promise<Result<FileView, QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("file_view", { source, path }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async conflictDismiss(conflictId: string, dismissed: boolean) : Promise<Result<null, QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("conflict_dismiss", { conflictId, dismissed }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async modVersionSet(id: string, version: string | null) : Promise<Result<ModSummary, QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("mod_version_set", { id, version }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
 }
 }
 
@@ -1168,6 +1244,11 @@ claims: Claim[];
  * The choice made for this slot alone.
  */
 choice?: string | null; 
+/**
+ * The compatibility mod whose choice decides this slot, when no choice of the profile
+ * does.
+ */
+chosen_by?: string | null; 
 /**
  * Who wins with the choices as they are: a source, or `vanilla`.
  */
@@ -1682,6 +1763,27 @@ export type FileStat = { target_file: string; original_lines: number; patched_li
  */
 patches: number; mods: string[]; broken: number; conflicts: number }
 /**
+ * One file of the game or of a mod, for the viewer.
+ */
+export type FileView = { 
+/**
+ * `vanilla`, or a mod id.
+ */
+source: string; path: string; kind: FileViewKind; size_bytes: number; 
+/**
+ * For `Text`.
+ */
+text: string | null; 
+/**
+ * For `Image` and `Audio`: a `data:` URL.
+ */
+data_url: string | null }
+export type FileViewKind = "text" | "image" | "audio" | 
+/**
+ * A kind the launcher cannot show; only the size is known.
+ */
+"other"
+/**
  * How one plan fix met the loaded patches (§3.9, §7.2).
  */
 export type FixBinding = { 
@@ -2085,7 +2187,11 @@ export type JobKind = "warm_mods" | "warm_vanilla" | "simulation" | "updates_ref
 /**
  * Makes the Fixes view's suggestions (§9.3) after a simulation.
  */
-"fix_suggestions"
+"fix_suggestions" | 
+/**
+ * Writes every file of the game into the workspace mods folder.
+ */
+"game_dump"
 /**
  * A fix an undo brings back and the newer running fix it clashes with.
  */
@@ -2184,6 +2290,23 @@ export type LauncherUpdateInfo = { current_version: string; latest_version: stri
  * A plain-text note on a group or a slot. `code` is stable; `text` is for the user.
  */
 export type LedgerNote = { code: string; text: string }
+/**
+ * A copy the launcher made of a real `Mods` folder it found in the game folder before
+ * linking its own there.
+ */
+export type LeftoverBackup = { 
+/**
+ * The folder name inside the backups folder.
+ */
+name: string; size_bytes: number; file_count: number; 
+/**
+ * The top-level folders in it (the mods), at most 20.
+ */
+contents: string[]; 
+/**
+ * Seconds since 1970, from the folder's modified time.
+ */
+modified: number | null }
 /**
  * What a save holds from mods that are not in a profile, from the save's stamp.
  */
@@ -2368,7 +2491,12 @@ fix_journal?: JournalEntry[];
 /**
  * Why the last migration to the ledger stopped (D38).
  */
-migration_error?: string | null }
+migration_error?: string | null; 
+/**
+ * Ids of conflicts the user dismissed in this profile. They stay listed under
+ * "Dismissed" and no longer count as open.
+ */
+dismissed_conflicts?: string[] }
 /**
  * Rich dependency and ordering relationships (Fabric / Factorio style).
  */
@@ -2421,6 +2549,11 @@ installed: boolean;
  * The pack carries the mod's files.
  */
 bundled: boolean }
+/**
+ * Where the mods come from: the launcher's library, or links to the workspace mods folder
+ * with their own profiles.
+ */
+export type ModsSource = "library" | "workspace"
 export type ModulePatch = { source: string; before?: string | null; name: string; load_now?: boolean; id: string | null; priority: number | null; on_failure?: OnFailurePolicy }
 export type NewProfile = { name: string; id: string | null; clone_from: string | null; linked_save_profile_id: string | null; description: string | null }
 /**
@@ -2904,7 +3037,15 @@ export type RevealKind = "logs" | "library" | "game_dir" | "profile_dir" | "save
 /**
  * `<data>/cache/diagnostics`, where bug report bundles are written.
  */
-"diagnostics"
+"diagnostics" | 
+/**
+ * `<data>/backups`.
+ */
+"backups" | 
+/**
+ * The workspace mods folder.
+ */
+"workspace"
 /**
  * A ribbon's name and description, from the game's `localisation.lua` (`ribName_<N>`, `ribDesc_<N>`).
  */
@@ -3181,7 +3322,19 @@ clear_workspace_mods_dir: boolean | null; color_vision: string | null; high_cont
 /**
  * `LauncherSettings` without the token itself.
  */
-export type SettingsView = { game_exe_path: string | null; save_dir_path: string | null; workspace_mods_dir: string | null; theme: string; default_launch_method: LaunchMethod; opt_in_prereleases: boolean; auto_backup_saves: boolean; max_save_backups: number; disable_console_on_launch: boolean; debug_mode: boolean; dev_commands: boolean; first_run_completed: boolean; active_profile_id: string; active_save_profile_id: string; portable_mode: boolean; auto_update_mods: Partial<{ [key in string]: boolean }>; last_known_exe_sha256: string | null; auto_check_updates: boolean; auto_install_updates: boolean; color_vision: string; high_contrast: boolean; text_scale: number }
+export type SettingsView = { game_exe_path: string | null; save_dir_path: string | null; workspace_mods_dir: string | null; theme: string; default_launch_method: LaunchMethod; opt_in_prereleases: boolean; auto_backup_saves: boolean; max_save_backups: number; disable_console_on_launch: boolean; debug_mode: boolean; dev_commands: boolean; first_run_completed: boolean; active_profile_id: string; active_save_profile_id: string; portable_mode: boolean; auto_update_mods: Partial<{ [key in string]: boolean }>; last_known_exe_sha256: string | null; auto_check_updates: boolean; auto_install_updates: boolean; color_vision: string; high_contrast: boolean; text_scale: number; 
+/**
+ * Mod id -> the colour (1 to 8) picked for it.
+ */
+mod_colors: Partial<{ [key in string]: number }>; window: WindowSettings; 
+/**
+ * The set of mods and profiles picked for the next start.
+ */
+mods_source: ModsSource; 
+/**
+ * The running launcher uses the workspace's mods and profiles.
+ */
+workspace_mode: boolean }
 /**
  * One line with code from two or more patches on one side, top to bottom.
  */
@@ -3284,7 +3437,11 @@ failure_groups?: FailureGroup[];
 /**
  * Patches that anchor on another patch's code (the Order view's dashed edges, G10).
  */
-inferred_edges?: InferredEdge[] }
+inferred_edges?: InferredEdge[]; 
+/**
+ * Ids of the conflicts dismissed in the active profile.
+ */
+dismissed_conflicts?: string[] }
 /**
  * Picks one of A's vanilla sites by its context hash. `ordinal` (1-based, among A's
  * matches in the unpatched file) picks among sites with the same context.
@@ -3627,6 +3784,18 @@ rate_limit_mode: string; launcher: LauncherUpdateInfo; mods: ModUpdateInfo[] }
  * A name a diagnostic test run would watch, and the code checks that flagged it.
  */
 export type WatchSuggestion = { name: string; checks: string[] }
+/**
+ * Overrides for the game's `conf.lua` window values. `None`: the game's own value.
+ */
+export type WindowSettings = { vsync?: boolean | null; resizable?: boolean | null; width?: number | null; height?: number | null; borderless?: boolean | null; 
+/**
+ * 1-based monitor number.
+ */
+display?: number | null; fullscreen?: boolean | null; 
+/**
+ * "desktop" | "exclusive".
+ */
+fullscreen_type?: string | null }
 
 /** tauri-specta globals **/
 

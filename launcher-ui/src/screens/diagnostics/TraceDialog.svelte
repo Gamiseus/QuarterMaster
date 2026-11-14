@@ -96,12 +96,14 @@
   {#if !loaded}
     <div aria-busy="true" aria-label="Loading the suggested names"><Skeleton lines={2} /></div>
   {:else}
-    <TextField label="Globals to watch" bind:value={globals} placeholder="loadModSettings, saveModSettings" disabled={busy} />
-    <TextField label="Functions whose callers to count" bind:value={hooks} placeholder="onDeath, Events.fire" disabled={busy} />
-    <p class="qm-muted">
-      Separate names with commas. The fields start with the names the code checks flagged. Your save is backed up
-      first, and the game loads more slowly during this run.
-    </p>
+    <div class="fields">
+      <TextField label="Globals to watch" bind:value={globals} placeholder="loadModSettings, saveModSettings" disabled={busy} />
+      <TextField label="Functions whose callers to count" bind:value={hooks} placeholder="onDeath, Events.fire" disabled={busy} />
+      <p class="qm-muted">
+        Separate names with commas. The fields start with the names the code checks flagged. Your save is backed up
+        first, and the game loads more slowly during this run.
+      </p>
+    </div>
   {/if}
   {#if blocked}<p class="qm-muted" role="note">{blocked}</p>{/if}
 
@@ -165,7 +167,14 @@
     font-weight: 600;
   }
 
+  .fields {
+    display: flex;
+    flex-direction: column;
+    gap: var(--qm-space-3);
+  }
+
   .result {
+    margin-top: var(--qm-space-3);
     display: flex;
     flex-direction: column;
     gap: var(--qm-space-2);

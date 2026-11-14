@@ -12,6 +12,7 @@ const TRACKED_KINDS: ReadonlySet<JobKind> = new Set<JobKind>([
   "updates_refresh",
   "catalog_refresh",
   "workspace_sync",
+  "game_dump",
   "modpack_export",
   "modpack_import",
 ]);

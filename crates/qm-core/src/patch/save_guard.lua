@@ -6,14 +6,15 @@
 --     the newest copy that does load: backUp.lua (for saveMNB3.lua), then "<name>.prev",
 --     then a fresh profile.
 --   Writing: before a save file is overwritten, the copy on disk (if it looks like a save)
---     becomes "<name>.prev".
+--     becomes "<name>.prev". A write that never reached the disk leaves only that copy;
+--     the game is then told the save is there, and gets the copy.
 do
   local fs = love and love.filesystem
   _G.QM = _G.QM or {}
   if fs and fs.load and fs.write and not _G.QM.saveGuard then
     local guard = { used = {} }
     _G.QM.saveGuard = guard
-    local origLoad, origWrite = fs.load, fs.write
+    local origLoad, origWrite, origInfo = fs.load, fs.write, fs.getInfo
 
     -- The files that hold a save, and so get a ".prev" copy.
     local ROTATED = { ["saveMNB3.lua"] = true, ["saveMNB2.lua"] = true, ["saveMNBclassic.lua"] = true }
@@ -22,7 +23,7 @@ do
         and (name:match("^saveMNB") or name:match("^backUp") or name:match("save.*%.lua$")) ~= nil
     end
     local function exists(name)
-      if fs.getInfo then return fs.getInfo(name) ~= nil end
+      if origInfo then return origInfo(name) ~= nil end
       return true
     end
     local function realPath(name)
@@ -51,24 +52,50 @@ do
       return result
     end
 
-    local function fresh()
+    -- What the game gets when no copy of `name` loads. For a profile, a new one made as
+    -- the game makes it at first start: its newProfile fills the global `player`, so the
+    -- new table stands in as `player` for the call and the profile in play is left alone.
+    -- Any other file gets an empty table.
+    local function fresh(name)
       local t = {}
-      if type(newProfile) == "function" then pcall(newProfile, t) end
+      local profile = name:match("^saveMNB") or name:match("^backUp")
+      if profile and type(newProfile) == "function" then
+        local live = rawget(_G, "player")
+        rawset(_G, "player", t)
+        pcall(newProfile, t)
+        rawset(_G, "player", live)
+      end
       return t
     end
 
+    -- A save whose last write never reached the disk: only its previous copy is there.
+    local function onlyPrev(name)
+      return ROTATED[name] == true and origInfo ~= nil and not exists(name) and exists(name .. ".prev")
+    end
+
+    if origInfo then
+      fs.getInfo = function(name, ...)
+        local info = origInfo(name, ...)
+        if info == nil and onlyPrev(name) then return origInfo(name .. ".prev", ...) end
+        return info
+      end
+    end
+
     fs.load = function(name, ...)
-      if not guarded(name) or not exists(name) then
+      if not guarded(name) or not (exists(name) or onlyPrev(name)) then
         return origLoad(name, ...)
       end
-      local save, why = read(name)
-      if save then
-        return function() return save end
+      local save, why = nil, "the file is missing"
+      if exists(name) then
+        save, why = read(name)
+        if save then
+          return function() return save end
+        end
+        if move(name, name .. ".damaged") then
+          print("[QM] Save guard: the damaged file was kept as " .. name .. ".damaged")
+        end
       end
       print("[QM] Save guard: " .. name .. " could not be loaded: " .. tostring(why))
-      if move(name, name .. ".damaged") then
-        print("[QM] Save guard: the damaged file was kept as " .. name .. ".damaged")
-      end
       local tries = {}
       if name == "saveMNB3.lua" then tries[#tries + 1] = "backUp.lua" end
       if ROTATED[name] then tries[#tries + 1] = name .. ".prev" end
@@ -83,9 +110,10 @@ do
           print("[QM] Save guard: " .. other .. " could not be loaded either: " .. tostring(whyNot))
         end
       end
-      print("[QM] Save guard: no usable copy of " .. name .. "; starting it as a fresh profile")
+      print("[QM] Save guard: no usable copy of " .. name .. "; starting it fresh")
       guard.used[#guard.used + 1] = { file = name, from = nil, why = why }
-      return function() return fresh() end
+      local made = fresh(name)
+      return function() return made end
     end
 
     -- Whether the file on disk starts like a save (and not with zero bytes or nothing).

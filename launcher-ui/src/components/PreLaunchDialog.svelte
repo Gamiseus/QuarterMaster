@@ -28,7 +28,7 @@
     resolver.show(id);
   }
 
-  const modNames = $derived(Object.fromEntries((mods.list.status === "ready" ? mods.list.data : []).map((m) => [m.id, m.name])));
+  const modNames = $derived({ qm_glue: "Your adjustments", ...Object.fromEntries((mods.list.status === "ready" ? mods.list.data : []).map((m) => [m.id, m.name])) } as Record<string, string>);
   const modName = (id: string) => modNames[id] ?? id;
   const blocked = $derived(prelaunch.blocked);
   const planError = $derived(prelaunch.planError);

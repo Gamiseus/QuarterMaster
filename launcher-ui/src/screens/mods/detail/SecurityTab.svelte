@@ -78,10 +78,16 @@
 </div>
 
 <style>
+  /* The sections sit side by side when the panel is wide. */
   .security {
-    display: flex;
-    flex-direction: column;
-    gap: var(--qm-space-4);
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, calc(var(--qm-text-13) * 26)), 1fr));
+    gap: var(--qm-space-4) var(--qm-space-6);
+    align-items: start;
+  }
+
+  .security section {
+    min-width: 0;
   }
 
   section {

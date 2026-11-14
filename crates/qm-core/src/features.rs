@@ -29,6 +29,7 @@ pub const QM_FEATURES: &[&str] = &[
     "regex_anchors",
     "min_qm",
     "sprite_sizes",
+    "asset_choices",
 ];
 
 /// Why this QuarterMaster cannot load the mod, or None when it can. The reason follows the

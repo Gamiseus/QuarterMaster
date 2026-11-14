@@ -3,6 +3,7 @@ pub mod app;
 pub mod assets;
 pub mod compat;
 pub mod diagnostics;
+pub mod extras;
 pub mod fixes;
 pub mod launch;
 pub mod load_order;

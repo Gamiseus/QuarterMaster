@@ -188,7 +188,10 @@
     });
 </script>
 
-<Dialog bind:open title="Manage profiles">
+<!-- Two panes: the profiles on the left, the picked one's settings on the right, so the
+     whole dialog fits the window. In a narrow window the panes stack. -->
+<Dialog bind:open title="Manage profiles" size="lg">
+  <div class="wrap">
   <div class="layout">
     <ul class="list" aria-label="Profiles">
       {#each profiles.list as p (p.id)}
@@ -218,8 +221,10 @@
         </div>
 
         <StencilHeading level={3}>Launch</StencilHeading>
-        <Select label="Save slot" items={saveItems} bind:value={saveId} disabled={!canEdit} placeholder="No save slot" />
-        <Select label="Start the game with" items={METHODS} bind:value={method} disabled={!canEdit} />
+        <div class="pair">
+          <Select label="Save slot" items={saveItems} bind:value={saveId} disabled={!canEdit} placeholder="No save slot" />
+          <Select label="Start the game with" items={METHODS} bind:value={method} disabled={!canEdit} />
+        </div>
         <TextField label="Launch arguments" placeholder="-windowed -novid" bind:value={args} disabled={!canEdit} />
         <p class="hint">Separate arguments with spaces. Quotes are not supported. The console is set in Settings for every profile.</p>
         <div class="row end">
@@ -246,6 +251,7 @@
             <Button disabled={profiles.list.length < 2} onclick={() => (compareOpen = true)}>Compare...</Button>
             <Button disabled={!app.startupDone || busy || builtin} onclick={exportPack}>Export as modpack...</Button>
             <Button
+              class="apart"
               variant="danger"
               disabled={!canEdit || isActive}
               {...{ "aria-description": builtin ? BUILTIN_REASON : isActive ? DELETE_ACTIVE_REASON : undefined }}
@@ -263,16 +269,23 @@
       <p class="reason">Loading...</p>
     {/if}
   </div>
+  </div>
 </Dialog>
 
 <ShareCodeDialog bind:open={shareOpen} mode="export" code={shareCode} />
 <CompareProfilesDialog bind:open={compareOpen} start={selectedId} />
 
 <style>
+  .wrap {
+    container-type: inline-size;
+  }
+
   .layout {
-    display: flex;
-    flex-direction: column;
-    gap: var(--qm-space-4);
+    display: grid;
+    grid-template-columns: minmax(0, 13rem) minmax(0, 1fr);
+    /* Stretched, so the line beside the list runs the dialog's height. */
+    align-items: stretch;
+    gap: var(--qm-space-5);
   }
 
   .list {
@@ -280,8 +293,32 @@
     flex-direction: column;
     gap: var(--qm-space-1);
     margin: 0;
-    padding: 0;
+    padding: 0 var(--qm-space-4) 0 0;
+    border-right: 1px solid var(--qm-border);
     list-style: none;
+  }
+
+  /* Save slot and launch method side by side. */
+  .pair {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--qm-space-3);
+  }
+
+  @container (max-width: 34rem) {
+    .layout {
+      grid-template-columns: minmax(0, 1fr);
+      gap: var(--qm-space-4);
+    }
+
+    .list {
+      padding-right: 0;
+      border-right: 0;
+    }
+
+    .pair {
+      grid-template-columns: minmax(0, 1fr);
+    }
   }
 
   .entry {
@@ -326,6 +363,11 @@
     flex-wrap: wrap;
     align-items: flex-end;
     gap: var(--qm-space-2);
+  }
+
+  /* Delete stands apart from the other actions, at the row's far end. */
+  .row :global(.apart) {
+    margin-left: auto;
   }
 
   .row.end {

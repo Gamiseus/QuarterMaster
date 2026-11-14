@@ -31,7 +31,7 @@ impl Service {
     }
 
     pub fn settings_get(&self) -> SettingsView {
-        SettingsView::from(&self.paths().load_settings())
+        self.settings_view(&self.paths().load_settings())
     }
 
     pub fn settings_update(&self, patch: SettingsPatch) -> QmResult<SettingsView> {
@@ -58,6 +58,14 @@ impl Service {
             RevealKind::Library => (paths.library_dir.clone(), true),
             RevealKind::DataDir => (paths.root_dir.clone(), true),
             RevealKind::Diagnostics => (paths.cache_dir.join("diagnostics"), true),
+            RevealKind::Backups => (paths.backups_dir.clone(), true),
+            RevealKind::Workspace => (
+                settings
+                    .workspace_mods_dir
+                    .clone()
+                    .ok_or_else(|| not_set("The workspace mods folder"))?,
+                false,
+            ),
             RevealKind::ProfileDir => (paths.profiles_dir.join(&settings.active_profile_id), true),
             RevealKind::GameDir => (
                 settings
@@ -94,6 +102,14 @@ impl Service {
     ) -> QmResult<SettingsView> {
         let mut s = self.paths().load_settings();
         validate(&patch)?;
+        if self.paths().workspace_mode
+            && (patch.clear_workspace_mods_dir == Some(true) || patch.workspace_mods_dir.is_some())
+        {
+            return Err(QmError::new(
+                ErrorKind::Conflict,
+                "Switch back to the library mods before changing the workspace folder.",
+            ));
+        }
         if let Some(exe) = &patch.game_exe_path {
             if s.game_exe_path.as_ref() != Some(exe) {
                 self.ensure_not_running()?;
@@ -117,7 +133,7 @@ impl Service {
         if workspace_changed && !complete_onboarding {
             self.warm_mods();
         }
-        Ok(SettingsView::from(&s))
+        Ok(self.settings_view(&s))
     }
 }
 
@@ -134,15 +150,25 @@ fn validate(p: &SettingsPatch) -> QmResult<()> {
             )));
         }
     }
-    for (label, dir) in [
-        ("Save folder", &p.save_dir_path),
-        ("Workspace mods folder", &p.workspace_mods_dir),
-    ] {
-        if let Some(d) = dir {
-            if !d.is_dir() {
-                return Err(invalid(format!("{label} not found: {}", d.display())));
-            }
+    if let Some(d) = &p.save_dir_path {
+        if !d.is_dir() {
+            return Err(invalid(format!("Save folder not found: {}", d.display())));
         }
+    }
+    // A workspace folder that is not there yet is made.
+    if let Some(d) = &p.workspace_mods_dir {
+        if !d.is_absolute() || (d.exists() && !d.is_dir()) {
+            return Err(invalid(format!(
+                "The workspace mods folder must be a folder: {}",
+                d.display()
+            )));
+        }
+        std::fs::create_dir_all(d).map_err(|e| {
+            invalid(format!(
+                "The workspace mods folder could not be made: {} ({e})",
+                d.display()
+            ))
+        })?;
     }
     if let Some(t) = &p.theme {
         if !THEMES.contains(&t.as_str()) {

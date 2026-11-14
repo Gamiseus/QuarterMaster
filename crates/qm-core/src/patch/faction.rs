@@ -202,18 +202,31 @@ pub fn faction_source(id: &str) -> String {
 /// The compiled data table for the runtime. With a plan, each faction also gets `excluded`:
 /// the globals (and `folder/stem` voice files) a choice gave to another source (D78).
 pub fn faction_data_lua(active: &[LoadedFaction], plan: Option<&LoadOrderPlan>) -> String {
+    faction_data_lua_with(active, plan, &std::collections::BTreeMap::new())
+}
+
+/// `faction_data_lua`, with what compat mods' asset choices leave out as well (`more`:
+/// source -> names).
+pub fn faction_data_lua_with(
+    active: &[LoadedFaction],
+    plan: Option<&LoadOrderPlan>,
+    more: &std::collections::BTreeMap<String, Vec<String>>,
+) -> String {
     let mut list = Vec::new();
     for lf in active {
         let mut v = serde_json::to_value(&lf.faction).unwrap_or_default();
         if let Some(obj) = v.as_object_mut() {
             obj.insert("root".into(), lua_path(&lf.root).into());
             obj.insert("mod_id".into(), lf.mod_id.clone().into());
-            let excluded = plan.map_or(&[][..], |p| {
-                p.asset_exclusions_of(&faction_source(&lf.faction.id))
-            });
+            let source = faction_source(&lf.faction.id);
+            let mut excluded: std::collections::BTreeSet<&String> = plan
+                .map_or(&[][..], |p| p.asset_exclusions_of(&source))
+                .iter()
+                .collect();
+            excluded.extend(more.get(&source).into_iter().flatten());
             if !excluded.is_empty() {
                 let set: serde_json::Map<String, serde_json::Value> =
-                    excluded.iter().map(|k| (k.clone(), true.into())).collect();
+                    excluded.iter().map(|k| ((*k).clone(), true.into())).collect();
                 obj.insert("excluded".into(), set.into());
             }
         }
@@ -261,6 +274,15 @@ fn pattern_patch(
 /// The patches for the active factions (at most one per side). Empty when there are none.
 /// `plan` gives what each faction leaves out (`asset_exclusions`).
 pub fn build_faction_patches(active: &[LoadedFaction], plan: Option<&LoadOrderPlan>) -> Vec<Patch> {
+    build_faction_patches_with(active, plan, &std::collections::BTreeMap::new())
+}
+
+/// `build_faction_patches`, with what compat mods' asset choices leave out as well.
+pub fn build_faction_patches_with(
+    active: &[LoadedFaction],
+    plan: Option<&LoadOrderPlan>,
+    more: &std::collections::BTreeMap<String, Vec<String>>,
+) -> Vec<Patch> {
     if active.is_empty() {
         return Vec::new();
     }
@@ -292,7 +314,7 @@ pub fn build_faction_patches(active: &[LoadedFaction], plan: Option<&LoadOrderPl
     // The data sits in its own function so its strings don't count against love.load's
     // constant limit.
     main_payload.push_str("_G.__qm_factions_apply((function() return ");
-    main_payload.push_str(&faction_data_lua(active, plan));
+    main_payload.push_str(&faction_data_lua_with(active, plan, more));
     main_payload.push_str(" end)())\n");
 
     let mut patches = vec![

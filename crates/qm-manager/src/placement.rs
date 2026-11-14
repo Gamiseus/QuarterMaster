@@ -113,6 +113,13 @@ pub(crate) fn mod_alone(table: &PatchTable, mod_id: &str, target: &str) -> Patch
     }
 }
 
+/// A mod's patches applied alone to a file, kept while that file's records are checked.
+struct SoloRun {
+    records: Vec<PatchExecutionRecord>,
+    trace: FileTrace,
+    scan: Option<Scan>,
+}
+
 /// `vanilla` is the prepared text and `trace` the full run over it. `to_file` maps a 1-based
 /// line of the patched text to the file line shown to the user.
 pub(crate) fn check_placement(
@@ -125,6 +132,9 @@ pub(crate) fn check_placement(
 ) -> Vec<DetectedConflict> {
     let mut out = Vec::new();
     let mut full: Option<Scan> = None;
+    // One solo run and one scan per mod, not per patch: a mod with thirty patches in a long
+    // file would otherwise be applied and scanned thirty times.
+    let mut alone_by_mod: HashMap<String, Option<SoloRun>> = HashMap::new();
     for (idx, rec) in records.iter().enumerate() {
         if rec.status != PatchOutcomeStatus::Applied || !matches!(rec.patch_type.as_str(), "pattern" | "regex") {
             continue;
@@ -150,8 +160,11 @@ pub(crate) fn check_placement(
             continue;
         };
         // The author tested the patch with the rest of its mod: apply the mod alone.
-        let solo = mod_alone(table, &rec.mod_id, target);
-        let Ok((_, _, solo_records, solo_trace)) = solo.apply_patches_traced(target, vanilla) else {
+        let solo = alone_by_mod.entry(rec.mod_id.clone()).or_insert_with(|| {
+            let (_, _, records, trace) = mod_alone(table, &rec.mod_id, target).apply_patches_traced(target, vanilla).ok()?;
+            Some(SoloRun { records, trace, scan: None })
+        });
+        let Some(SoloRun { records: solo_records, trace: solo_trace, scan: solo_scan }) = solo.as_mut() else {
             continue;
         };
         let Some(solo_idx) = solo_records.iter().position(|r| r.patch_id == rec.patch_id) else {
@@ -166,13 +179,13 @@ pub(crate) fn check_placement(
             continue;
         }
         let full = full.get_or_insert_with(|| scan(&trace.text));
-        let alone = scan(&solo_trace.text);
+        let alone = &*solo_scan.get_or_insert_with(|| scan(&solo_trace.text));
         let position = match patch {
             Patch::Pattern(p) => p.position,
             Patch::Regex(r) => r.position,
             _ => continue,
         };
-        if let Some(c) = compare(target, rec, trace, full, &alone, &runs, &solo_runs, position, records, to_file) {
+        if let Some(c) = compare(target, rec, trace, full, alone, &runs, &solo_runs, position, records, to_file) {
             out.push(c);
         }
     }

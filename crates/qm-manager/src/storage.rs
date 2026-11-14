@@ -10,17 +10,14 @@ use qm_schema::sha256_hex;
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum LaunchMethod {
     SteamUrl,
+    #[default]
     DirectExe,
     Vanilla,
 }
 
-impl Default for LaunchMethod {
-    fn default() -> Self {
-        Self::DirectExe
-    }
-}
 
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -84,6 +81,101 @@ pub struct LauncherSettings {
     /// One-time launch settings migration done up to this version (0: never ran).
     #[serde(default)]
     pub launch_model_version: u32,
+    /// Mod id -> the colour (1 to 8) the user picked for it in the patch views.
+    #[serde(default)]
+    pub mod_colors: HashMap<String, u8>,
+    /// The game window settings written into the launcher's own "Game window settings" mod.
+    #[serde(default)]
+    pub window: WindowSettings,
+    /// Which set of mods and profiles is in use. Read when the launcher starts.
+    #[serde(default)]
+    pub mods_source: ModsSource,
+    /// The active profile of the set that is not in use (`active_profile_id` in the file is
+    /// always the library's; `load_settings` swaps the two in workspace mode).
+    #[serde(default = "default_profile_id")]
+    pub other_active_profile_id: String,
+}
+
+/// Where the mods come from: the launcher's library, or links to the workspace mods folder
+/// with their own profiles.
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ModsSource {
+    #[default]
+    Library,
+    Workspace,
+}
+
+/// Overrides for the game's `conf.lua` window values. `None`: the game's own value.
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct WindowSettings {
+    #[serde(default)]
+    pub vsync: Option<bool>,
+    #[serde(default)]
+    pub resizable: Option<bool>,
+    #[serde(default)]
+    pub width: Option<u32>,
+    #[serde(default)]
+    pub height: Option<u32>,
+    #[serde(default)]
+    pub borderless: Option<bool>,
+    /// 1-based monitor number.
+    #[serde(default)]
+    pub display: Option<u32>,
+    #[serde(default)]
+    pub fullscreen: Option<bool>,
+    /// "desktop" | "exclusive".
+    #[serde(default)]
+    pub fullscreen_type: Option<String>,
+}
+
+impl WindowSettings {
+    pub fn is_empty(&self) -> bool {
+        *self == Self::default()
+    }
+
+    /// The Lua appended to `conf.lua`: the game's own `love.conf` runs first, then the
+    /// overrides.
+    pub fn conf_lua(&self) -> String {
+        let mut out = String::from(
+            "-- Written by QuarterMaster (Settings, Game window). Edits here are overwritten.\n\
+             local qm_game_conf = love.conf\n\
+             function love.conf(t)\n    if qm_game_conf then qm_game_conf(t) end\n",
+        );
+        let mut set = |key: &str, value: String| {
+            out.push_str(&format!("    t.window.{key} = {value}\n"));
+        };
+        if let Some(v) = self.width {
+            set("width", v.to_string());
+            set("minwidth", format!("math.min(t.window.minwidth or {v}, {v})"));
+        }
+        if let Some(v) = self.height {
+            set("height", v.to_string());
+            set("minheight", format!("math.min(t.window.minheight or {v}, {v})"));
+        }
+        if let Some(v) = self.fullscreen {
+            set("fullscreen", v.to_string());
+        }
+        if let Some(v) = &self.fullscreen_type {
+            set("fullscreentype", format!("{v:?}"));
+        }
+        if let Some(v) = self.borderless {
+            set("borderless", v.to_string());
+        }
+        if let Some(v) = self.resizable {
+            set("resizable", v.to_string());
+        }
+        if let Some(v) = self.vsync {
+            set("vsync", if v { "1" } else { "0" }.to_string());
+        }
+        if let Some(v) = self.display {
+            set("display", v.to_string());
+        }
+        out.push_str("end\n");
+        out
+    }
 }
 
 fn default_color_vision() -> String {
@@ -142,6 +234,10 @@ impl Default for LauncherSettings {
             high_contrast: false,
             text_scale: default_text_scale(),
             launch_model_version: 0,
+            mod_colors: HashMap::new(),
+            window: WindowSettings::default(),
+            mods_source: ModsSource::Library,
+            other_active_profile_id: default_profile_id(),
         }
     }
 }
@@ -159,6 +255,10 @@ pub struct QuarterMasterPaths {
     pub settings_file: PathBuf,
     pub journal_file: PathBuf,
     pub is_portable: bool,
+    /// Workspace mode: `library_dir` holds links to the workspace mods folder and
+    /// `profiles_dir` the workspace's own profiles. Set when the paths are resolved.
+    #[serde(default)]
+    pub workspace_mode: bool,
     /// Profile notices found by a read that could not report them (shared by clones).
     #[serde(skip)]
     pub(crate) profile_notices: std::sync::Arc<std::sync::Mutex<PendingNotices>>,
@@ -202,9 +302,22 @@ impl QuarterMasterPaths {
             (appdata, false)
         };
 
+        // Workspace mode keeps its mods and profiles apart from the library's.
+        let workspace_mode = fs::read_to_string(root_dir.join("settings.json"))
+            .ok()
+            .and_then(|raw| serde_json::from_str::<LauncherSettings>(&raw).ok())
+            .is_some_and(|s| {
+                s.mods_source == ModsSource::Workspace && s.workspace_mods_dir.is_some()
+            });
+        let mods_root = if workspace_mode {
+            root_dir.join("workspace")
+        } else {
+            root_dir.clone()
+        };
         let paths = Self {
-            library_dir: root_dir.join("library"),
-            profiles_dir: root_dir.join("profiles"),
+            library_dir: mods_root.join("library"),
+            profiles_dir: mods_root.join("profiles"),
+            workspace_mode,
             saves_dir: root_dir.join("saves"),
             vanilla_cache_dir: root_dir.join("vanilla-cache"),
             cache_dir: root_dir.join("cache"),
@@ -236,6 +349,9 @@ impl QuarterMasterPaths {
         }
     }
 
+    /// The settings. A missing file is made with the defaults. A file that cannot be read as
+    /// settings is kept as `settings.json.unreadable` before the defaults replace it, so the
+    /// paths and choices in it are not lost.
     pub fn load_settings(&self) -> LauncherSettings {
         if let Ok(raw) = fs::read_to_string(&self.settings_file) {
             if let Ok(mut s) = serde_json::from_str::<LauncherSettings>(&raw) {
@@ -245,7 +361,15 @@ impl QuarterMasterPaths {
                 if s.save_dir_path.is_none() {
                     s.save_dir_path = detect_save_directory();
                 }
+                if self.workspace_mode {
+                    std::mem::swap(&mut s.active_profile_id, &mut s.other_active_profile_id);
+                }
                 return s;
+            }
+            if !raw.trim().is_empty() {
+                let mut kept = self.settings_file.as_os_str().to_os_string();
+                kept.push(".unreadable");
+                let _ = fs::write(std::path::PathBuf::from(kept), &raw);
             }
         }
         let s = LauncherSettings::default();
@@ -256,7 +380,12 @@ impl QuarterMasterPaths {
     /// Writes `settings.json` atomically: a unique temp file next to it, then a rename over it.
     pub fn save_settings(&self, settings: &LauncherSettings) -> Result<(), String> {
         static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-        let json = serde_json::to_string_pretty(settings)
+        // The file always holds the library's active profile in `active_profile_id`.
+        let mut on_disk = settings.clone();
+        if self.workspace_mode {
+            std::mem::swap(&mut on_disk.active_profile_id, &mut on_disk.other_active_profile_id);
+        }
+        let json = serde_json::to_string_pretty(&on_disk)
             .map_err(|e| format!("Failed to serialize settings.json: {e}"))?;
         let fail = |e: std::io::Error| format!("Failed to write {}: {e}", self.settings_file.display());
         let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -330,10 +459,9 @@ fn read_registry_string(key: &str, value_name: &str) -> Option<String> {
     };
     let (hive, subkey) = if let Some(rest) = key.strip_prefix(r"HKCU\") {
         (HKEY_CURRENT_USER, rest)
-    } else if let Some(rest) = key.strip_prefix(r"HKLM\") {
-        (HKEY_LOCAL_MACHINE, rest)
     } else {
-        return None;
+        let rest = key.strip_prefix(r"HKLM\")?;
+        (HKEY_LOCAL_MACHINE, rest)
     };
     let wide = |s: &str| s.encode_utf16().chain(Some(0)).collect::<Vec<u16>>();
     let (subkey, value_name) = (wide(subkey), wide(value_name));
@@ -587,6 +715,9 @@ pub struct VanillaGameInfo {
     pub lua_file_count: usize,
 }
 
+/// In a vanilla cache folder once every Lua file of the game was written to it.
+const VANILLA_CACHE_DONE: &str = ".complete";
+
 impl QuarterMasterPaths {
     /// Extracts and caches all vanilla `.lua` files from `mnb.exe` (or `decompile/` fallback)
     /// into `vanilla-cache/<version>-<hash8>/`, and detects the exact game version (e.g. `0.5.3b`).
@@ -619,6 +750,7 @@ impl QuarterMasterPaths {
                     && cached.exe_size == exe_size
                     && cached.exe_mtime == exe_mtime
                     && cached.info.cache_dir.join("main.lua").is_file()
+                    && cached.info.cache_dir.join(VANILLA_CACHE_DONE).is_file()
                 {
                     return Ok(cached.info);
                 }
@@ -638,8 +770,10 @@ impl QuarterMasterPaths {
         let cache_dir = self.vanilla_cache_dir.join(format!("mnb-{hash8}"));
         let main_lua_cached = cache_dir.join("main.lua");
 
+        // The marker is written last: a cache without it was cut short and is made again.
+        let done_marker = cache_dir.join(VANILLA_CACHE_DONE);
         let mut lua_file_count = 0usize;
-        if !main_lua_cached.is_file() {
+        if !main_lua_cached.is_file() || !done_marker.is_file() {
             fs::create_dir_all(&cache_dir)
                 .map_err(|e| format!("Failed to create vanilla cache dir: {e}"))?;
 
@@ -664,6 +798,9 @@ impl QuarterMasterPaths {
                     if entry.read_to_end(&mut buf).is_ok() && fs::write(&dest, &buf).is_ok() {
                         lua_file_count += 1;
                     }
+                }
+                if main_lua_cached.is_file() {
+                    let _ = fs::write(&done_marker, b"");
                 }
             }
         } else {
@@ -901,6 +1038,23 @@ impl QuarterMasterPaths {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A settings file that cannot be read is kept beside the new one, not thrown away.
+    #[test]
+    fn unreadable_settings_are_kept_before_the_defaults_replace_them() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let paths = QuarterMasterPaths::resolve(Some(temp.path()));
+        paths.ensure_directories();
+        fs::write(&paths.settings_file, "{ \"active_profile_id\": \"mine\", ").unwrap();
+        let s = paths.load_settings();
+        assert_eq!(s.active_profile_id, default_profile_id());
+        let mut kept = paths.settings_file.as_os_str().to_os_string();
+        kept.push(".unreadable");
+        let kept = fs::read_to_string(std::path::PathBuf::from(kept)).unwrap();
+        assert!(kept.contains("mine"), "{kept}");
+        // The new file reads; nothing more is kept on the next load.
+        assert_eq!(paths.load_settings().active_profile_id, default_profile_id());
+    }
 
     #[test]
     #[ignore = "pre-existing failure: requires a Steam Mud and Blood install on the machine"]

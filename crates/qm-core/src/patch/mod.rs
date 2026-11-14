@@ -86,6 +86,15 @@ pub struct PatchFile {
     )]
     pub overrides: Vec<crate::lenient::Lenient<compat::Override>>,
 
+    /// `[[asset_choices]]`: which source's file is used where this mod's requirements
+    /// replace the same sound, image or font. An older loader warns about the unknown key.
+    #[serde(
+        default,
+        skip_serializing_if = "Vec::is_empty",
+        deserialize_with = "crate::lenient::lenient_list"
+    )]
+    pub asset_choices: Vec<crate::lenient::Lenient<compat::AssetChoiceEntry>>,
+
     /// `[sprites.<image global>]`: the size an image is shown at, whatever its pixel size.
     /// An older loader warns about the unknown key and shows images at their pixel size.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]

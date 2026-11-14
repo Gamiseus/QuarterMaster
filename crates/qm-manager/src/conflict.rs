@@ -562,6 +562,9 @@ pub fn simulate_and_analyze_patches_with(
 
         // 4. Diagnose any broken anchors (`ZeroMatches`) on this file using Tier 1 & Tier 2,
         // and report places lost by patches that still matched elsewhere.
+        // Swap tests already run for this file: two broken patches of one mod ask the same
+        // question, and each answer costs a whole run of the file's patches.
+        let mut swap_tests: HashMap<(String, Priority), bool> = HashMap::new();
         for (idx, rec) in records.iter().enumerate() {
             let loss = file_losses
                 .iter()
@@ -575,6 +578,7 @@ pub fn simulate_and_analyze_patches_with(
                     &records,
                     patch_table,
                     loss,
+                    &mut swap_tests,
                 );
                 conflicts.push(diag);
             } else if let Some((l, c)) = loss.and_then(|l| l.consumer.as_ref().map(|c| (l, c))) {
@@ -904,6 +908,7 @@ fn diagnose_broken_anchor(
     file_records: &[PatchExecutionRecord],
     full_table: &PatchTable,
     loss: Option<&SiteLoss>,
+    swap_tests: &mut HashMap<(String, Priority), bool>,
 ) -> DetectedConflict {
     let mut suggestions = Vec::new();
     let mut culprit_mod_id: Option<String> = None;
@@ -955,17 +960,21 @@ fn diagnose_broken_anchor(
                     .unwrap_or(10);
                 let test_prio = cand_min_prio - 5;
 
-                // Build a test table where `failed_rec.mod_id` runs at `test_prio` (before `cand_mod`)
-                let swapped_table = swapped_table(full_table, &failed_rec.mod_id, test_prio);
-
-                if let Ok((_, _, swapped_recs)) =
-                    swapped_table.apply_patches_offline(target, vanilla_src)
+                // A test table where `failed_rec.mod_id` runs at `test_prio` (before `cand_mod`).
+                let all_succeeded = *swap_tests
+                    .entry((failed_rec.mod_id.clone(), test_prio))
+                    .or_insert_with(|| {
+                        swapped_table(full_table, &failed_rec.mod_id, test_prio)
+                            .apply_patches_offline(target, vanilla_src)
+                            .is_ok_and(|(_, _, swapped_recs)| {
+                                // A patch the profile turned off is not a failure of the swap (G5).
+                                swapped_recs
+                                    .iter()
+                                    .filter(|r| r.status != PatchOutcomeStatus::SkippedDisabled)
+                                    .all(|r| r.status == PatchOutcomeStatus::Applied)
+                            })
+                    });
                 {
-                    // A patch the profile turned off is not a failure of the swap (G5).
-                    let all_succeeded = swapped_recs
-                        .iter()
-                        .filter(|r| r.status != PatchOutcomeStatus::SkippedDisabled)
-                        .all(|r| r.status == PatchOutcomeStatus::Applied);
                     if all_succeeded {
                         culprit_mod_id = Some(cand_mod.clone());
                         culprit_patch_id = file_records

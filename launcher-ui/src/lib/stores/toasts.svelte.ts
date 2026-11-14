@@ -11,6 +11,8 @@ interface ToastBase {
   action?: ToastAction;
   /** More buttons after `action`. An info toast with buttons stays until dismissed. */
   actions?: ToastAction[];
+  /** Closes the toast after this long, also when it has buttons. */
+  closeAfterMs?: number;
 }
 
 /** A toast before it has an id; `progress` toasts follow a running job. */
@@ -36,7 +38,8 @@ class ToastStore {
   #expire(id: number, toast: ToastInit): void {
     this.#clearTimer(id);
     const sticky = toast.action !== undefined || (toast.actions?.length ?? 0) > 0;
-    if (toast.tone === "info" && !sticky) this.#timers.set(id, setTimeout(() => this.dismiss(id), INFO_TIMEOUT_MS));
+    const after = toast.closeAfterMs ?? (toast.tone === "info" && !sticky ? INFO_TIMEOUT_MS : null);
+    if (after !== null) this.#timers.set(id, setTimeout(() => this.dismiss(id), after));
   }
 
   #clearTimer(id: number): void {
@@ -49,9 +52,12 @@ class ToastStore {
     return this.#push({ tone: "info", message, details: null });
   }
 
-  /** An info toast with buttons; it stays until a button or Dismiss closes it. */
-  notice(message: string, actions: ToastAction[]): number {
-    return this.#push({ tone: "info", message, details: null, actions });
+  /**
+   * An info toast with buttons. It stays until a button or Dismiss closes it, unless
+   * `closeAfterMs` is given: then it also closes by itself after that long.
+   */
+  notice(message: string, actions: ToastAction[], closeAfterMs?: number): number {
+    return this.#push({ tone: "info", message, details: null, actions, ...(closeAfterMs ? { closeAfterMs } : {}) });
   }
 
   error(message: string, details: string | null = null, action?: ToastAction): number {

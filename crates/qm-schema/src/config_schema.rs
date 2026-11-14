@@ -858,13 +858,20 @@ impl ModSettingsStore {
     }
 }
 
+const LUA_KEYWORDS: &[&str] = &[
+    "and", "break", "do", "else", "elseif", "end", "false", "for", "function", "goto", "if", "in",
+    "local", "nil", "not", "or", "repeat", "return", "then", "true", "until", "while",
+];
+
 fn format_lua_key(k: &str) -> String {
     let is_ident = !k.is_empty()
         && k.chars()
             .next()
             .map(|c| c.is_ascii_alphabetic() || c == '_')
             .unwrap_or(false)
-        && k.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
+        && k.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+        // A reserved word is no name: `end=1` does not compile.
+        && !LUA_KEYWORDS.contains(&k);
     if is_ident {
         k.to_string()
     } else {
@@ -875,6 +882,13 @@ fn format_lua_key(k: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_reserved_word_is_written_as_a_quoted_key() {
+        assert_eq!(format_lua_key("speed"), "speed");
+        assert_eq!(format_lua_key("end"), "[\"end\"]");
+        assert_eq!(format_lua_key("my-option"), "[\"my-option\"]");
+    }
 
     #[test]
     fn parses_gspecialevents_and_tactical_overhaul_configs() {

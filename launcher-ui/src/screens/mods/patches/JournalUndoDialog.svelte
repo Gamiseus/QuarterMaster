@@ -18,7 +18,7 @@
   let choice = $state<JournalUndoChoice | null>(null);
   let token = 0;
 
-  const modNames = $derived(Object.fromEntries((mods.list.status === "ready" ? mods.list.data : []).map((m) => [m.id, m.name])));
+  const modNames = $derived({ qm_glue: "Your adjustments", ...Object.fromEntries((mods.list.status === "ready" ? mods.list.data : []).map((m) => [m.id, m.name])) } as Record<string, string>);
   /** A mod by its name, as FactionNote names it. */
   const modName = (id: string) => modNames[id] ?? modNames[id.toLowerCase()] ?? id;
   const name = (patchId: string) => {

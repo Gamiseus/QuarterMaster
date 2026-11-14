@@ -59,8 +59,23 @@
       grid-template-columns: repeat(2, minmax(0, 1fr));
       column-gap: var(--qm-space-6);
     }
+  }
 
+  @container (760px <= width < 1500px) {
     .dossier :global(.qm-kv .row:nth-last-child(2):nth-child(odd)) {
+      border-bottom: 0;
+    }
+  }
+
+  /* A maximised window: three columns, so the figures do not sit far from their labels' neighbours. */
+  @container (min-width: 1500px) {
+    .dossier :global(.qm-kv) {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    /* The last line of the grid has no rule under it. */
+    .dossier :global(.qm-kv .row:nth-child(3n + 1):nth-last-child(-n + 3)),
+    .dossier :global(.qm-kv .row:nth-child(3n + 1):nth-last-child(-n + 3) ~ .row) {
       border-bottom: 0;
     }
   }

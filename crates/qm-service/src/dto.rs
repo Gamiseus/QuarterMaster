@@ -55,6 +55,13 @@ pub struct SettingsView {
     pub color_vision: String,
     pub high_contrast: bool,
     pub text_scale: f32,
+    /// Mod id -> the colour (1 to 8) picked for it.
+    pub mod_colors: HashMap<String, u8>,
+    pub window: qm_manager::storage::WindowSettings,
+    /// The set of mods and profiles picked for the next start.
+    pub mods_source: qm_manager::storage::ModsSource,
+    /// The running launcher uses the workspace's mods and profiles.
+    pub workspace_mode: bool,
 }
 
 impl From<&LauncherSettings> for SettingsView {
@@ -82,6 +89,10 @@ impl From<&LauncherSettings> for SettingsView {
             color_vision: s.color_vision.clone(),
             high_contrast: s.high_contrast,
             text_scale: s.text_scale,
+            mod_colors: s.mod_colors.clone(),
+            window: s.window.clone(),
+            mods_source: s.mods_source,
+            workspace_mode: false,
         }
     }
 }
@@ -120,6 +131,10 @@ pub enum RevealKind {
     DataDir,
     /// `<data>/cache/diagnostics`, where bug report bundles are written.
     Diagnostics,
+    /// `<data>/backups`.
+    Backups,
+    /// The workspace mods folder.
+    Workspace,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
@@ -459,6 +474,10 @@ pub struct SimulationOverview {
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
     #[specta(optional)]
     pub inferred_edges: Vec<qm_manager::failure_groups::InferredEdge>,
+    /// Ids of the conflicts dismissed in the active profile.
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    #[specta(optional)]
+    pub dismissed_conflicts: Vec<String>,
 }
 
 /// What the patches do to one game file.

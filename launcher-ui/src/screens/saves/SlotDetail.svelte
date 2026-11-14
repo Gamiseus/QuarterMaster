@@ -96,10 +96,6 @@
     padding-top: var(--qm-space-3);
   }
 
-  :global(.slot-detail .body > *) {
-    max-width: calc(var(--qm-measure) * 1.4);
-  }
-
   .error p {
     margin: 0 0 var(--qm-space-2);
   }

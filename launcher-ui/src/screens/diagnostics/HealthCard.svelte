@@ -21,9 +21,13 @@
   let acknowledging = $state(false);
 
   const report = $derived(diagnostics.health.status === "ready" ? diagnostics.health.data : null);
+  /** Problems first, then things to check: the card scrolls, and what needs a look must not sit below the fold. */
+  const RANK: Record<HealthTone, number> = { danger: 0, warn: 1, neutral: 2, ok: 2 };
   const rows = $derived(
     report
-      ? healthRows(report, game.isBusy, profiles.activeSummary?.id ?? null, (id) => profiles.list.find((p) => p.id === id)?.name)
+      ? [...healthRows(report, game.isBusy, profiles.activeSummary?.id ?? null, (id) => profiles.list.find((p) => p.id === id)?.name)].sort(
+          (a, b) => RANK[a.tone] - RANK[b.tone],
+        )
       : [],
   );
   const canChange = $derived(app.startupDone && !game.isBusy);
@@ -71,6 +75,9 @@
             <div class="detail">
               <span>{row.detail}</span>
               {#if row.action === "clear_overwrite"}
+                {#if files.length > 0}
+                  <Inset>{@render fileList("Overwrite files")}</Inset>
+                {/if}
                 <Button size="sm" disabled={!canChange} onclick={() => (clearOpen = true)}>Clear overwrite folder</Button>
               {:else if row.action === "acknowledge_update"}
                 <Button size="sm" disabled={!app.startupDone || acknowledging} onclick={acknowledge}>Mark as checked</Button>
@@ -81,9 +88,6 @@
           </li>
         {/each}
       </ul>
-      {#if files.length > 0}
-        <Inset>{@render fileList("Overwrite files")}</Inset>
-      {/if}
     </ScrollRegion>
     <div class="actions">
       <Button disabled={!canRepair} onclick={() => (repairOpen = true)}>Repair DLL</Button>
@@ -129,7 +133,8 @@
 
   .row {
     display: grid;
-    grid-template-columns: calc(var(--qm-detail-w) * 0.4) auto 1fr;
+    /* The badge column is as wide as the longest badge ("Problem"), so the texts line up. */
+    grid-template-columns: calc(var(--qm-detail-w) * 0.4) calc(var(--qm-text-11) * 7.5) 1fr;
     gap: var(--qm-space-3);
     align-items: baseline;
     padding: var(--qm-space-2) 0;
@@ -142,6 +147,10 @@
     border-bottom: none;
   }
 
+  .row > :global(.badge) {
+    justify-self: start;
+  }
+
   .label {
     font-weight: 600;
   }
@@ -151,6 +160,11 @@
     flex-direction: column;
     align-items: flex-start;
     gap: var(--qm-space-2);
+    min-width: 0;
+  }
+
+  .detail > :global(.qm-inset) {
+    align-self: stretch;
   }
 
   .files {

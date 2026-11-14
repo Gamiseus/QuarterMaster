@@ -12,12 +12,15 @@ use crate::ops::profiles::vanilla_profile_error;
 use crate::service::Service;
 use qm_core::handshake::{BindingStatus, LoadOrderPlan, OverrideReport};
 use qm_core::lenient::Lenient;
-use qm_core::patch::compat::{overrides_toml, Override};
+use qm_core::patch::compat::{
+    asset_choices_toml, overrides_toml, AssetChoiceEntry, Override, ASSET_VANILLA,
+};
 use qm_core::patch::fingerprint::{PatchFingerprintLite, PatchRef};
 use qm_core::patch::order::{name_matches, patch_name};
 use qm_core::patch::plan::{self, BindKind, Fingerprints, FpMode, RawLoad};
 use qm_core::patch::table::PatchTable;
 use qm_core::patch::Patch;
+use qm_manager::assets_ledger::{self, AssetLedger};
 use qm_manager::fixes::{self, FixChange, JournalEntry, ProfileFix, FIXES_VERSION};
 use qm_manager::{ModProfile, SimulationReport, VANILLA_ID};
 use qm_schema::ModManifest;
@@ -40,9 +43,21 @@ struct Part {
     refs: Vec<(String, Why)>,
 }
 
+/// One asset choice as `[[asset_choices]]` entries, one per file it decides.
+struct AssetPart {
+    fix: ProfileFix,
+    entries: Vec<AssetChoiceEntry>,
+    /// The mods the entries refer to (the winner's first), with why.
+    refs: Vec<(String, Why)>,
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Why {
     Changes,
+    /// Its files are the ones used (an asset choice).
+    UsesFiles,
+    /// Some of its files are not loaded (an asset choice).
+    LeavesOut,
     PlacesNext,
     Orders,
     /// It keeps that mod's change to a line another patch also changes (D49).
@@ -341,6 +356,7 @@ impl Service {
 
         let mut refused = Vec::new();
         let mut parts: Vec<Part> = Vec::new();
+        let mut asset_parts: Vec<AssetPart> = Vec::new();
         let wanted: BTreeSet<&str> = req.fix_ids.iter().map(String::as_str).collect();
         if p.fixes_version < FIXES_VERSION {
             for id in &wanted {
@@ -354,7 +370,18 @@ impl Service {
             }
             let mut fps = Fingerprints::new(raw, FpMode::All);
             let copies = copy_ids(p);
+            // The asset ledger, made once and only when an asset choice is asked for.
+            let mut ledger: Option<Option<AssetLedger>> = None;
             for f in fixes::fixes(p).filter(|f| wanted.contains(f.id.as_str())) {
+                if matches!(f.change, FixChange::AssetChoice { .. }) {
+                    let l = ledger
+                        .get_or_insert_with(|| self.ledger_with(p, raw, &fixes::asset_choices(p)));
+                    match asset_part_of(raw, l.as_ref(), f) {
+                        Ok(part) => asset_parts.push(part),
+                        Err(why) => refused.push(refusal(&f.id, &why)),
+                    }
+                    continue;
+                }
                 match part_of(raw, &copies, &mut fps, f) {
                     Ok(part) => parts.push(part),
                     Err(why) => refused.push(refusal(&f.id, &why)),
@@ -371,7 +398,16 @@ impl Service {
                 .or_else(|| meta_of(raw, m).and_then(|x| x.name.clone()))
                 .unwrap_or_else(|| m.to_string())
         };
-        let Some(first) = parts.first() else {
+        // The mod the new mod is named after: the first changed patch's, else the first
+        // asset choice's first mod.
+        let first_target = parts.first().map(|x| x.target.clone()).or_else(|| {
+            asset_parts
+                .iter()
+                .flat_map(|x| x.refs.iter())
+                .map(|(m, _)| m.clone())
+                .next()
+        });
+        let Some(first_target) = first_target else {
             let reason = "None of these fixes can be saved as a compatibility patch.".to_string();
             return Ok(ExportWork {
                 preview: CompatExportPreview {
@@ -398,6 +434,7 @@ impl Service {
             .iter()
             .flat_map(|x| x.refs.iter())
             .filter(|(_, w)| *w == Why::Changes)
+            .chain(asset_parts.iter().flat_map(|x| x.refs.iter()))
             .chain(
                 parts
                     .iter()
@@ -408,6 +445,8 @@ impl Service {
             let l = label(m);
             let reason = match why {
                 Why::Changes => format!("it changes {l}'s patch"),
+                Why::UsesFiles => format!("it uses {l}'s files where another mod has the same"),
+                Why::LeavesOut => format!("it leaves out files of {l}"),
                 Why::PlacesNext => format!("it places code next to {l}'s change"),
                 Why::Orders => format!("it runs a patch before or after {l}'s patch"),
                 Why::KeepsChange => format!("it keeps {l}'s change to a line"),
@@ -468,18 +507,22 @@ impl Service {
         let other = requires
             .iter()
             .map(|r| r.mod_id.to_lowercase())
-            .find(|m| *m != first.target);
-        let mod_id = unique_id(&first.target, other.as_deref(), &taken);
+            .find(|m| *m != first_target);
+        let mod_id = unique_id(&first_target, other.as_deref(), &taken);
         let name = clean_name(&req.name).unwrap_or_else(|| {
             let mods: Vec<&str> = requires.iter().map(|r| r.name.as_str()).take(2).collect();
             clip(&format!("Compatibility patch for {}", mods.join(" and ")))
         });
 
-        let manifest = manifest_for(&mod_id, &name, &requires, &features_for(&parts, raw));
+        let mut features = features_for(&parts, raw);
+        if !asset_parts.is_empty() {
+            features.push("asset_choices".to_string());
+        }
+        let manifest = manifest_for(&mod_id, &name, &requires, &features);
         let mod_json = serde_json::to_string_pretty(&manifest_json(&manifest)?)
             .map_err(|e| internal("Could not write mod.json.", e.to_string()))?;
-        let qm_toml = toml_for(&name, &p.name, &parts)?;
-        let readme = readme_for(&name, &p.name, &parts, &requires);
+        let qm_toml = toml_for(&name, &p.name, &parts, &asset_parts)?;
+        let readme = readme_for(&name, &p.name, &parts, &asset_parts, &requires);
 
         // The mod as the loader would read it once installed, with no disk access.
         let raw2 = raw
@@ -498,12 +541,30 @@ impl Service {
                 "qm.toml gives other overrides".to_string(),
             ));
         }
+        let choices_back: Vec<&AssetChoiceEntry> = raw2
+            .asset_choices
+            .iter()
+            .filter(|(ix, _)| raw2.mods.get(*ix as usize).is_some_and(|m| m.id == mod_id))
+            .filter_map(|(_, c)| c.ok())
+            .collect();
+        let choices_meant: Vec<&AssetChoiceEntry> =
+            asset_parts.iter().flat_map(|x| &x.entries).collect();
+        if choices_back != choices_meant {
+            return Err(internal(
+                "The compatibility patch does not read back.",
+                "qm.toml gives other asset choices".to_string(),
+            ));
+        }
 
         // The profile after the export, planned as activation would plan it (§8.2).
         let mut q = p.clone();
         let mut removed = Vec::new();
-        for x in &parts {
-            removed.extend(fixes::remove(&mut q, &x.fix.id));
+        for id in parts
+            .iter()
+            .map(|x| &x.fix.id)
+            .chain(asset_parts.iter().map(|x| &x.fix.id))
+        {
+            removed.extend(fixes::remove(&mut q, id));
         }
         fixes::sync_legacy(&mut q);
         if !q.enabled_mods.contains(&mod_id) {
@@ -551,7 +612,11 @@ impl Service {
                     },
                 ],
                 equivalence,
-                included: parts.iter().map(|x| x.fix.id.clone()).collect(),
+                included: parts
+                    .iter()
+                    .map(|x| x.fix.id.clone())
+                    .chain(asset_parts.iter().map(|x| x.fix.id.clone()))
+                    .collect(),
                 refused,
             },
             profile: Some(q),
@@ -641,6 +706,63 @@ fn name_mods(raw: &RawLoad, copies: &HashSet<String>, name: &str) -> Result<Vec<
     }
 }
 
+/// The entries for asset choice `f`, one per file it decides, or why there are none.
+/// `ledger` is the profile's asset ledger; None while the mods are still being read.
+fn asset_part_of(
+    raw: &RawLoad,
+    ledger: Option<&AssetLedger>,
+    f: &ProfileFix,
+) -> Result<AssetPart, String> {
+    if f.paused {
+        return Err("It is paused. Resume it first.".to_string());
+    }
+    let FixChange::AssetChoice { key, winner, .. } = &f.change else {
+        return Err("It is not an asset choice.".to_string());
+    };
+    let ledger = ledger.ok_or(MSG_NOT_READY)?;
+    let slots = assets_ledger::slot_exclusions(ledger, key);
+    if slots.is_empty() {
+        return Err("It leaves no file out now, so there is nothing to save.".to_string());
+    }
+    // The loaded mod a source belongs to: a mod id, or the mod that has the faction.
+    let mod_of = |source: &str| -> Result<String, String> {
+        let off = || format!("It refers to {source}, which is off. Turn it on first.");
+        match source.strip_prefix("faction:") {
+            Some(id) => raw
+                .factions
+                .iter()
+                .find(|lf| lf.faction.id == id)
+                .map(|lf| lf.mod_id.to_lowercase())
+                .ok_or_else(off),
+            None => loaded_mod(raw, source).ok_or_else(off),
+        }
+    };
+    let mut refs: Vec<(String, Why)> = Vec::new();
+    if winner != ASSET_VANILLA {
+        refs.push((mod_of(winner)?, Why::UsesFiles));
+    }
+    let mut entries = Vec::new();
+    for s in slots {
+        for source in s.leaves_out.keys() {
+            let m = mod_of(source)?;
+            if !refs.iter().any(|(r, _)| *r == m) {
+                refs.push((m, Why::LeavesOut));
+            }
+        }
+        entries.push(AssetChoiceEntry {
+            key: s.slot,
+            group: Some(s.group),
+            winner: winner.clone(),
+            leaves_out: s.leaves_out,
+        });
+    }
+    Ok(AssetPart {
+        fix: f.clone(),
+        entries,
+        refs,
+    })
+}
+
 /// Why an export refuses a name that refers to an adjusted copy.
 const COPY_NAMED: &str = "It refers to an adjusted copy, which a compatibility patch cannot name.";
 
@@ -663,7 +785,7 @@ fn part_of(
             return Err("A load order change cannot be saved as a compatibility patch.".to_string())
         }
         FixChange::AssetChoice { .. } => {
-            return Err("An asset choice cannot be saved as a compatibility patch.".to_string())
+            return Err("An asset choice is saved through its own entries.".to_string())
         }
         FixChange::Disable { patch } => (patch.clone(), BindKind::Disable),
         FixChange::Priority { patch, .. } => (patch.clone(), BindKind::Priority),
@@ -984,11 +1106,17 @@ fn manifest_json(m: &ModManifest) -> QmResult<serde_json::Value> {
     Ok(v)
 }
 
-fn toml_for(name: &str, profile: &str, parts: &[Part]) -> QmResult<String> {
+fn toml_for(
+    name: &str,
+    profile: &str,
+    parts: &[Part],
+    asset_parts: &[AssetPart],
+) -> QmResult<String> {
     let mut out = format!(
         "# {}\n# A compatibility patch QuarterMaster made from fixes in the profile \"{}\".\n\
-         # Each [[overrides]] entry is one fix. QuarterMaster applies an entry only while this\n\
-         # mod requires every mod the entry refers to.\n\n\
+         # Each [[overrides]] entry is one fix, and each [[asset_choices]] entry is one file of\n\
+         # an asset choice. QuarterMaster applies an entry only while this mod requires every\n\
+         # mod the entry refers to.\n\n\
          [manifest]\nversion = \"{EXPORT_VERSION}\"\n\n",
         one_line(name),
         one_line(profile)
@@ -997,13 +1125,44 @@ fn toml_for(name: &str, profile: &str, parts: &[Part]) -> QmResult<String> {
         .iter()
         .map(|x| (one_line(&x.fix.label), x.entry.clone()))
         .collect();
-    let body = overrides_toml(&entries).map_err(|e| internal("Could not write qm.toml.", e))?;
-    out.push_str(body.trim_end());
-    out.push('\n');
+    if !entries.is_empty() {
+        let body = overrides_toml(&entries).map_err(|e| internal("Could not write qm.toml.", e))?;
+        out.push_str(body.trim_end());
+        out.push('\n');
+    }
+    // The fix's label goes above its first entry.
+    let choices: Vec<(String, AssetChoiceEntry)> = asset_parts
+        .iter()
+        .flat_map(|x| {
+            x.entries.iter().enumerate().map(|(i, e)| {
+                let comment = if i == 0 {
+                    one_line(&x.fix.label)
+                } else {
+                    String::new()
+                };
+                (comment, e.clone())
+            })
+        })
+        .collect();
+    if !choices.is_empty() {
+        let body =
+            asset_choices_toml(&choices).map_err(|e| internal("Could not write qm.toml.", e))?;
+        if !parts.is_empty() {
+            out.push('\n');
+        }
+        out.push_str(body.trim_end());
+        out.push('\n');
+    }
     Ok(out)
 }
 
-fn readme_for(name: &str, profile: &str, parts: &[Part], requires: &[CompatRequirement]) -> String {
+fn readme_for(
+    name: &str,
+    profile: &str,
+    parts: &[Part],
+    asset_parts: &[AssetPart],
+    requires: &[CompatRequirement],
+) -> String {
     let mut out = format!(
         "{}\n\nA compatibility patch QuarterMaster made from fixes in the profile \"{}\".\n\nIt changes:\n",
         one_line(name),
@@ -1016,6 +1175,13 @@ fn readme_for(name: &str, profile: &str, parts: &[Part], requires: &[CompatRequi
         } else {
             out.push_str(&format!("- {label} ({})\n", x.entry.patch));
         }
+    }
+    for x in asset_parts {
+        let files = match x.entries.len() {
+            1 => "1 file".to_string(),
+            n => format!("{n} files"),
+        };
+        out.push_str(&format!("- {} ({files})\n", one_line(&x.fix.label)));
     }
     out.push_str("\nIt needs:\n");
     for r in requires {

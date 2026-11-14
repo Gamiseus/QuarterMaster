@@ -11,13 +11,20 @@ export type DiffRow = {
   patch?: string;
 };
 
-/** Unchanged rows `start` to `end` (exclusive) folded into one row. */
-export type FoldRow = { kind: "fold"; start: number; end: number };
+/**
+ * Rows `start` to `end` (exclusive) folded into one row: unchanged rows, or with `changed` the
+ * rest of one long change (then `mod` and `patch` say whose).
+ */
+export type FoldRow = { kind: "fold"; start: number; end: number; changed?: boolean; mod?: string; patch?: string };
 
 export type DisplayRow = DiffRow | FoldRow;
 
 /** Folds shorter than this stay open: a fold row saves nothing over three lines. */
 const MIN_FOLD = 4;
+
+/** A change of one patch longer than this shows its first `LONG_CHANGE_HEAD` rows and folds the rest. */
+export const LONG_CHANGE = 60;
+export const LONG_CHANGE_HEAD = 24;
 
 type Added = { side: DiffSide; mod?: string; patch?: string };
 
@@ -103,6 +110,20 @@ export function collapse(rows: DiffRow[], context = 3, expanded: ReadonlySet<num
   const out: DisplayRow[] = [];
   let i = 0;
   while (i < rows.length) {
+    if (rows[i].kind !== "same") {
+      // One patch's run of changed rows. A very long one (a whole file added) would make the
+      // view as long as the patch, so its tail folds until asked for.
+      const start = i;
+      const { patch, mod } = rows[i];
+      while (i < rows.length && rows[i].kind !== "same" && rows[i].patch === patch) i++;
+      const from = start + LONG_CHANGE_HEAD;
+      if (i - start > LONG_CHANGE && !expanded.has(from)) {
+        out.push(...rows.slice(start, from), { kind: "fold", start: from, end: i, changed: true, mod, patch });
+      } else {
+        out.push(...rows.slice(start, i));
+      }
+      continue;
+    }
     if (keep[i]) {
       out.push(rows[i++]);
       continue;
@@ -138,7 +159,7 @@ export function viewLines(rows: DisplayRow[], mode: "split" | "unified"): ViewLi
   const out: ViewLine[] = [];
   rows.forEach((r, i) => {
     if (r.kind === "fold") {
-      out.push({ kind: "fold", fold: r, key: `f${r.start}` });
+      out.push({ kind: "fold", fold: r, mod: r.mod, patch: r.patch, key: `f${r.start}` });
     } else if (mode === "unified" && r.kind === "replaced") {
       out.push({ kind: "removed", left: r.left, mod: r.mod, patch: r.patch, key: `${i}-` });
       out.push({ kind: "added", right: r.right, mod: r.mod, patch: r.patch, key: `${i}+` });

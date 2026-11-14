@@ -2,6 +2,75 @@
 
 Versions are `Major.Minor.Patch`.
 
+## 1.8.2
+
+- launcher: a choice from the Assets view can be saved as a compatibility patch
+- added `[[asset_choices]]` in `qm.toml`: a compatibility patch names whose sound, image or font is used where two mods it requires replace the same one
+- a player's own choice for the file or its group wins over a compatibility patch's; the Assets view shows which mod chose a file
+- added feature name `asset_choices`
+- launcher: Settings fills the window: its cards flow into one to three columns by the window's width and the text size, and each setting keeps its control beside its text; colour vision is one row with a list instead of a tall block, and text size is a row like the others
+- launcher: on the Patches tab the view switcher (Changes, Order, Fixes, Assets) leads the tab, and Fixes and Assets use the whole width
+- launcher: the Saves tabs (Dossier, Ribbons, Soldiers, Backups) use the panel's whole width
+- launcher: the Dossier shows its figures in three columns in a very wide window
+- launcher: Manage profiles shows the profiles beside the picked profile's settings, so the dialog fits the window
+- launcher: the "mod update is ready" note closes by itself after 15 seconds; the update stays on the Mods screen
+- launcher: a mod's Patches tab explains each conflict in plain words, with the mods' and patches' names
+- launcher: Compare profiles shows each profile's own mods side by side, and a kind of difference with nothing in it takes one line
+- launcher: Diagnostics lists health problems first, then things to check, with the overwrite files inside their own row; the card is taller in a tall window
+- launcher: a mod's Load order tab names other mods by name and writes a version range in words
+- launcher: in a narrow mod list the category tag gives way so the mod's name stays readable
+- launcher: the patch details explain each conflict in plain words, with the mods' and patches' names
+- launcher: a file's changes start in the unified layout when there is no room for two columns of code, as at a large text size
+- launcher: an order preview names adjusted copies "Your adjustments" instead of an internal name
+- launcher: every mod row has an uninstall button; Select all (or Ctrl and Shift click) shows a bar that enables, disables or uninstalls the picked mods together, after one confirmation that lists them
+- launcher: fixed uninstalled mods coming back: with a workspace mods folder set, an emptied library was filled from it again at the next start. The folder now fills an empty library once; Sync now in Settings copies it again
+- launcher: fixed a message with a long address pushing its Dismiss button out of the window, so the message could not be closed
+- launcher: a mod's details use the panel's width: patches, options and sections sit in columns, and the readme sits beside the mod's facts
+- launcher: on the Patches tab, notes and conflicts that belong to no file are one line until opened; opened, each conflict has Resolve when a fix exists and a button to open the mod it names
+- launcher: the patch details column shows only once a patch is picked, and has a close button; the file uses the room until then
+- launcher: the patches above a file are larger, show name, mod and state on two lines, and picking one scrolls the file to its change
+- launcher: a change longer than 60 lines shows its first 24 and folds the rest behind "Show N more lines of this change"
+- launcher: Diagnostics shows Health and Crashes at the same height
+- launcher: fixed a mod's Patches tab never loading when one of its patches targets several files
+- launcher: checking a profile is faster with many patches on one long file: a mod is run alone once per file instead of once per patch, and an order swap is tested once per file instead of once per broken patch
+- launcher: the launcher log no longer records every patch of every check, which wrote megabytes per session; warnings and errors stay
+- launcher: on the Patches tab, "Show files changed by" also dims the other mods' changes in the file; the separate mod and patch lists above the file are gone, and so is the caption line above the patches
+- launcher: long lines in a file's changes scroll sideways instead of being cut off, and the mod's whole name stays at the right edge of each change
+- launcher: the row of patches above a file scrolls sideways with the mouse wheel, and a picked patch scrolls fully into view
+- launcher: a mod with more than one installed version has a version picker in the mod list; each profile chooses the version it uses
+- launcher: with a workspace mods folder set, a Library and Workspace switch beside the profile picker swaps between your installed mods and the workspace folder's mods. Workspace runs the folders as they are, with its own profiles; switching restarts the launcher
+- launcher: a workspace mods folder that does not exist yet is made; Settings can open it and write every file of the game into `_game_dump` inside it
+- a workspace subfolder whose name starts with `_` is never read as a mod
+- launcher: Settings lists the copies the launcher made of real `Mods` folders it found in the game folder, with their size and contents, and deletes them. Before, they were kept without any notice
+- launcher: a conflict that belongs to no line can be dismissed per profile; it stays listed under "Dismissed", stops counting, and can be shown again. Its game file can be viewed
+- launcher: the Assets view shows a replaced file from the game and from each mod: images are shown, sounds play, text is read
+- launcher: a file in a mod's file list opens in the same viewer
+- launcher: Settings > Game window sets window size, fullscreen and its type, borderless, resizable, VSync and monitor. The values go into a mod the launcher writes, Game window settings, which patches `conf.lua`
+- launcher: a file's changes can wrap long lines (Wrap), as well as scroll sideways; a file whose lines are too long for two columns side by side starts in the unified layout
+- launcher: a mod has the same colour in every file on the Patches tab, and its Overview tab can pick the colour
+- a `qm.toml` with a key written twice in one patch now says so in plain words, and that the lines starting the next patch are probably missing; before, the error read like two patches sharing an id
+- fixed: when a damaged save had no older copy to fall back on, the fresh profile the game got was empty, and the profile in play was reset in memory
+- fixed: a save whose last write never reached the disk is loaded from its `.prev` copy instead of starting over
+- the game no longer does extra work each time it reads an undefined global while no mod adds numbered sounds
+- a module or copy `source` must be inside its mod's folder; a path with `..` or an absolute path fails the mod
+- security scan: a file a patch names as a `source` is read whatever its extension
+- each `qm.toml` is read once per launch instead of three times, so a warning about it appears once
+- `blacklist.txt`: spaces around a name are ignored
+- a `.zip` mod's assets are unpacked again only when they changed, not on every launch
+- fixed: the size limit for a mod archive counts what is really unpacked, not what the archive claims
+- fixed: the mod list could mark a mod as installed because another mod's update key contained its repository name
+- fixed: a crafted download address could place the temporary mod archive outside the launcher's download folder
+- fixed: restoring a save backup reports a file it could not put back instead of saying it worked
+- restoring a save backup makes the slot's saves exactly the backup's: a save file made after the backup is removed (it is kept in the backup made before the restore, when automatic backups are on)
+- fixed: a shared profile code or `.qmpack` opened with `qm` could create its profile outside the profiles folder, or replace a profile with the same name; the new profile now gets a plain, unused id
+- a `qm://import-profile` link shows what it would add and asks before it makes the profile
+- `qm://install` links no longer install from a file or network path; use `qm import <path>` for a file on this computer
+- fixed: a mod setting whose id is a Lua reserved word (such as `end`) no longer breaks the saved settings file
+- fixed: a settings file that cannot be read is kept as `settings.json.unreadable` instead of being replaced by the defaults without a trace
+- fixed: a copy of the game's Lua files that was cut short while being made is made again, instead of being used with files missing
+- fixed: a launcher update that fails half way puts the old launcher back, so one is always there to start
+- fixed: `qm verify-library` can repair an installed mod file that was edited in place; the library keeps its own copy of each file, which takes more disk space
+
 ## 1.8.1
 
 - security scan: `os.rename` is found

@@ -14,6 +14,8 @@
     /** Why updates cannot be installed right now, or null. */
     updateBlocked?: string | null;
     onupdateall?: () => void;
+    /** Selects every mod shown, so they can be enabled, disabled or uninstalled together. */
+    onselectall?: () => void;
     /** Narrow: Add separator moves into a More menu; Update all and Add mod stay buttons. */
     compact?: boolean;
   }
@@ -27,6 +29,7 @@
     updateCount = 0,
     updateBlocked = null,
     onupdateall,
+    onselectall,
     compact = false,
   }: Props = $props();
 
@@ -91,6 +94,9 @@
         {chip.label}
       </button>
     {/each}
+    {#if onselectall}
+      <Button class="select-all" size="sm" variant="ghost" onclick={onselectall}>Select all</Button>
+    {/if}
   </div>
 </div>
 
@@ -116,6 +122,10 @@
   .chips {
     display: flex;
     gap: var(--qm-space-1);
+  }
+
+  .chips :global(.select-all) {
+    margin-left: auto;
   }
 
   .actions {

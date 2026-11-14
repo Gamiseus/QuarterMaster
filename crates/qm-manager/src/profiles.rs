@@ -111,6 +111,11 @@ pub struct ModProfile {
     #[serde(skip_serializing_if = "Option::is_none", default)]
     #[cfg_attr(feature = "specta", specta(optional))]
     pub migration_error: Option<String>,
+    /// Ids of conflicts the user dismissed in this profile. They stay listed under
+    /// "Dismissed" and no longer count as open.
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    #[cfg_attr(feature = "specta", specta(optional))]
+    pub dismissed_conflicts: Vec<String>,
 }
 
 /// The stacking notice (D3).
@@ -203,6 +208,7 @@ pub fn builtin_vanilla_profile(existing: Option<&ModProfile>) -> ModProfile {
         auto_follow: false,
         fix_journal: Vec::new(),
         migration_error: None,
+            dismissed_conflicts: Vec::new(),
         faction_picks: BTreeMap::new(),
     }
 }
@@ -692,6 +698,7 @@ impl QuarterMasterPaths {
                 auto_follow: false,
                 fix_journal: Vec::new(),
                 migration_error: None,
+            dismissed_conflicts: Vec::new(),
                 faction_picks: BTreeMap::new(),
             };
             let _ = self.save_profile(&default_prof);
@@ -901,6 +908,7 @@ impl QuarterMasterPaths {
                 auto_follow: false,
                 fix_journal: Vec::new(),
                 migration_error: None,
+            dismissed_conflicts: Vec::new(),
                 faction_picks: BTreeMap::new(),
             }
         };
@@ -1509,6 +1517,7 @@ impl QuarterMasterPaths {
     }
 
     /// Restores a backup snapshot into the save profile (and live `%APPDATA%\mnb\` if active).
+    /// The slot's save files become exactly the backup's: one the backup does not have is removed.
     pub fn restore_save_backup(
         &self,
         save_profile_id: &str,
@@ -1523,19 +1532,31 @@ impl QuarterMasterPaths {
 
         let active_dir = slot_dir.join("active");
         fs::create_dir_all(&active_dir).map_err(|e| e.to_string())?;
+        let live_dir = (settings.active_save_profile_id == save_profile_id)
+            .then_some(settings.save_dir_path.as_ref())
+            .flatten();
+        // A copy that fails is an error: a restore that put back only some files is not one.
+        let put = |from: &Path, to: &Path| -> Result<(), String> {
+            fs::copy(from, to)
+                .map(drop)
+                .map_err(|e| format!("Failed to restore {}: {e}", to.display()))
+        };
         for fname in SAVE_FILES {
             let src = snap_dir.join(fname);
             if src.is_file() {
-                let _ = fs::copy(&src, active_dir.join(fname));
-            }
-        }
-
-        if settings.active_save_profile_id == save_profile_id {
-            if let Some(ref live_dir) = settings.save_dir_path {
-                for fname in SAVE_FILES {
-                    let src = active_dir.join(fname);
-                    if src.is_file() {
-                        let _ = fs::copy(&src, live_dir.join(fname));
+                put(&src, &active_dir.join(fname))?;
+                if let Some(live) = live_dir {
+                    put(&src, &live.join(fname))?;
+                }
+            } else if fname.starts_with("saveMNB") || fname.starts_with("backUp") {
+                // A save the backup does not have was made after it (or is a copy of one
+                // that was): the slot goes back to what the backup holds. Settings files
+                // the backup lacks stay.
+                for dir in std::iter::once(&active_dir).chain(live_dir) {
+                    let stale = dir.join(fname);
+                    if stale.is_file() {
+                        fs::remove_file(&stale)
+                            .map_err(|e| format!("Failed to remove {}: {e}", stale.display()))?;
                     }
                 }
             }

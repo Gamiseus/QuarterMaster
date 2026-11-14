@@ -51,6 +51,10 @@ impl Service {
             line_rules_change: self.line_rules_change(),
             failure_groups: r.failure_groups.clone(),
             inferred_edges: r.inferred_edges.clone(),
+            dismissed_conflicts: self
+                .active_profile()
+                .map(|p| p.dismissed_conflicts)
+                .unwrap_or_default(),
             files: r
                 .files_touched
                 .iter()

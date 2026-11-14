@@ -1142,6 +1142,11 @@ fn raw_without(raw: &RawLoad, drop: &[String]) -> RawLoad {
             .iter()
             .filter_map(|(ix, o)| Some((remap(*ix)?, o.clone())))
             .collect(),
+        asset_choices: raw
+            .asset_choices
+            .iter()
+            .filter_map(|(ix, c)| Some((remap(*ix)?, c.clone())))
+            .collect(),
         factions: raw
             .factions
             .iter()

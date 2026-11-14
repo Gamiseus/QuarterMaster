@@ -238,6 +238,8 @@ pub struct RawLoad {
     pub patches: Vec<RawPatch>,
     /// Their `[[overrides]]` entries with the index of the mod (into `mods`), in loader order.
     pub overrides: Vec<(u32, Lenient<Override>)>,
+    /// Their `[[asset_choices]]` entries with the index of the mod, in loader order.
+    pub asset_choices: Vec<(u32, Lenient<compat::AssetChoiceEntry>)>,
     /// Faction candidates of the loaded mods.
     pub factions: Vec<LoadedFaction>,
     /// Configurations of the loaded mods for the built-in menu.
@@ -1268,7 +1270,20 @@ fn layer_patches_with(
     bindings: &mut Vec<FixBinding>,
 ) -> Layered {
     let layer = plan.map(|plan| profile_layer(raw, plan, mode, bindings));
-    let compat = compat::compat_layer(raw, &profile_touch(raw, layer.as_ref()));
+    let mut compat = compat::compat_layer(raw, &profile_touch(raw, layer.as_ref()));
+    // Asset choices of compat mods; the profile's own choice for a file or its group wins.
+    let chosen: BTreeSet<String> = plan
+        .map(|p| {
+            p.asset_choices
+                .iter()
+                .filter(|(_, v)| v.ok().is_some())
+                .map(|(k, _)| k.to_lowercase())
+                .collect()
+        })
+        .unwrap_or_default();
+    let asset_layer = compat::asset_choice_layer(raw, &chosen);
+    compat.reports.extend(asset_layer.reports);
+    let compat_excluded = asset_layer.exclusions;
     // A `Base` copy takes the place of the first patch it replaces (D58); the others, and a
     // `Base` copy whose base is gone, run last (D18).
     let mut at_slot: HashMap<usize, Vec<&GluePatchEntry>> = HashMap::new();
@@ -1409,11 +1424,15 @@ fn layer_patches_with(
             }
         }
         // Asset files a choice leaves out are not loaded (D78).
-        let excluded = plan
+        let mut excluded: Vec<String> = plan
             .zip(patch.mod_id())
-            .map_or(&[][..], |(plan, id)| plan.asset_exclusions_of(id));
+            .map_or(&[][..], |(plan, id)| plan.asset_exclusions_of(id))
+            .to_vec();
+        if let Some(more) = patch.mod_id().and_then(|id| compat_excluded.get(id)) {
+            excluded.extend(more.iter().cloned());
+        }
         if !excluded.is_empty() {
-            match loader::without_excluded_assets(&patch, excluded) {
+            match loader::without_excluded_assets(&patch, &excluded) {
                 Some(p) => patch = p,
                 None => continue,
             }
@@ -1424,7 +1443,7 @@ fn layer_patches_with(
     // Factions: at most one per side, compiled into patches QuarterMaster owns.
     let (active, faction_notes) =
         crate::patch::faction::choose_active(raw.factions.clone(), plan);
-    for p in crate::patch::faction::build_faction_patches(&active, plan) {
+    for p in crate::patch::faction::build_faction_patches_with(&active, plan, &compat_excluded) {
         out.push((
             p,
             crate::patch::faction::FACTION_PATCH_PRIORITY,

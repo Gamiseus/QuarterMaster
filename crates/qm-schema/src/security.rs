@@ -60,9 +60,13 @@ pub struct SecurityScanReport {
 }
 
 impl SecurityScanReport {
-    /// Scans all `.lua` and `.toml` files in `mod_dir` for elevated capabilities.
+    /// Scans all `.lua` and `.toml` files in `mod_dir` for elevated capabilities, and every
+    /// other file a patch file names as a module or copy `source`: the game runs those as
+    /// Lua whatever they are called.
     pub fn scan_directory(mod_dir: &Path) -> Self {
         let mut findings = Vec::new();
+        // Sources with another extension, as paths relative to `mod_dir` with `/`.
+        let mut named: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
 
         for entry in WalkDir::new(mod_dir).into_iter().filter_map(|e| e.ok()) {
             let path = entry.path();
@@ -84,6 +88,32 @@ impl SecurityScanReport {
                 .replace('\\', "/");
 
             if let Ok(content) = std::fs::read_to_string(path) {
+                findings.extend(Self::scan_source(&rel, &content));
+                if ext == "toml" {
+                    // A source is looked up from the mod's folder, then from the file's own.
+                    let here = rel.rsplit_once('/').map_or("", |(dir, _)| dir);
+                    for source in patch_sources(&content) {
+                        let source = source.replace('\\', "/");
+                        named.insert(source.clone());
+                        if !here.is_empty() {
+                            named.insert(format!("{here}/{source}"));
+                        }
+                    }
+                }
+            }
+        }
+        for rel in named {
+            let is_scanned = [".lua", ".toml"]
+                .iter()
+                .any(|e| rel.to_ascii_lowercase().ends_with(e));
+            if is_scanned || rel.split('/').any(|seg| seg == "..") {
+                continue;
+            }
+            let path = mod_dir.join(&rel);
+            if !path.is_file() {
+                continue;
+            }
+            if let Ok(content) = std::fs::read_to_string(&path) {
                 findings.extend(Self::scan_source(&rel, &content));
             }
         }
@@ -318,9 +348,59 @@ pub fn sha256_hex(bytes: &[u8]) -> String {
     hex
 }
 
+/// The module and copy sources a patch file names (`[patches.module] source`,
+/// `[patches.copy] sources`). Empty when the text is no patch file.
+fn patch_sources(toml_text: &str) -> Vec<String> {
+    let Ok(doc) = toml_text.parse::<toml::Value>() else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    let patches = doc.get("patches").and_then(|p| p.as_array());
+    for patch in patches.into_iter().flatten() {
+        if let Some(s) = patch
+            .get("module")
+            .and_then(|m| m.get("source"))
+            .and_then(|s| s.as_str())
+        {
+            out.push(s.to_string());
+        }
+        let sources = patch
+            .get("copy")
+            .and_then(|c| c.get("sources"))
+            .and_then(|s| s.as_array());
+        for s in sources.into_iter().flatten().filter_map(|s| s.as_str()) {
+            out.push(s.to_string());
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Lua under another extension is scanned when a patch file names it as a source.
+    #[test]
+    fn scans_the_files_a_patch_file_names_as_sources() {
+        let dir = tempfile::tempdir().unwrap();
+        let write = |rel: &str, text: &str| {
+            let p = dir.path().join(rel);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(p, text).unwrap();
+        };
+        write(
+            "qm.toml",
+            "[manifest]\nversion = \"1.0.0\"\n\n[[patches]]\n[patches.module]\nsource = \"data/notes.txt\"\nbefore = \"main.lua\"\nname = \"notes\"\n\n[[patches]]\n[patches.copy]\ntarget = \"main.lua\"\nposition = \"append\"\nsources = [\"extra.dat\"]\n",
+        );
+        write("data/notes.txt", "os.execute('calc')\n");
+        write("extra.dat", "local f = io.open('x', 'w')\n");
+        // Not named by any patch file: text that only mentions a call is left alone.
+        write("README.txt", "This mod never calls os.execute.\n");
+        let report = SecurityScanReport::scan_directory(dir.path());
+        let files: Vec<&str> = report.findings.iter().map(|f| f.file.as_str()).collect();
+        assert_eq!(files, ["data/notes.txt", "extra.dat"], "{:?}", report.findings);
+        assert!(report.has_high_risk);
+    }
 
     #[test]
     fn detects_lua_capabilities_and_ignores_comments() {

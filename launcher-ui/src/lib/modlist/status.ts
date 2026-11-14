@@ -15,9 +15,10 @@ export function assembleStatus(
   patchStates?: Map<string, ModPatchStatus[]>,
 ): Map<string, ModStatus> {
   const conflicts = new Map<string, number>();
+  const dismissed = new Set(sim?.dismissed_conflicts ?? []);
   for (const c of sim?.conflicts ?? []) {
-    // Info notes are not conflicts.
-    if (c.severity === "info") continue;
+    // Info notes are not conflicts, and a dismissed conflict no longer counts.
+    if (c.severity === "info" || dismissed.has(c.id)) continue;
     conflicts.set(c.mod_a_id, (conflicts.get(c.mod_a_id) ?? 0) + 1);
     if (c.mod_b_id !== null && c.mod_b_id !== c.mod_a_id) {
       conflicts.set(c.mod_b_id, (conflicts.get(c.mod_b_id) ?? 0) + 1);

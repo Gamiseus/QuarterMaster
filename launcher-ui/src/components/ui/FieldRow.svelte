@@ -67,7 +67,7 @@
     min-width: 0;
   }
 
-  @container (min-width: 520px) {
+  @container (min-width: 420px) {
     .inner {
       display: grid;
       grid-template-columns: minmax(0, 1fr) minmax(0, max-content);

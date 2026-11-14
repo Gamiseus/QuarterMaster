@@ -1,7 +1,7 @@
 <script lang="ts">
   import { Badge } from "../../../components/ui";
   import type { PatchExecutionRecord, PatchOutcomeStatus } from "../../../lib/bindings";
-  import { assignModColours } from "../../../lib/patches/colors";
+  import { modColours } from "../../../lib/stores/modcolours.svelte";
   import { isShadowed } from "../../../lib/patches/explain";
 
   interface Props {
@@ -29,22 +29,49 @@
   const NOT_RUN = { label: "Does not run in the game", tone: "warn" } as const;
   const badgeOf = (r: PatchExecutionRecord) => (r.status !== "skipped_disabled" && isShadowed(r) ? NOT_RUN : STATUS[r.status]);
 
-  const colours = $derived(assignModColours(colourMods ?? records.map((r) => r.mod_id)));
+  const colours = $derived(modColours(colourMods ?? records.map((r) => r.mod_id)));
+
+  let strip = $state<HTMLElement>();
+  /** The strip only scrolls sideways, so the wheel moves it sideways without Shift. */
+  function onwheel(e: WheelEvent) {
+    if (!strip || e.deltaX !== 0 || e.deltaY === 0 || strip.scrollWidth <= strip.clientWidth) return;
+    e.preventDefault();
+    strip.scrollLeft += e.deltaY;
+  }
+  // The picked patch is brought fully into view (a click on one half past the edge, a deep link).
+  $effect(() => {
+    const id = selected;
+    void records;
+    if (!id || !strip) return;
+    const chip = strip.querySelector<HTMLElement>(`[data-patch="${CSS.escape(id)}"]`);
+    chip?.scrollIntoView?.({ block: "nearest", inline: "nearest", behavior: "smooth" });
+  });
 </script>
 
-<ol class="strip" aria-label="Patches in application order">
+<ol
+  class="strip"
+  aria-label="Patches in application order"
+  title="Patches in this file, in the order they run. Pick one to jump to its change and see what it does."
+  bind:this={strip}
+  {onwheel}
+>
   {#each records as r, i (r.patch_id)}
     <li>
       <button
         type="button"
         class={["chip", `c${colours.get(r.mod_id) ?? 0}`, { selected: r.patch_id === selected }]}
         aria-pressed={r.patch_id === selected}
+        data-patch={r.patch_id}
         onclick={() => onselect(r.patch_id)}
       >
         <span class="n">{i + 1}</span>
-        <span class="name">{r.patch_name || r.patch_id}</span>
-        <span class="mod qm-muted">{modNames[r.mod_id] ?? r.mod_id}</span>
-        <Badge tone={badgeOf(r).tone}>{badgeOf(r).label}</Badge>
+        <span class="what">
+          <span class="name">{r.patch_name || r.patch_id}</span>
+          <span class="sub">
+            <span class="mod qm-muted">{modNames[r.mod_id] ?? r.mod_id}</span>
+            <Badge tone={badgeOf(r).tone}>{badgeOf(r).label}</Badge>
+          </span>
+        </span>
       </button>
     </li>
   {/each}
@@ -60,20 +87,38 @@
     list-style: none;
   }
 
+  /* Two lines: the patch's name, then its mod and state. A name longer than the chip is cut;
+     the details and the change itself show it whole. */
   .chip {
     display: flex;
     align-items: center;
-    gap: var(--qm-space-2);
-    padding: var(--qm-space-1) var(--qm-space-2);
+    gap: var(--qm-space-3);
+    max-width: calc(var(--qm-text-13) * 30);
+    padding: var(--qm-space-2) var(--qm-space-3);
     border: 1px solid var(--qm-border);
     border-left: 4px solid var(--attr, var(--qm-border-strong));
     border-radius: var(--qm-radius-sm);
     background: var(--qm-panel);
     color: var(--qm-text);
     font: inherit;
-    font-size: var(--qm-text-12);
+    font-size: var(--qm-text-13);
+    text-align: left;
     white-space: nowrap;
     cursor: pointer;
+  }
+
+  .what {
+    display: flex;
+    flex-direction: column;
+    gap: var(--qm-space-1);
+    min-width: 0;
+  }
+
+  .sub {
+    display: flex;
+    align-items: center;
+    gap: var(--qm-space-2);
+    font-size: var(--qm-text-12);
   }
 
   .chip.selected {
@@ -93,7 +138,9 @@
   }
 
   .name {
+    overflow: hidden;
     font-weight: 600;
+    text-overflow: ellipsis;
   }
 
   .c1 { --attr: var(--qm-attr-1); }

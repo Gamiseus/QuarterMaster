@@ -3,7 +3,8 @@
   import { Badge, Button, Callout, Dialog, EmptyState, Select, Skeleton } from "../../../components/ui";
   import { call } from "../../../lib/api";
   import { commands, type AssetChoicePreview, type AssetGroup, type AssetLedger, type AssetSlot, type FactionSideChoice } from "../../../lib/bindings";
-  import { VANILLA, choiceDraft, groupSummary, groupTitle, groupWinner, previewLines, slotSources, sourceName, winnerItems } from "../../../lib/patches/assets";
+  import { VANILLA, choiceDraft, groupChosenBy, groupSummary, groupTitle, groupWinner, previewLines, slotSources, sourceName, winnerItems } from "../../../lib/patches/assets";
+  import FileViewDialog, { type ViewSource } from "../../../components/FileViewDialog.svelte";
   import { fixes } from "../../../lib/stores/fixes.svelte";
   import { loadOrder } from "../../../lib/stores/loadorder.svelte";
 
@@ -109,6 +110,19 @@
   }
 
   const slotTitle = (s: AssetSlot) => `${s.name} (${s.key})`;
+
+  /** The game's file and each mod's file for a slot, to look at or listen to side by side. */
+  let viewOpen = $state(false);
+  let viewTitle = $state("");
+  let viewFiles = $state<ViewSource[]>([]);
+  function view(s: AssetSlot) {
+    viewTitle = s.name;
+    viewFiles = [
+      ...(s.game ? [{ source: VANILLA, path: s.game.path, label: "The game's file" }] : []),
+      ...s.claims.map((c) => ({ source: c.source, path: c.file, label: sourceName(c.source, modName) })),
+    ];
+    viewOpen = true;
+  }
   const sources = (g: AssetGroup) => g.claimants.map((c) => c.source);
 </script>
 
@@ -180,7 +194,8 @@
         </div>
         <p class="now">
           {#if winner}
-            Used now: {sourceName(winner, modName)}{g.choice ? " (your choice)" : ""}.
+            {@const by = groupChosenBy(g)}
+            Used now: {sourceName(winner, modName)}{g.choice ? " (your choice)" : by ? ` (chosen by ${modName(by)})` : ""}.
           {:else}
             Used now: a mix; see the files.
           {/if}
@@ -199,6 +214,10 @@
                   <span class="name">{s.name}</span>
                   <Badge tone={s.winner === VANILLA ? "neutral" : "info"} icon={false}>{sourceName(s.winner, modName)}</Badge>
                   <span class="qm-muted from">{slotSources(s, modName)}</span>
+                  {#if s.chosen_by}
+                    <span class="qm-muted from" data-testid="asset-chosen-by">Chosen by {modName(s.chosen_by)}</span>
+                  {/if}
+                  <Button size="sm" variant="ghost" aria-label={`View ${s.name}`} onclick={() => view(s)}>View</Button>
                   {#if s.claims.length > 1 || s.choice}
                     {#key pickKey}
                       <Select
@@ -265,6 +284,8 @@
     {/snippet}
   </Dialog>
 {/if}
+
+<FileViewDialog bind:open={viewOpen} title={viewTitle} files={viewFiles} />
 
 <style>
   .assets-view {

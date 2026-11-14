@@ -4,6 +4,7 @@ import type {
   CompatChangesView, CompatEquivalence, CompatExportPreview, CompatExportRequest, CompatExportResult, CompatRefusal,
   CompatRequirement, ModProfile, ModSummary, ProfileFix,
 } from "../bindings";
+import * as assets from "./assets";
 import { mods, patchesByMod } from "./fixtures";
 import * as ledger from "./ledger";
 import { COMPAT_OVERRIDES, compatLayer, findPatch, MOCK_PATCHES, MOD_RELATIONS, profileTexts, SKIPPED_RUNGS, type MockOverride } from "./patchworld";
@@ -52,8 +53,25 @@ export function compatChanges(modId: string, profile: ModProfile): CompatChanges
 const modName = (id: string) => mods.find((m) => m.id === id)?.name ?? id;
 const modOf = (name: string) => findPatch(name)?.mod ?? (name.includes(":") ? name.split(":")[0] : name);
 
-type Why = "changes" | "places_next" | "orders" | "stacks" | "keeps_change";
+type Why = "changes" | "uses_files" | "leaves_out" | "places_next" | "orders" | "stacks" | "keeps_change";
 type Part = { fix: ProfileFix; entry: MockOverride; target: string; refs: [string, Why][] };
+/** One asset choice as `[[asset_choices]]` entries, one per file it decides. */
+type AssetPart = { fix: ProfileFix; entries: assets.CompatAssetChoice[]; refs: [string, Why][] };
+
+/** The entries for an asset choice, or why there are none. */
+function assetPartOf(p: ModProfile, f: ProfileFix): AssetPart | string {
+  const v = ledger.fixView(p, f.id);
+  if (!v.can_export) return v.export_blocked_reason ?? "This fix cannot be saved as a compatibility patch.";
+  if (f.change.kind !== "asset_choice") return "It is not an asset choice.";
+  const entries = assets.slotExclusions(p, f.change.key);
+  if (entries.length === 0) return "It leaves no file out now, so there is nothing to save.";
+  const refs: [string, Why][] = f.change.winner === assets.VANILLA ? [] : [[assets.modOfSource(f.change.winner), "uses_files"]];
+  for (const source of entries.flatMap((e) => Object.keys(e.leaves_out))) {
+    const m = assets.modOfSource(source);
+    if (!refs.some(([r]) => r === m)) refs.push([m, "leaves_out"]);
+  }
+  return { fix: f, entries, refs };
+}
 
 /** One fix as an override entry, or why it cannot be one. */
 function partOf(p: ModProfile, f: ProfileFix): Part | string {
@@ -128,12 +146,13 @@ function toml(v: unknown): string {
   return typeof v === "string" ? JSON.stringify(v) : String(v);
 }
 
-function tomlFor(name: string, profile: string, parts: Part[]): string {
+function tomlFor(name: string, profile: string, parts: Part[], assetParts: AssetPart[]): string {
   const out = [
     `# ${name}`,
     `# A compatibility patch QuarterMaster made from fixes in the profile "${profile}".`,
-    "# Each [[overrides]] entry is one fix. QuarterMaster applies an entry only while this",
-    "# mod requires every mod the entry refers to.",
+    "# Each [[overrides]] entry is one fix, and each [[asset_choices]] entry is one file of",
+    "# an asset choice. QuarterMaster applies an entry only while this mod requires every",
+    "# mod the entry refers to.",
     "",
     "[manifest]",
     'version = "1.0.0"',
@@ -142,11 +161,20 @@ function tomlFor(name: string, profile: string, parts: Part[]): string {
     out.push("", `# ${x.fix.label}`, "[[overrides]]");
     for (const [k, v] of Object.entries(x.entry)) if (v !== undefined && !(Array.isArray(v) && v.length === 0)) out.push(`${k} = ${toml(v)}`);
   }
+  for (const x of assetParts) {
+    x.entries.forEach((e, i) => {
+      out.push("", ...(i === 0 ? [`# ${x.fix.label}`] : []), "[[asset_choices]]", `key = ${toml(e.key)}`, `group = ${toml(e.group)}`, `winner = ${toml(e.winner)}`, "", "[asset_choices.leaves_out]");
+      for (const [source, files] of Object.entries(e.leaves_out)) out.push(`${/^[A-Za-z0-9_-]+$/.test(source) ? source : JSON.stringify(source)} = ${toml(files)}`);
+    });
+  }
   return `${out.join("\n")}\n`;
 }
 
-function readmeFor(name: string, profile: string, parts: Part[], requires: CompatRequirement[]): string {
-  const changes = parts.map((x) => (x.fix.label.includes(x.entry.patch) ? `- ${x.fix.label}` : `- ${x.fix.label} (${x.entry.patch})`));
+function readmeFor(name: string, profile: string, parts: Part[], assetParts: AssetPart[], requires: CompatRequirement[]): string {
+  const changes = [
+    ...parts.map((x) => (x.fix.label.includes(x.entry.patch) ? `- ${x.fix.label}` : `- ${x.fix.label} (${x.entry.patch})`)),
+    ...assetParts.map((x) => `- ${x.fix.label} (${x.entries.length === 1 ? "1 file" : `${x.entries.length} files`})`),
+  ];
   const needs = requires.map((r) => `- ${r.name}${r.range !== "*" && r.version ? ` ${r.version} or newer` : ""}: ${r.reasons.join("; ")}`);
   return [
     name, "", `A compatibility patch QuarterMaster made from fixes in the profile "${profile}".`, "", "It changes:", ...changes, "", "It needs:", ...needs,
@@ -155,20 +183,22 @@ function readmeFor(name: string, profile: string, parts: Part[], requires: Compa
 }
 
 /** Registers a compatibility mod with the mock engine; returns a function that takes it out again. */
-function register(id: string, name: string, requires: string[], overrides: MockOverride[]): () => void {
+function register(id: string, name: string, requires: string[], overrides: MockOverride[], choices: assets.CompatAssetChoice[] = []): () => void {
   mods.push(summary(id, name, 100, 0));
   MOD_RELATIONS[id] = { requires: [...requires], load_after: [...requires], load_before: [] };
   COMPAT_OVERRIDES[id] = overrides;
+  if (choices.length > 0) assets.COMPAT_ASSET_CHOICES[id] = choices;
   patchesByMod[id] = [];
   return () => {
     mods.splice(mods.findIndex((m) => m.id === id), 1);
     delete MOD_RELATIONS[id];
     delete COMPAT_OVERRIDES[id];
+    delete assets.COMPAT_ASSET_CHOICES[id];
     delete patchesByMod[id];
   };
 }
 
-type Work = { preview: CompatExportPreview; parts: Part[]; next: ModProfile | null };
+type Work = { preview: CompatExportPreview; parts: Part[]; assetParts: AssetPart[]; next: ModProfile | null };
 
 /** What saving `req` makes, checked the way activation would run it (§8.2). Nothing is kept. */
 function exportWork(profile: ModProfile, req: CompatExportRequest): Work {
@@ -179,27 +209,38 @@ function exportWork(profile: ModProfile, req: CompatExportRequest): Work {
   const wanted = new Set(req.fix_ids);
   const refused: CompatRefusal[] = [...wanted].filter((id) => !(p.fixes ?? []).some((f) => f.id === id)).map((fix_id) => ({ fix_id, reason: "That fix is already gone." }));
   const parts: Part[] = [];
+  const assetParts: AssetPart[] = [];
   for (const f of (p.fixes ?? []).filter((x) => wanted.has(x.id))) {
+    if (f.change.kind === "asset_choice") {
+      const r = assetPartOf(p, f);
+      if (typeof r === "string") refused.push({ fix_id: f.id, reason: r });
+      else assetParts.push(r);
+      continue;
+    }
     const r = partOf(p, f);
     if (typeof r === "string") refused.push({ fix_id: f.id, reason: r });
     else parts.push(r);
   }
-  const first = parts[0];
-  if (!first) {
+  // The mod the new mod is named after: the first changed patch's, else the first asset choice's.
+  const firstTarget = parts[0]?.target ?? assetParts.flatMap((x) => x.refs)[0]?.[0];
+  if (!firstTarget) {
     const reason = "None of these fixes can be saved as a compatibility patch.";
     return {
       preview: { mod_id: "", name: "", version: "1.0.0", requires: [], load_after: [], files: [], equivalence: { kind: "not_checked", reason }, included: [], refused },
-      parts, next: null,
+      parts, assetParts, next: null,
     };
   }
 
   // The changed mods first, then the others, each with why.
   const requires: CompatRequirement[] = [];
   const refs = parts.flatMap((x) => x.refs);
-  for (const [m, w] of [...refs.filter(([, w]) => w === "changes"), ...refs.filter(([, w]) => w !== "changes")]) {
+  const assetRefs = assetParts.flatMap((x) => x.refs);
+  for (const [m, w] of [...refs.filter(([, w]) => w === "changes"), ...assetRefs, ...refs.filter(([, w]) => w !== "changes")]) {
     const l = modName(m);
     const reason =
       w === "changes" ? `it changes ${l}'s patch`
+      : w === "uses_files" ? `it uses ${l}'s files where another mod has the same`
+      : w === "leaves_out" ? `it leaves out files of ${l}`
       : w === "places_next" ? `it places code next to ${l}'s change`
       : w === "stacks" ? `it puts its code next to ${l}'s code at a shared line`
       : w === "keeps_change" ? `it keeps ${l}'s change to a line`
@@ -212,18 +253,20 @@ function exportWork(profile: ModProfile, req: CompatExportRequest): Work {
     const version = mods.find((x) => x.id === m)?.version ?? null;
     requires.push({ mod_id: m, name: l, version, range: version ? `>=${version}` : "*", reasons: [reason] });
   }
-  const other = requires.map((r) => r.mod_id).find((m) => m !== first.target) ?? null;
-  const modId = uniqueId(first.target, other, new Set(mods.map((m) => m.id.toLowerCase())));
+  const other = requires.map((r) => r.mod_id).find((m) => m !== firstTarget) ?? null;
+  const modId = uniqueId(firstTarget, other, new Set(mods.map((m) => m.id.toLowerCase())));
   const name = cleanName(req.name ?? "") ?? `Compatibility patch for ${requires.slice(0, 2).map((r) => r.name).join(" and ")}`.slice(0, 64).trim();
   const manifest = {
     id: modId, name, version: "1.0.0", authors: [], description: "A compatibility patch QuarterMaster made from fixes in a profile.",
     category: "Other", tags: ["compatibility"],
+    ...(assetParts.length > 0 ? { qm_features: ["asset_choices"] } : {}),
     relationships: { requires: Object.fromEntries(requires.map((r) => [r.mod_id, r.range])), load_after: requires.map((r) => r.mod_id) },
   };
 
   // The profile after the export, with the mod in place of the fixes.
   const next = structuredClone(p);
-  const included = new Set(parts.map((x) => x.fix.id));
+  const includedIds = [...parts.map((x) => x.fix.id), ...assetParts.map((x) => x.fix.id)];
+  const included = new Set(includedIds);
   next.fixes = (next.fixes ?? []).filter((f) => !included.has(f.id));
   ledger.sync(next);
   next.enabled_mods = [...next.enabled_mods, modId];
@@ -245,12 +288,12 @@ function exportWork(profile: ModProfile, req: CompatExportRequest): Work {
       mod_id: modId, name, version: "1.0.0", requires, load_after: requires.map((r) => r.mod_id),
       files: [
         { name: "mod.json", text: JSON.stringify(manifest, null, 2) },
-        { name: "qm.toml", text: tomlFor(name, profile.name, parts) },
-        { name: "README.txt", text: readmeFor(name, profile.name, parts, requires) },
+        { name: "qm.toml", text: tomlFor(name, profile.name, parts, assetParts) },
+        { name: "README.txt", text: readmeFor(name, profile.name, parts, assetParts, requires) },
       ],
-      equivalence, included: parts.map((x) => x.fix.id), refused,
+      equivalence, included: includedIds, refused,
     },
-    parts, next,
+    parts, assetParts, next,
   };
 }
 
@@ -261,14 +304,14 @@ export function exportPreview(profile: ModProfile, req: CompatExportRequest): Co
 /** `compat_export` (D14): installs the mod, turns it on and takes out the fixes, as one undoable step. */
 export function exportFixes(profile: ModProfile, req: CompatExportRequest): CompatExportResult {
   ledger.ledgerOf(profile);
-  const { preview, parts, next } = exportWork(profile, req);
+  const { preview, parts, assetParts, next } = exportWork(profile, req);
   if (preview.refused.length > 0) {
     fail("invalid_input", `Some fixes cannot be saved as a compatibility patch: ${preview.refused.map((r) => r.reason).join(" ")}`);
   }
   const eq = preview.equivalence;
   if (eq.kind === "differs") fail("conflict", `The compatibility patch would change the game code in ${eq.files.join(", ")}. Keep the fixes instead.`);
   if (eq.kind === "not_checked" || !next) fail("invalid_input", eq.kind === "not_checked" ? eq.reason : "Nothing to save.");
-  register(preview.mod_id, preview.name, preview.requires.map((r) => r.mod_id), parts.map((x) => x.entry));
+  register(preview.mod_id, preview.name, preview.requires.map((r) => r.mod_id), parts.map((x) => x.entry), assetParts.flatMap((x) => x.entries));
   const removed = (profile.fixes ?? []).filter((f) => preview.included.includes(f.id));
   profile.fixes = (profile.fixes ?? []).filter((f) => !preview.included.includes(f.id));
   ledger.sync(profile);

@@ -91,7 +91,7 @@ fn not_ready() -> QmError {
 impl Service {
     /// The ledger for profile `p` over the cached mods, with `choices` as its asset choices.
     /// None while the mods or the simulation are not loaded.
-    fn ledger_with(
+    pub(crate) fn ledger_with(
         &self,
         p: &ModProfile,
         raw: &RawLoad,
@@ -109,11 +109,20 @@ impl Service {
             assets_ledger::all_manifests_in_run_order(raw.patches.iter().map(|rp| &rp.patch), main);
         let active = active_factions(raw.factions.clone(), &p.faction_picks);
         let last_run = self.last_run_asset_winners(&p.id);
+        // What the enabled compatibility mods choose, where the profile chose nothing.
+        let chosen = choices.keys().map(|k| k.to_lowercase()).collect();
+        let compat: BTreeMap<String, (String, String)> =
+            qm_core::patch::compat::asset_choice_layer(raw, &chosen)
+                .applied
+                .into_iter()
+                .map(|c| (c.key, (c.winner, c.from)))
+                .collect();
         Some(assets_ledger::build(&LedgerInput {
             manifests: &manifests,
             factions: &active,
             listing: listing.as_deref(),
             choices,
+            compat: &compat,
             last_run: &last_run,
         }))
     }

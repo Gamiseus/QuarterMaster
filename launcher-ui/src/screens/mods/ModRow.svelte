@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { Attachment } from "svelte/attachments";
-  import { IconGrip, IconLock, IconUnlock } from "../../components/icons";
-  import { Badge, Checkbox, IconButton, Tooltip } from "../../components/ui";
+  import { IconGrip, IconLock, IconTrash, IconUnlock } from "../../components/icons";
+  import { Badge, Checkbox, IconButton, Select, Tooltip } from "../../components/ui";
   import type { ModSummary } from "../../lib/bindings";
   import { maxRowBadges, rowBadges, type ModStatus } from "../../lib/modlist/status";
   import { app } from "../../lib/stores/app.svelte";
@@ -22,6 +22,14 @@
     handle: Attachment<HTMLElement>;
     onenabledchange: (enabled: boolean) => void;
     ontogglelock: () => void;
+    /** Asks to uninstall this mod (the list confirms first). */
+    onuninstall: () => void;
+    /** Why uninstalling is not possible right now. */
+    uninstallBlocked?: string | null;
+    /** Picks which installed version this profile uses (shown when the mod has more than one). */
+    onversionchange?: (version: string) => void;
+    /** Some mod in the list has a version picker: every row keeps room for one, so the columns line up. */
+    versionPicker?: boolean;
   }
 
   let {
@@ -37,6 +45,10 @@
     handle,
     onenabledchange,
     ontogglelock,
+    onuninstall,
+    uninstallBlocked = null,
+    onversionchange,
+    versionPicker = false,
   }: Props = $props();
 
   const tab = $derived(active ? 0 : -1);
@@ -51,7 +63,7 @@
 
 <div
   role="row"
-  class={["row", { selected, dimmed: !enabled, locked, "one-badge": max === 1 }]}
+  class={["row", { selected, dimmed: !enabled, locked, "one-badge": max === 1, "version-picker": versionPicker }]}
   tabindex={tab}
   aria-selected={selected}
   aria-label={mod.name}
@@ -92,7 +104,23 @@
     {/if}
   </div>
   <!-- Asset-only mods have no real version (the library files them under a placeholder). -->
-  <div role="gridcell" class="cell version">{mod.kind === "assets" ? "" : mod.version}</div>
+  <div role="gridcell" class="cell version">
+    {#if mod.kind === "assets"}
+      <!-- No real version. -->
+    {:else if mod.installed_versions.length > 1 && onversionchange}
+      <Select
+        label={`Version of ${mod.name} in this profile`}
+        hideLabel
+        class="version-pick"
+        items={mod.installed_versions.map((v) => ({ value: v, label: v }))}
+        disabled={!canMutate}
+        tabindex={tab}
+        bind:value={() => mod.version, (v) => v !== mod.version && onversionchange?.(v)}
+      />
+    {:else}
+      {mod.version}
+    {/if}
+  </div>
   <div role="gridcell" class="cell status">
     {#each shown as b (b.text)}
       <Badge tone={b.tone}>{b.text}</Badge>
@@ -118,6 +146,15 @@
       onclick={ontogglelock}
     />
   </div>
+  <div role="gridcell" class="cell remove">
+    <IconButton
+      icon={IconTrash}
+      label={uninstallBlocked ?? `Uninstall ${mod.name}`}
+      disabled={!canMutate || uninstallBlocked !== null}
+      tabindex={tab}
+      onclick={onuninstall}
+    />
+  </div>
 </div>
 
 <style>
@@ -125,7 +162,8 @@
     display: grid;
     grid-template-columns:
       var(--qm-space-5) var(--qm-space-5) var(--qm-space-6) minmax(0, 1fr)
-      7ch var(--qm-status-col) var(--qm-row-h);
+      var(--qm-version-col) var(--qm-status-col) var(--qm-row-h) var(--qm-row-h);
+    --qm-version-col: 7ch;
     /* Two badges with icons, in badge-text units so the column grows with the text size. */
     --qm-status-col: calc(var(--qm-text-11) * 15);
     align-items: center;
@@ -137,6 +175,7 @@
     font-size: var(--qm-text-13);
     user-select: none;
     transition: background var(--qm-dur-fast) var(--qm-ease);
+    container-type: inline-size;
   }
 
   .row:hover {
@@ -182,6 +221,24 @@
     font-size: var(--qm-text-12);
   }
 
+  .row.version-picker {
+    --qm-version-col: 10ch;
+  }
+
+  /* The version picker: as plain as the version text, with a chevron. */
+  .version :global(.version-pick) {
+    width: 100%;
+  }
+
+  .version :global(.version-pick .qm-select-trigger) {
+    min-height: 0;
+    width: 100%;
+    padding: 0 var(--qm-space-1);
+    gap: var(--qm-space-1);
+    font-family: var(--qm-font-mono);
+    font-size: var(--qm-text-12);
+  }
+
   /* One badge plus "+N". */
   .row.one-badge {
     --qm-status-col: calc(var(--qm-text-11) * 10);
@@ -194,10 +251,17 @@
   }
 
   .name > :global(.badge) {
-    flex: 0 1 auto;
+    flex: 0 1000 auto;
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+
+  /* A narrow list (wide sidebar, small window) has no room for both: the name wins. */
+  @container (max-width: 35rem) {
+    .name > :global(.badge) {
+      display: none;
+    }
   }
 
   .title {

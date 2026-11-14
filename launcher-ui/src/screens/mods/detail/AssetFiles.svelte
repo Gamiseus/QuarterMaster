@@ -1,13 +1,24 @@
 <script lang="ts">
+  import FileViewDialog from "../../../components/FileViewDialog.svelte";
   import { Badge, Section } from "../../../components/ui";
   import type { AssetFile } from "../../../lib/bindings";
   import { assetSummary, groupAssetFiles } from "../../../lib/modlist/assets";
 
   interface Props {
     files: AssetFile[];
+    /** The mod the files belong to; with it each file can be viewed. */
+    modId?: string;
+    modName?: string;
   }
 
-  let { files }: Props = $props();
+  let { files, modId, modName }: Props = $props();
+
+  let viewOpen = $state(false);
+  let viewPath = $state("");
+  function view(path: string) {
+    viewPath = path;
+    viewOpen = true;
+  }
 
   /** Folders with more files than this start collapsed. */
   const OPEN_LIMIT = 40;
@@ -26,7 +37,11 @@
       <ul aria-label={`Files in ${g.folder === "" ? "assets" : g.folder}`}>
         {#each g.files as f (f.path)}
           <li>
-            <span class="name">{f.name}</span>
+            {#if modId}
+              <button type="button" class="name link" aria-label={`View ${f.name}`} onclick={() => view(f.path)}>{f.name}</button>
+            {:else}
+              <span class="name">{f.name}</span>
+            {/if}
             {#if f.overrides === true}
               <!-- Plain tones: replacing the game's files is what these mods are for, not a warning. -->
               <Badge tone="accent">Overrides</Badge>
@@ -40,7 +55,36 @@
   {/each}
 </Section>
 
+{#if modId}
+  <FileViewDialog
+    bind:open={viewOpen}
+    title={viewPath.split("/").pop() ?? viewPath}
+    files={[{ source: modId, path: viewPath, label: modName ?? modId }]}
+  />
+{/if}
+
 <style>
+  /* A file name that opens the file: plain text until hovered. */
+  .link {
+    padding: 0;
+    border: 0;
+    background: none;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .link:hover {
+    color: var(--qm-accent-text);
+    text-decoration: underline;
+  }
+
+  .link:focus-visible {
+    outline: none;
+    box-shadow: var(--qm-focus-ring);
+  }
+
   .note {
     margin: 0 0 var(--qm-space-2);
   }

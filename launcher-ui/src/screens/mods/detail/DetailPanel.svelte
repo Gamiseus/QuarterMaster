@@ -234,12 +234,10 @@
     margin: 0;
   }
 
-  /* Readable line length for readmes and option forms, however wide the column is. */
+  /* Each tab lays itself out in as many columns as the panel has room for; running text
+     (a readme, a note) keeps a readable line length inside its column. */
   :global(.detail-panel .body) {
+    container-type: inline-size;
     font-size: var(--qm-text-13);
-  }
-
-  :global(.detail-panel .body > *) {
-    max-width: var(--qm-measure);
   }
 </style>

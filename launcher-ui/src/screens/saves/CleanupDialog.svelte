@@ -51,6 +51,7 @@
   initialFocus="content"
   dismissible={!busy}
 >
+  <div class="stack">
   {#if removable.length > 0}
     <ul class="rows" data-testid="cleanup-fields">
       {#each removable as r (r.field)}
@@ -65,12 +66,14 @@
     </ul>
   {/if}
   {#if kept.length > 0}
-    <p class="qm-muted">Not removed, because more than one mod wrote them:</p>
-    <ul class="kept" data-testid="cleanup-kept">
-      {#each kept as r (r.field)}
-        <li>{r.field} (from {r.mods.join(", ")})</li>
-      {/each}
-    </ul>
+    <div class="kept-block">
+      <p class="qm-muted">Not removed, because more than one mod wrote them:</p>
+      <ul class="kept" data-testid="cleanup-kept">
+        {#each kept as r (r.field)}
+          <li>{r.field} (from {r.mods.join(", ")})</li>
+        {/each}
+      </ul>
+    </div>
   {/if}
   <p class="qm-muted">
     {removable.length > 0
@@ -78,6 +81,7 @@
       : "Nothing here can be removed safely."}
   </p>
   {#if blocked}<p class="qm-muted" role="note">{blocked}</p>{/if}
+  </div>
   {#snippet footer()}
     <Button disabled={busy} onclick={() => (open = false)}>{removable.length > 0 ? "Cancel" : "Close"}</Button>
     {#if removable.length > 0}
@@ -92,6 +96,18 @@
   p {
     margin: 0;
     font-size: var(--qm-text-12);
+  }
+
+  .stack {
+    display: flex;
+    flex-direction: column;
+    gap: var(--qm-space-3);
+  }
+
+  .kept-block {
+    display: flex;
+    flex-direction: column;
+    gap: var(--qm-space-1);
   }
 
   .rows,

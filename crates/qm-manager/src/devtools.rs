@@ -207,11 +207,55 @@ impl QuarterMasterPaths {
         }
     }
 
+    /// A profile id for `name` that is safe as a folder name and not taken: lowercase letters
+    /// and digits with `-` for everything else, `modpack` when nothing is left, then `-2`,
+    /// `-3`, ... while a profile has it.
+    pub fn free_profile_id(&self, name: &str) -> String {
+        let base: String = name
+            .trim()
+            .chars()
+            .map(|c| if c.is_ascii_alphanumeric() { c.to_ascii_lowercase() } else { '-' })
+            .collect::<String>()
+            .trim_matches('-')
+            .chars()
+            .take(48)
+            .collect();
+        let base = if base.is_empty() || base == crate::VANILLA_ID {
+            "modpack".to_string()
+        } else {
+            base
+        };
+        let taken = |id: &str| self.profiles_dir.join(id).exists();
+        let mut id = base.clone();
+        let mut n = 2;
+        while taken(&id) {
+            id = format!("{base}-{n}");
+            n += 1;
+        }
+        id
+    }
+
+    /// Makes a new profile from a modpack. The id becomes a folder name, and the pack may
+    /// come from anyone: an id that is not plain letters, digits, `_` and `-` is refused, and
+    /// so is one a profile already has (it would be overwritten).
     pub fn apply_modpack_as_profile(
         &self,
         manifest: &ModpackManifest,
         new_profile_id: &str,
     ) -> Result<ModProfile, String> {
+        let plain = !new_profile_id.is_empty()
+            && new_profile_id.len() <= 64
+            && new_profile_id
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-');
+        if !plain {
+            return Err(format!(
+                "Profile id '{new_profile_id}' may only contain letters, digits, '_' and '-'."
+            ));
+        }
+        if self.profiles_dir.join(new_profile_id).join("profile.json").exists() {
+            return Err(format!("A profile with the id '{new_profile_id}' already exists."));
+        }
         let now = jiff::Zoned::now().to_string();
         let enabled_mods: Vec<String> = manifest.mods.iter().map(|m| m.id.clone()).collect();
         let prof = ModProfile {
@@ -246,6 +290,7 @@ impl QuarterMasterPaths {
             auto_follow: false,
             fix_journal: Vec::new(),
             migration_error: None,
+            dismissed_conflicts: Vec::new(),
             faction_picks: Default::default(),
         };
         self.save_profile(&prof)?;
@@ -1900,7 +1945,7 @@ impl QuarterMasterPaths {
         if trimmed_url.is_empty() {
             return Err("Download URL is empty".to_string());
         }
-        if !trimmed_url.starts_with("https://") && !trimmed_url.starts_with("http://127.0.0.1") {
+        if !crate::community::is_https_or_local(trimmed_url) {
             return Err("Only HTTPS or local URLs permitted for updates".to_string());
         }
         let staging_dir = self.cache_dir.join("updates");
@@ -1969,6 +2014,8 @@ if not exist %STAGED_EXE% goto give_up
 if exist %OLD_EXE% del /F /Q %OLD_EXE%
 if exist %LAUNCHER_EXE% move /Y %LAUNCHER_EXE% %OLD_EXE%
 move /Y %STAGED_EXE% %LAUNCHER_EXE%
+rem The new file did not arrive: the old launcher goes back, so one is always there.
+if not exist %LAUNCHER_EXE% if exist %OLD_EXE% move /Y %OLD_EXE% %LAUNCHER_EXE%
 
 :give_up
 rem On timeout the update is skipped and the current launcher is started again.
@@ -1976,9 +2023,9 @@ if exist %LAUNCHER_EXE% start "" %LAUNCHER_EXE%
 (goto) 2>nul & del "%~f0"
 "#,
                 max_tries = SWAP_WAIT_MAX_TRIES,
-                launcher_exe = current_exe.display(),
-                staged_exe = staged_file.display(),
-                old_exe = old_exe.display(),
+                launcher_exe = bat_path(&current_exe),
+                staged_exe = bat_path(&staged_file),
+                old_exe = bat_path(&old_exe),
             );
             fs::write(&script_path, bat_content)
                 .map_err(|e| format!("Failed to write swap script: {e}"))?;
@@ -2045,8 +2092,8 @@ if exist %LAUNCHER_EXE% start "" %LAUNCHER_EXE%
 (goto) 2>nul & del "%~f0"
 "#,
                 max_tries = SWAP_WAIT_MAX_TRIES,
-                launcher_exe = current_exe.display(),
-                old_exe = old_exe.display(),
+                launcher_exe = bat_path(&current_exe),
+                old_exe = bat_path(&old_exe),
             );
             fs::write(&script_path, bat_content)
                 .map_err(|e| format!("Failed to write rollback script: {e}"))?;
@@ -2190,6 +2237,12 @@ if exist %LAUNCHER_EXE% start "" %LAUNCHER_EXE%
 }
 
 /// Registers `qm://`, `nxm://`, and `.qmpack` file associations in `HKCU\Software\Classes` (no UAC elevation needed).
+/// A path as text inside a batch file's quotes: a `%` is doubled, so a folder named like
+/// `100%` or `%TEMP%` is taken as it is written.
+fn bat_path(p: &Path) -> String {
+    p.display().to_string().replace('%', "%%")
+}
+
 pub fn register_windows_protocols() -> Result<Vec<String>, String> {
     let exe_path = std::env::current_exe()
         .map_err(|e| format!("Failed to resolve current executable path: {e}"))?;
@@ -2468,8 +2521,7 @@ return config
         }
 
         "custom_hud_overlay" => {
-            let qm_toml = format!(
-                r#"[manifest]
+            let qm_toml = r#"[manifest]
 version = "1.0.0"
 priority = 50
 
@@ -2502,8 +2554,7 @@ payload = '''
     custom_hud.draw()
   end
 '''
-"#
-            );
+"#.to_string();
             fs::write(mod_dir.join("qm.toml"), qm_toml).map_err(|e| e.to_string())?;
 
             let hud_lua = tpl_def
@@ -2514,8 +2565,7 @@ payload = '''
 
         "sprite_replacer" => {
             let _ = fs::create_dir_all(mod_dir.join("assets").join("sprites").join("icons"));
-            let qm_toml = format!(
-                r#"[manifest]
+            let qm_toml = r#"[manifest]
 version = "1.0.0"
 priority = 50
 
@@ -2536,8 +2586,7 @@ payload = '''
 local sprite_replacer = require "includes/sprite_replacer"
 sprite_replacer.init()
 '''
-"#
-            );
+"#.to_string();
             fs::write(mod_dir.join("qm.toml"), qm_toml).map_err(|e| e.to_string())?;
 
             let sprite_lua = tpl_def
@@ -2547,8 +2596,7 @@ sprite_replacer.init()
         }
 
         "custom_particle_fx" => {
-            let qm_toml = format!(
-                r#"[manifest]
+            let qm_toml = r#"[manifest]
 version = "1.0.0"
 priority = 50
 
@@ -2571,8 +2619,7 @@ payload = '''
     return
   end
 '''
-"#
-            );
+"#.to_string();
             fs::write(mod_dir.join("qm.toml"), qm_toml).map_err(|e| e.to_string())?;
 
             let part_lua = tpl_def
@@ -2584,8 +2631,7 @@ payload = '''
         "sound_replacer" => {
             let _ = fs::create_dir_all(mod_dir.join("assets").join("sounds").join("weapons"));
             let _ = fs::create_dir_all(mod_dir.join("assets").join("sounds").join("explosions"));
-            let qm_toml = format!(
-                r#"[manifest]
+            let qm_toml = r#"[manifest]
 version = "1.0.0"
 priority = 50
 
@@ -2606,8 +2652,7 @@ payload = '''
   local sound_replacer = require "includes/sound_replacer"
   sound_replacer.init()
 '''
-"#
-            );
+"#.to_string();
             fs::write(mod_dir.join("qm.toml"), qm_toml).map_err(|e| e.to_string())?;
 
             let sound_lua = tpl_def
@@ -2618,8 +2663,7 @@ payload = '''
 
         "custom_battle_music" => {
             let _ = fs::create_dir_all(mod_dir.join("assets").join("music"));
-            let qm_toml = format!(
-                r#"[manifest]
+            let qm_toml = r#"[manifest]
 version = "1.0.0"
 priority = 50
 
@@ -2640,8 +2684,7 @@ payload = '''
   local battle_music = require "includes/battle_music"
   battle_music.evaluateBattleIntensity()
 '''
-"#
-            );
+"#.to_string();
             fs::write(mod_dir.join("qm.toml"), qm_toml).map_err(|e| e.to_string())?;
 
             let music_lua = tpl_def
@@ -2651,8 +2694,7 @@ payload = '''
         }
 
         "custom_weapon" => {
-            let qm_toml = format!(
-                r#"[manifest]
+            let qm_toml = r#"[manifest]
 version = "1.0.0"
 priority = 50
 
@@ -2675,8 +2717,7 @@ payload = '''
     return
   end
 '''
-"#
-            );
+"#.to_string();
             fs::write(mod_dir.join("qm.toml"), qm_toml).map_err(|e| e.to_string())?;
 
             let wep_lua = tpl_def
@@ -2686,8 +2727,7 @@ payload = '''
         }
 
         "custom_soldier_class" => {
-            let qm_toml = format!(
-                r#"[manifest]
+            let qm_toml = r#"[manifest]
 version = "1.0.0"
 priority = 50
 
@@ -2710,8 +2750,7 @@ payload = '''
     return
   end
 '''
-"#
-            );
+"#.to_string();
             fs::write(mod_dir.join("qm.toml"), qm_toml).map_err(|e| e.to_string())?;
 
             let sol_lua = tpl_def
@@ -2721,8 +2760,7 @@ payload = '''
         }
 
         "custom_battle_condition" => {
-            let qm_toml = format!(
-                r#"[manifest]
+            let qm_toml = r#"[manifest]
 version = "1.0.0"
 priority = 50
 
@@ -2743,8 +2781,7 @@ payload = '''
   local custom_bc = require "includes/custom_bc"
   custom_bc.affect(bc)
 '''
-"#
-            );
+"#.to_string();
             fs::write(mod_dir.join("qm.toml"), qm_toml).map_err(|e| e.to_string())?;
 
             let bc_lua = tpl_def
@@ -2754,8 +2791,7 @@ payload = '''
         }
 
         "custom_reinforcement_card" => {
-            let qm_toml = format!(
-                r#"[manifest]
+            let qm_toml = r#"[manifest]
 version = "1.0.0"
 priority = 50
 
@@ -2776,8 +2812,7 @@ payload = '''
   local custom_callin = require "includes/custom_callin"
   custom_callin.registerCard()
 '''
-"#
-            );
+"#.to_string();
             fs::write(mod_dir.join("qm.toml"), qm_toml).map_err(|e| e.to_string())?;
 
             let callin_lua = tpl_def
@@ -2787,8 +2822,7 @@ payload = '''
         }
 
         "custom_map_structure" => {
-            let qm_toml = format!(
-                r#"[manifest]
+            let qm_toml = r#"[manifest]
 version = "1.0.0"
 priority = 50
 
@@ -2809,8 +2843,7 @@ payload = '''
   local map_structure = require "includes/map_structure"
   map_structure.createConcretePillbox(200, 360, 0)
 '''
-"#
-            );
+"#.to_string();
             fs::write(mod_dir.join("qm.toml"), qm_toml).map_err(|e| e.to_string())?;
 
             let struct_lua = tpl_def
@@ -3346,6 +3379,36 @@ mod tests {
 
     /// `qm pack` puts every entry under one folder named after the mod, leaves out
     /// leftovers, and the loader reads the zip as the mod.
+    /// A modpack from anyone cannot pick a profile folder outside the profiles folder, and
+    /// cannot replace a profile that is there.
+    #[test]
+    fn a_modpack_profile_id_is_plain_and_unused() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let paths = QuarterMasterPaths::resolve(Some(temp.path()));
+        let pack = ModpackManifest {
+            schema_version: 1,
+            name: "..\\..\\Evil Pack".into(),
+            description: String::new(),
+            exported_at: String::new(),
+            mods: Vec::new(),
+            mod_priorities: HashMap::new(),
+            mod_settings: Default::default(),
+        };
+        for bad in ["", "..", "..\\..\\evil", "a/b", "a b", "C:x"] {
+            assert!(paths.apply_modpack_as_profile(&pack, bad).is_err(), "{bad:?}");
+        }
+        assert!(!temp.path().join("evil").exists());
+
+        let id = paths.free_profile_id(&pack.name);
+        assert_eq!(id, "evil-pack");
+        paths.apply_modpack_as_profile(&pack, &id).unwrap();
+        let err = paths.apply_modpack_as_profile(&pack, &id).unwrap_err();
+        assert!(err.contains("already exists"), "{err}");
+        assert_eq!(paths.free_profile_id(&pack.name), "evil-pack-2");
+        assert_eq!(paths.free_profile_id("///"), "modpack");
+        assert_eq!(paths.free_profile_id(crate::VANILLA_ID), "modpack");
+    }
+
     #[test]
     fn pack_puts_the_mod_in_one_folder_named_after_it() {
         let temp = tempfile::TempDir::new().unwrap();

@@ -53,6 +53,7 @@ pub use solver::{
 };
 pub use storage::{
     detect_game_installation, detect_save_directory, detect_workspace_mods_dir,
-    extract_game_version_from_main_lua, LaunchMethod, LauncherSettings, PendingTransaction,
+    extract_game_version_from_main_lua, LaunchMethod, LauncherSettings, ModsSource,
+    PendingTransaction, WindowSettings,
     QuarterMasterPaths, StateJournal, VanillaGameInfo,
 };

@@ -60,7 +60,7 @@ Open PowerShell in the `Quartermaster` folder and run:
 
 ```powershell
 # Run tests
-cargo test -p qm-schema -p qm-core -p qm-manager -p qm-service
+cargo test --workspace
 
 # Build the release DLL
 cargo build --release -p qm-win

@@ -136,6 +136,11 @@ pub struct AssetSlot {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "specta", specta(optional))]
     pub choice: Option<String>,
+    /// The compatibility mod whose choice decides this slot, when no choice of the profile
+    /// does.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "specta", specta(optional))]
+    pub chosen_by: Option<String>,
     /// Who wins with the choices as they are: a source, or `vanilla`.
     pub winner: String,
     /// What the game used in the profile's last run, when it reported it.
@@ -191,6 +196,9 @@ pub struct LedgerInput<'a> {
     pub listing: Option<&'a VanillaAssetListing>,
     /// Group or slot key -> winner.
     pub choices: &'a BTreeMap<String, String>,
+    /// Slot key -> (winner, compatibility mod): the choices of compatibility mods that
+    /// apply. A choice of the profile for the slot or its group wins over them.
+    pub compat: &'a BTreeMap<String, (String, String)>,
     /// Slot key -> the source the game used in the last run.
     pub last_run: &'a BTreeMap<String, String>,
 }
@@ -541,6 +549,7 @@ pub fn build(input: &LedgerInput<'_>) -> AssetLedger {
         });
         group.slots.push(AssetSlot {
             choice: input.choices.get(&key).cloned(),
+            chosen_by: None,
             last_run_winner: input.last_run.get(&key).cloned(),
             key,
             name,
@@ -556,6 +565,12 @@ pub fn build(input: &LedgerInput<'_>) -> AssetLedger {
     let source_order = source_order(input);
     let mut out = Vec::new();
     for (_, mut g) in groups {
+        // A compatibility mod's choice counts where the profile made none.
+        if g.choice.is_none() {
+            for s in g.slots.iter_mut().filter(|s| s.choice.is_none()) {
+                s.chosen_by = input.compat.get(&s.key).map(|(_, from)| from.clone());
+            }
+        }
         // A folder group lists only the slots where two sources meet; a set lists them all.
         let overlaps = |s: &AssetSlot| s.game.is_some() || s.claims.len() >= 2;
         if !g.slots.iter().any(overlaps) {
@@ -565,7 +580,7 @@ pub fn build(input: &LedgerInput<'_>) -> AssetLedger {
             g.slots.retain(overlaps);
         }
         g.slots.sort_by(|a, b| (a.number, &a.key).cmp(&(b.number, &b.key)));
-        finish_group(&mut g, listing, &source_order);
+        finish_group(&mut g, listing, &source_order, input.compat);
         out.push(g);
     }
     AssetLedger {
@@ -584,7 +599,12 @@ fn source_order(input: &LedgerInput<'_>) -> Vec<String> {
         .collect()
 }
 
-fn finish_group(g: &mut AssetGroup, listing: Option<&VanillaAssetListing>, order: &[String]) {
+fn finish_group(
+    g: &mut AssetGroup,
+    listing: Option<&VanillaAssetListing>,
+    order: &[String],
+    compat: &BTreeMap<String, (String, String)>,
+) {
     g.game_count = match g.kind {
         GroupKind::Set => listing.map_or(0, |l| l.set_count(&g.key)),
         GroupKind::Folder => g.slots.iter().filter(|s| s.game.is_some()).count() as u32,
@@ -659,7 +679,11 @@ fn finish_group(g: &mut AssetGroup, listing: Option<&VanillaAssetListing>, order
             .claims
             .last()
             .map_or_else(|| VANILLA.to_string(), |c| c.source.clone());
-        let choice = s.choice.clone().or_else(|| group_choice.clone());
+        let choice = s
+            .choice
+            .clone()
+            .or_else(|| group_choice.clone())
+            .or_else(|| s.chosen_by.as_ref().and_then(|_| compat.get(&s.key)).map(|(w, _)| w.clone()));
         s.winner = match choice.as_deref() {
             None => default,
             Some(VANILLA) => VANILLA.to_string(),
@@ -742,6 +766,50 @@ pub fn exclusions_by_key(ledger: &AssetLedger) -> BTreeMap<String, BTreeMap<Stri
             )
         })
         .collect()
+}
+
+/// One slot a choice decides, with what the choice leaves out there.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SlotExclusion {
+    pub slot: String,
+    pub group: String,
+    /// Source -> files (or, for a faction, game names).
+    pub leaves_out: BTreeMap<String, Vec<String>>,
+}
+
+/// The choice for `key` (a group's or a slot's) split by slot, in ledger order: each slot it
+/// decides where it leaves something out. A slot with its own choice is not its group's.
+pub fn slot_exclusions(ledger: &AssetLedger, key: &str) -> Vec<SlotExclusion> {
+    let mut out = Vec::new();
+    for g in &ledger.groups {
+        for s in &g.slots {
+            let choice = match (&s.choice, &g.choice) {
+                (Some(c), _) if s.key == key => c.as_str(),
+                (None, Some(c)) if g.key == key => c.as_str(),
+                _ => continue,
+            };
+            if choice != VANILLA && !s.claims.iter().any(|c| c.source == choice) {
+                continue;
+            }
+            let mut leaves_out: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+            for c in s.claims.iter().filter(|c| c.source != choice) {
+                let what = c.target.clone().unwrap_or_else(|| c.file.clone());
+                leaves_out.entry(c.source.clone()).or_default().insert(what);
+            }
+            if leaves_out.is_empty() {
+                continue;
+            }
+            out.push(SlotExclusion {
+                slot: s.key.clone(),
+                group: g.key.clone(),
+                leaves_out: leaves_out
+                    .into_iter()
+                    .map(|(k, v)| (k, v.into_iter().collect()))
+                    .collect(),
+            });
+        }
+    }
+    out
 }
 
 /// What a choice of `winner` for `key` would leave out, with the ledger's other choices as

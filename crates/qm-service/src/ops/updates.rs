@@ -416,7 +416,7 @@ impl Service {
                 (!e.name.is_empty() && m.manifest.name.eq_ignore_ascii_case(&e.name))
                     || m.manifest.update_keys.iter().any(|k| {
                         (!k.is_empty() && !key.is_empty() && k.eq_ignore_ascii_case(key))
-                            || (!repo.is_empty() && k.to_ascii_lowercase().contains(&repo))
+                            || (!repo.is_empty() && same_source(k, &repo) && is_github_key(k))
                     })
             });
             e.installed = found.is_some();
@@ -434,6 +434,13 @@ fn same_source(update_key: &str, repository: &str) -> bool {
         }
         _ => true,
     }
+}
+
+fn is_github_key(update_key: &str) -> bool {
+    matches!(
+        ParsedUpdateKey::parse(update_key),
+        ParsedUpdateKey::GitHub { .. }
+    )
 }
 
 fn catalog_entry(e: &IndexEntry) -> CatalogEntry {

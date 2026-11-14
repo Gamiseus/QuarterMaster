@@ -1,13 +1,14 @@
 <script lang="ts">
   import { Badge, Button, Inset, KeyValueList, Section } from "../../../components/ui";
   import { call } from "../../../lib/api";
-  import { commands, type PatchDetail, type PatchExecutionRecord } from "../../../lib/bindings";
+  import { commands, type DetectedConflict, type PatchDetail, type PatchExecutionRecord } from "../../../lib/bindings";
   import { dependentsToDisable, requirementsToEnable } from "../../../lib/patches/cascade";
-  import { isNote, recordNotes, runsAsValue } from "../../../lib/patches/explain";
+  import { explainConflict, isNote, recordNotes, runsAsValue } from "../../../lib/patches/explain";
   import { changedBy, modOfName, namesPatch, tiedTo } from "../../../lib/patches/compat";
   import { badgeOf } from "../../../lib/patches/fixlist";
   import { fixes } from "../../../lib/stores/fixes.svelte";
   import { loadOrder } from "../../../lib/stores/loadorder.svelte";
+  import { patches } from "../../../lib/stores/patches.svelte";
   import { patchView } from "../../../lib/stores/patchview.svelte";
   import { resolver } from "../../../lib/stores/resolver.svelte";
   import CascadeDialog from "./CascadeDialog.svelte";
@@ -39,6 +40,19 @@
   /** Info notes (`multi_match`) are not conflicts: shown as notes, with nothing to resolve. */
   const conflicts = $derived(named.filter((c) => !isNote(c)));
   const notes = $derived(named.filter(isNote));
+  /** A conflict in plain words, with the mods and patches by name (as the mod's Patches tab says it). */
+  function explain(c: DetectedConflict): string {
+    const patchName = (id: string) => {
+      if (id === detail.patch_id) return title;
+      for (const mod of [c.mod_a_id, c.mod_b_id]) {
+        const entry = mod ? patches.get(mod) : null;
+        const p = entry?.status === "ready" ? entry.data.find((x) => x.patch_id === id) : undefined;
+        if (p) return p.name ?? p.patch_id;
+      }
+      return id;
+    };
+    return explainConflict(c, { records: [], modName: (id) => modNames[id] ?? id, patchName });
+  }
   /** The profile's fixes that change or name this patch. */
   const myFixes = $derived(fixes.forPatch(detail.patch_id, detail.mod_id));
   /** Compatibility mods that change this patch (§11.6). */
@@ -126,7 +140,7 @@
       <ul class="conflicts">
         {#each conflicts as c (c.id)}
           <li>
-            <span>{c.description}</span>
+            <span>{explain(c)}</span>
             <Button size="sm" onclick={() => resolver.show(c.id)}>Resolve...</Button>
           </li>
         {/each}

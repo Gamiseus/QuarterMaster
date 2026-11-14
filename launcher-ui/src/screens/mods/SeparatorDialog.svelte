@@ -51,7 +51,7 @@
   <form id="separator-form" class="form" onsubmit={submit}>
     <TextField label="Name" placeholder="Section name" bind:value={title} />
     <div class="colors">
-      <span class="label" id="separator-color-label">Color</span>
+      <span class="label" id="separator-color-label">Colour</span>
       <div class="swatches" role="radiogroup" aria-labelledby="separator-color-label">
         {#each SEP_NAMES as name, i (name)}
           <button

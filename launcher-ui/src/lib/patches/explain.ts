@@ -8,6 +8,8 @@ export type ExplainContext = {
   /** The conflict file's records (for line numbers and which patch runs later). */
   records: PatchExecutionRecord[];
   modName: (id: string) => string;
+  /** A patch's name by id, for when its details (`a`, `b`) are not loaded. */
+  patchName?: (id: string) => string;
 };
 
 /** Pattern and regex patches have an anchor and a position; copy and module patches do not. */
@@ -107,6 +109,7 @@ export function orderNotes(o: SimulationOverview, patchName: (id: string) => str
 export const isShadowed = (r: PatchExecutionRecord): boolean => r.warnings.some((w) => w.startsWith("shadowed_by_module:"));
 
 const nameOf = (d: PatchDetail | undefined, fallback: string) => d?.name ?? d?.patch_id ?? fallback;
+const named = (ctx: ExplainContext, id: string) => (id ? (ctx.patchName?.(id) ?? id) : id);
 
 /** A finding of the semantic checks (D69): a warning or a note, never a launch blocker. */
 export const isSemantic = (c: DetectedConflict): boolean => c.id.startsWith("semantic:");
@@ -134,7 +137,7 @@ function regionOf(records: PatchExecutionRecord[], id: string | null): PatchRegi
 export function explainConflict(c: DetectedConflict, ctx: ExplainContext): string {
   const modA = ctx.modName(c.mod_a_id);
   const modB = c.mod_b_id ? ctx.modName(c.mod_b_id) : "";
-  const patchA = nameOf(ctx.a, c.patch_a_id);
+  const patchA = nameOf(ctx.a, named(ctx, c.patch_a_id));
   const file = c.target_file;
 
   switch (c.kind) {
@@ -174,7 +177,7 @@ export function explainConflict(c: DetectedConflict, ctx: ExplainContext): strin
       }
       if (rb) {
         // The later patch replaced what the earlier one wrote, so only its lines remain.
-        const patchB = nameOf(ctx.b, c.patch_b_id ?? "");
+        const patchB = nameOf(ctx.b, named(ctx, c.patch_b_id ?? ""));
         const at = rb.start_line === rb.end_line ? `line ${rb.start_line}` : `lines ${rb.start_line} to ${rb.end_line}`;
         return `${modB}'s "${patchB}" replaces code that ${modA}'s "${patchA}" added to ${file} (now ${at}). ${modB} runs later, so its version is what the game gets.`;
       }
@@ -219,7 +222,7 @@ export function explainConflict(c: DetectedConflict, ctx: ExplainContext): strin
       if (isNote(c)) return `${modA}'s "${patchA}" turns off some of the game's code in ${file} with an "if" that is never true.`;
       return `${modA}'s "${patchA}" adds code to ${file} inside an "if" that is never true${modB ? ` (from ${modB})` : ""}, so that code never runs.`;
     case "early_return_shadow": {
-      const patchB = nameOf(ctx.b, c.patch_b_id ?? "");
+      const patchB = nameOf(ctx.b, named(ctx, c.patch_b_id ?? ""));
       const where = semanticName(c) || file;
       return `${modB}'s "${patchB}" returns from ${where} before ${modA}'s "${patchA}" code in ${file}, so that code never runs.`;
     }
@@ -264,7 +267,7 @@ export function explainConflict(c: DetectedConflict, ctx: ExplainContext): strin
     }
     case "block_balance": {
       if (c.patch_b_id) {
-        const patchB = nameOf(ctx.b, c.patch_b_id);
+        const patchB = nameOf(ctx.b, named(ctx, c.patch_b_id));
         // The service says why the partner falls short: turned off, fewer places, or not applied.
         const why = c.description.includes("applied at fewer places")
           ? "applies at fewer places"
@@ -300,7 +303,7 @@ function consumerSentence(c: DetectedConflict, ctx: ExplainContext, posA: Insert
   if (!k) return null;
   const modA = ctx.modName(c.mod_a_id);
   const modB = ctx.modName(k.mod_id);
-  const patchA = nameOf(ctx.a, c.patch_a_id);
+  const patchA = nameOf(ctx.a, named(ctx, c.patch_a_id));
   const file = c.target_file;
   const line = k.site_line > 0 ? `line ${k.site_line}` : "a line";
   const verbA =

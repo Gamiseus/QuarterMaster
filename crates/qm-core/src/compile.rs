@@ -1364,7 +1364,9 @@ love = {{ filesystem = {{
     return chunk
   end,
 }} }}
-function newProfile(t) t.fresh = true end
+-- As the game's: it takes no argument and fills the global `player`.
+function newProfile() player.fresh = true end
+player = {{ wave = 7 }}
 local printed = {{}}
 print = function(s) printed[#printed + 1] = tostring(s) end
 "#
@@ -1393,8 +1395,9 @@ assert(not pcall(fs.load, "other.lua"), "another file's error is the game's to s
 put("saveMNB2.lua", zeros)
 local t = fs.load("saveMNB2.lua")()
 assert(t.fresh == true and t.wave == nil)
+assert(player.wave == 7 and player.fresh == nil, "the profile in play is left alone")
 assert(slurp("saveMNB2.lua") == nil and slurp("saveMNB2.lua.damaged") == zeros, "the damaged file is set aside")
-assert(has("saveMNB2.lua could not be loaded") and has("fresh profile"))
+assert(has("saveMNB2.lua could not be loaded") and has("starting it fresh"))
 assert(QM.saveGuard.used[1].file == "saveMNB2.lua" and QM.saveGuard.used[1].from == nil)
 
 -- Each write keeps the copy it replaces.
@@ -1430,6 +1433,14 @@ put("saveMNBclassic.lua", "error('boom')")
 assert(fs.load("saveMNBclassic.lua")().fresh == true)
 put("saveMNBclassic.lua", "return 5")
 assert(fs.load("saveMNBclassic.lua")().fresh == true)
+
+-- A write that never reached the disk: only the previous copy is there. The game is told
+-- the save exists, and gets the copy.
+os.remove(path("saveMNB2.lua"))
+assert(slurp("saveMNB2.lua.prev") == save(3))
+assert(fs.getInfo("saveMNB2.lua") ~= nil and fs.getInfo("nothing.lua") == nil)
+assert(fs.load("saveMNB2.lua")().wave == 3)
+assert(has("saveMNB2.lua could not be loaded: the file is missing"))
 
 -- Other files are written as before, and get no copy.
 fs.write("saveModSettings.lua", "return {}")

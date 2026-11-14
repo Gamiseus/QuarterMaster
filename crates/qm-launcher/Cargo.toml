@@ -1,6 +1,6 @@
 [package]
 name = "qm-launcher"
-version = "1.8.1"
+version = "1.8.2"
 edition = "2021"
 description = "QuarterMaster Tauri 2 launcher shell"
 authors = ["QuarterMaster Team"]
@@ -32,7 +32,8 @@ specta-typescript = "0.0.9"
 serde = { version = "1.0.197", features = ["derive"] }
 tracing = "0.1"
 tracing-appender = "0.2"
-tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "std", "tracing-log"] }
+tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "std", "registry", "tracing-log"] }
+tracing-log = "0.2"
 jiff = { workspace = true }
 qm-service = { path = "../qm-service" }
 qm-manager = { path = "../qm-manager", features = ["specta"] }

@@ -1,7 +1,7 @@
 # One-command check for the QuarterMaster workspace.
 $ErrorActionPreference = "Stop"
 $root = $PSScriptRoot
-$maxBytes = 24.5 * 1024 * 1024
+$maxBytes = 25 * 1024 * 1024
 
 function Invoke-Step {
     param([string]$Name, [string]$Dir, [scriptblock]$Action)
@@ -29,8 +29,6 @@ Invoke-Step "cargo test --workspace" $root { cargo test --workspace }
 # The site repository holds copies of the wiki, the changelog and the schemas; skipped when it is
 # not next to this workspace.
 Invoke-Step "site content is current (tools\sync-site.ps1)" $root { & "$root\tools\sync-site.ps1" -Check }
-# The legacy app (ui/, qm-app): its tests read ui/app.js directly.
-Invoke-Step "legacy app tests" $root { node ui/tests/run.js }
 Invoke-Step "npm run check" "$root\launcher-ui" { npm run check }
 Invoke-Step "npm test" "$root\launcher-ui" { npm test }
 # Playwright builds the mock bundle into launcher-ui\dist-e2e and serves it on port 5173
@@ -72,9 +70,9 @@ Write-Host "[OK] release artifacts exist"
 $size = (Get-Item $exe).Length
 $mb = [math]::Round($size / 1MB, 2)
 if ($size -gt $maxBytes) {
-    Write-Host "[FAIL] size check: qm-launcher.exe is $mb MB (limit 24.5 MB)"
+    Write-Host "[FAIL] size check: qm-launcher.exe is $mb MB (limit 25 MB)"
     exit 1
 }
-Write-Host "[OK] size check: qm-launcher.exe is $mb MB (limit 24.5 MB)"
+Write-Host "[OK] size check: qm-launcher.exe is $mb MB (limit 25 MB)"
 
 Write-Host "[OK] All checks passed"

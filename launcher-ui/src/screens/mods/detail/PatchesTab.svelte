@@ -80,7 +80,7 @@
     void loadCompat(modId);
   });
 
-  const modNames = $derived(Object.fromEntries((mods.list.status === "ready" ? mods.list.data : []).map((m) => [m.id, m.name])));
+  const modNames = $derived({ qm_glue: "Your adjustments", ...Object.fromEntries((mods.list.status === "ready" ? mods.list.data : []).map((m) => [m.id, m.name])) } as Record<string, string>);
   const modName = (id: string) => modNames[id] ?? id;
   const simOverrides = $derived(loadOrder.simulation.status === "ready" ? (loadOrder.simulation.data.overrides ?? []) : []);
   const changes = $derived(compat ? changedMods(compat) : []);
@@ -88,6 +88,11 @@
   const idle = $derived(compat ? idleLines(compat) : []);
 
   const nameOf = (p: ModPatchStatus) => p.name ?? p.patch_id;
+  /** This mod's patches by id, so a conflict names them as the list above does. */
+  const patchName = (id: string) => {
+    const p = list.find((x) => x.patch_id === id);
+    return p ? nameOf(p) : id;
+  };
 
   async function toggle(p: ModPatchStatus, enabled: boolean) {
     const id = p.patch_id;
@@ -126,7 +131,8 @@
     <p class="qm-muted">This mod has no patches.</p>
   {:else}
     <ul class="rows">
-      {#each list as p (p.patch_id)}
+      <!-- A patch with several target files has a row per file: the file is part of the key. -->
+      {#each list as p (`${p.patch_id}|${p.target_file}`)}
         <li class="row">
           <div class="main">
             <span class="name">{nameOf(p)}</span>
@@ -173,7 +179,8 @@
         {#if r.kind === "one"}
           {@const c = r.conflict}
           <div class="conflict">
-            <p>{c.description}</p>
+            <!-- In plain words with the mods' names, as the resolver says it. -->
+            <p>{explainConflict(c, { records: [], modName, patchName })}</p>
             <code class="file">{c.target_file}</code>
             <!-- Every fix goes through the resolver, which previews its impact before Apply. -->
             <div class="actions">
@@ -227,10 +234,12 @@
     gap: var(--qm-space-2);
   }
 
+  /* As many columns of patches as fit: a mod with dozens of patches fills a wide panel
+     instead of one long list down its left edge. */
   .rows {
-    display: flex;
-    flex-direction: column;
-    gap: var(--qm-space-2);
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, calc(var(--qm-text-13) * 32)), 1fr));
+    gap: var(--qm-space-2) var(--qm-space-6);
     margin: 0;
     padding: 0;
     list-style: none;
@@ -269,12 +278,18 @@
     display: flex;
     flex-direction: column;
     gap: var(--qm-space-2);
+    max-width: var(--qm-measure);
   }
 
   .conflicts {
-    display: flex;
-    flex-direction: column;
-    gap: var(--qm-space-2);
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, calc(var(--qm-text-13) * 32)), 1fr));
+    gap: var(--qm-space-2) var(--qm-space-4);
+    align-items: start;
+  }
+
+  .conflicts > :global(:is(h3, .qm-stencil)) {
+    grid-column: 1 / -1;
   }
 
   .conflict {

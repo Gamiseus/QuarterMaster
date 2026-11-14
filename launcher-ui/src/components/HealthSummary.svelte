@@ -6,7 +6,7 @@
   import { Badge } from "./ui";
 
   const sim = $derived(loadOrder.simulation);
-  const conflicts = $derived(sim.status === "ready" ? sim.data.conflicts.filter((c) => !isNote(c)).length : 0);
+  const conflicts = $derived(sim.status === "ready" ? sim.data.conflicts.filter((c) => !isNote(c) && !(sim.data.dismissed_conflicts ?? []).includes(c.id)).length : 0);
   /** Fixes that warn before a launch (D23); they are not conflicts, so they get their own badge. */
   const review = $derived(fixes.attention.total);
 </script>

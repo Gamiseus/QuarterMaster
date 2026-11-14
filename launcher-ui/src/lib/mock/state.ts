@@ -123,6 +123,12 @@ export interface MockInit {
    * fix gave Vehicle Pack the higher priority, so Red Army runs. Previews list faction switches (D73).
    */
   factionOrder?: boolean;
+  /** The backups folder holds two copies of unlinked `Mods` folders. */
+  leftovers?: boolean;
+  /** The simulation reports two conflicts no file lists (a replaced module, a shared variable). */
+  unlistedConflicts?: boolean;
+  /** GCore has an older version installed beside the newest. */
+  twoVersions?: boolean;
 }
 
 declare global {

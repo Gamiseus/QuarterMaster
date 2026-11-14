@@ -95,7 +95,7 @@ impl Service {
     }
 
     /// A file from the game payload: the archive inside `mnb.exe` first, then an unpacked folder.
-    fn read_payload_file(&self, inner: &str, max: u64) -> QmResult<Option<Vec<u8>>> {
+    pub(crate) fn read_payload_file(&self, inner: &str, max: u64) -> QmResult<Option<Vec<u8>>> {
         let exe =
             self.paths().load_settings().game_exe_path.ok_or_else(|| {
                 QmError::new(ErrorKind::NotFound, "The game executable is not set.")
@@ -169,7 +169,7 @@ pub(crate) fn parse_ribbons(text: &str) -> Vec<RibbonInfo> {
 }
 
 /// Standard base64 with padding (no extra dependency for one small use).
-fn base64(bytes: &[u8]) -> String {
+pub(crate) fn base64(bytes: &[u8]) -> String {
     const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
     for chunk in bytes.chunks(3) {

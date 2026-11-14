@@ -78,9 +78,16 @@
     gap: var(--qm-space-2);
   }
 
+  /* A long word (a URL, a path) wraps inside the toast, so the buttons and Dismiss stay in it. */
   .message {
     flex: 1;
+    min-width: 0;
     margin: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .row > :global(:is(button, .badge)) {
+    flex: none;
   }
 
   .toasts :global(.progress) {

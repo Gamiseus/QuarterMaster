@@ -507,7 +507,7 @@ pub fn generate_mod_json_schema() -> serde_json::Value {
             "id": {
                 "type": "string",
                 "pattern": "^[a-z0-9_-]+$",
-                "description": "Unique lowercase identifier for the mod (e.g. 'gcore', 'tactical_overhaul')."
+                "description": "Unique lowercase identifier for the mod (e.g. 'example_mod')."
             },
             "name": {
                 "type": "string",
@@ -586,7 +586,7 @@ pub fn generate_mod_json_schema() -> serde_json::Value {
                     "requires": {
                         "type": "object",
                         "additionalProperties": { "type": "string" },
-                        "description": "Hard dependencies mapped to version ranges (e.g. {'gcore': '>=1.0.0'})."
+                        "description": "Hard dependencies mapped to version ranges (e.g. {'other_mod': '>=1.0.0'})."
                     },
                     "recommends": {
                         "type": "object",
@@ -779,6 +779,34 @@ pub fn generate_qm_toml_schema() -> serde_json::Value {
                 "type": "array",
                 "description": "Changes to other mods' patches. Every mod an entry names must be in this mod's requires.",
                 "items": { "$ref": "#/definitions/override" }
+            },
+            "asset_choices": {
+                "type": "array",
+                "description": "Which source's file is used where two mods this mod requires replace the same sound, image or font. One entry per file.",
+                "items": {
+                    "type": "object",
+                    "required": ["key", "winner"],
+                    "additionalProperties": false,
+                    "properties": {
+                        "key": {
+                            "type": "string",
+                            "description": "The file: its folder and name in lowercase, without the extension (e.g. 'sounds/garand1')."
+                        },
+                        "group": {
+                            "type": "string",
+                            "description": "The group the file is listed under in the launcher's Assets view: its numbered set ('sounds/garand#') or its folder."
+                        },
+                        "winner": {
+                            "type": "string",
+                            "description": "A mod id, 'faction:<faction id>', or 'vanilla' for the game's own file."
+                        },
+                        "leaves_out": {
+                            "type": "object",
+                            "description": "For each other source (a mod id or 'faction:<faction id>'), what it does not load: a mod's 'assets/...' files, or the game names a faction leaves alone.",
+                            "additionalProperties": { "type": "array", "items": { "type": "string" } }
+                        }
+                    }
+                }
             },
             "patches": {
                 "type": "array",

@@ -241,6 +241,14 @@ pub fn verify(src: &dyn Source, c: &Candidate, page_base: &str) -> RepoReport {
             ));
             continue;
         };
+        // The id becomes a folder of the site (`mods/<id>/`) and a key of the mod index.
+        if !plain_mod_id(&manifest.id) {
+            r.problems.push(format!(
+                "`{mod_json}`: the id `{}` cannot be listed. An id is 1 to 64 lowercase letters, digits, `_` or `-`.",
+                manifest.id.escape_default()
+            ));
+            continue;
+        }
         claims.push((dir_of(path).to_string(), publish, manifest));
     }
     if claims.is_empty() {
@@ -414,4 +422,39 @@ pub fn verify(src: &dyn Source, c: &Candidate, page_base: &str) -> RepoReport {
     r.release_notes = release.notes.clone();
     r.repo = Some(repo);
     r
+}
+
+/// Whether a mod id is safe as a folder name on the site: what `mod.json`'s schema allows.
+pub fn plain_mod_id(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= 64
+        && id
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_' || b == b'-')
+}
+
+#[cfg(test)]
+mod id_tests {
+    use super::plain_mod_id;
+
+    #[test]
+    fn an_id_that_could_be_read_as_a_path_is_not_plain() {
+        for ok in ["example_mod", "example-mod", "a", "mod2"] {
+            assert!(plain_mod_id(ok), "{ok}");
+        }
+        let long = "a".repeat(65);
+        for bad in [
+            "",
+            "..",
+            "../wiki",
+            "a/b",
+            r"a\b",
+            "Example",
+            "a b",
+            "a.b",
+            long.as_str(),
+        ] {
+            assert!(!plain_mod_id(bad), "{bad}");
+        }
+    }
 }

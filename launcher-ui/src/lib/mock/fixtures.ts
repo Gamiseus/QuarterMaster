@@ -26,6 +26,10 @@ export const settings: SettingsView = {
   color_vision: "standard",
   high_contrast: false,
   text_scale: 1,
+  mod_colors: {},
+  window: { vsync: null, resizable: null, width: null, height: null, borderless: null, display: null, fullscreen: null, fullscreen_type: null },
+  mods_source: "library",
+  workspace_mode: false,
 };
 
 export const appInfo: AppInfo = {
@@ -425,6 +429,7 @@ export function simulationFor(profile: ModProfile): SimulationOverview {
     applied_patches: patches.filter((p) => p.state === "applied").length,
     broken_anchors: patches.filter((p) => p.state === "broken").length,
     conflicts: liveConflicts(profile),
+    dismissed_conflicts: [...(profile.dismissed_conflicts ?? [])],
     files: [...new Set(patches.map((p) => p.target_file))],
     file_stats: fileStatsFor(profile),
     compile_check: { ran: true, files_checked: new Set(patches.map((p) => p.target_file)).size, note: null },

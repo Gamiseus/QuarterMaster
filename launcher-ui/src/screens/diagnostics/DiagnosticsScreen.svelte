@@ -51,13 +51,14 @@
     min-height: 0;
   }
 
-  /* Health and crashes sit side by side at their natural height, each capped at 40% of the screen. */
+  /* Health and crashes sit side by side at the same height, each capped at 40% of the screen (half in a tall window). */
   .top {
     flex: none;
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: var(--qm-space-4);
-    align-items: start;
+    /* Both cards are as tall as the taller one: no gap under the shorter. */
+    align-items: stretch;
   }
 
   .top :global(:is(.health, .crashes)) {
@@ -65,6 +66,13 @@
     flex-direction: column;
     max-height: 40vh;
     min-height: 0;
+  }
+
+  /* A taller window has the room: the log below still keeps more than a third of it. */
+  @media (min-height: 780px) {
+    .top :global(:is(.health, .crashes)) {
+      max-height: 50vh;
+    }
   }
 
   .top :global(.card-scroll) {

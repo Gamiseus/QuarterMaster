@@ -168,6 +168,17 @@ export class ModListController {
     return this.#change({ ...cur, rows: cur.rows.filter((r) => !(r.kind === "separator" && r.sep.id === id)) });
   }
 
+  /** Picks which installed version of a mod this profile uses. Not part of undo: it is not an order change. */
+  async setVersion(id: string, version: string): Promise<void> {
+    try {
+      const m = await call(commands.modVersionSet(id, version));
+      toasts.info(`${m.name} now uses version ${m.version} in this profile.`);
+      await modsStore.load();
+    } catch {
+      // call() showed the error.
+    }
+  }
+
   toggleLock(id: string): Promise<void> {
     const cur = this.#snapshot();
     const locked = cur.locked.includes(id) ? cur.locked.filter((x) => x !== id) : [...cur.locked, id];

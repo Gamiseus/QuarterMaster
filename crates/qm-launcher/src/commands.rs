@@ -2,12 +2,13 @@
 use qm_core::handshake::{CrashReport, GluePatchEntry, StackMode};
 use qm_core::patch::order::OrderRule;
 use qm_core::patch::InsertPosition;
-use qm_manager::storage::DetectedPaths;
+use qm_manager::storage::{DetectedPaths, ModsSource, WindowSettings};
 use qm_manager::{
     ArchiveModCandidate, ConflictResolutionSuggestion, LoadOrderResolution, ModProfile,
     ProfileDiff, SaveBackupEntry, SaveProfile, SharedStack,
 };
 use qm_schema::{ConfigValue, SaveComparison, SaveSummary};
+use qm_service::ops::extras::{FileView, LeftoverBackup};
 use qm_service::ops::modpacks::ModpackPreview;
 use qm_service::ops::sprites::{RibbonInfo, SpriteKind};
 use qm_service::{
@@ -1127,4 +1128,82 @@ pub async fn jobs_list(svc: Svc<'_>) -> Result<Vec<JobInfo>, QmError> {
 #[specta::specta]
 pub async fn job_cancel(svc: Svc<'_>, id: JobId) -> Result<(), QmError> {
     run(&svc, move |s| s.jobs().cancel(id)).await
+}
+
+// Mod colours, the game window, the mods source, stored copies, file previews
+
+#[tauri::command]
+#[specta::specta]
+pub async fn mod_color_set(
+    svc: Svc<'_>,
+    mod_id: String,
+    color: Option<u8>,
+) -> Result<SettingsView, QmError> {
+    run(&svc, move |s| s.mod_color_set(&mod_id, color)).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn window_settings_set(
+    svc: Svc<'_>,
+    window: WindowSettings,
+) -> Result<SettingsView, QmError> {
+    run(&svc, move |s| s.window_settings_set(window)).await
+}
+
+/// Stores the mods source and starts the launcher again, so it opens on the other set of
+/// mods and profiles.
+#[tauri::command]
+#[specta::specta]
+pub async fn mods_source_set(
+    app: tauri::AppHandle,
+    svc: Svc<'_>,
+    source: ModsSource,
+) -> Result<(), QmError> {
+    run(&svc, move |s| s.mods_source_set(source)).await?;
+    app.restart()
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn leftover_backups_list(svc: Svc<'_>) -> Result<Vec<LeftoverBackup>, QmError> {
+    run(&svc, move |s| Ok(s.leftover_backups_list())).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn leftover_backup_delete(svc: Svc<'_>, name: String) -> Result<(), QmError> {
+    run(&svc, move |s| s.leftover_backup_delete(&name)).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn game_dump_full(svc: Svc<'_>) -> Result<JobId, QmError> {
+    run(&svc, move |s| s.game_dump_full()).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn file_view(svc: Svc<'_>, source: String, path: String) -> Result<FileView, QmError> {
+    run(&svc, move |s| s.file_view(&source, &path)).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn conflict_dismiss(
+    svc: Svc<'_>,
+    conflict_id: String,
+    dismissed: bool,
+) -> Result<(), QmError> {
+    run(&svc, move |s| s.conflict_dismiss(&conflict_id, dismissed)).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn mod_version_set(
+    svc: Svc<'_>,
+    id: String,
+    version: Option<String>,
+) -> Result<ModSummary, QmError> {
+    run(&svc, move |s| s.mod_version_set(&id, version)).await
 }

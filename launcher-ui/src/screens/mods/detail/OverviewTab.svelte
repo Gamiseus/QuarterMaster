@@ -2,6 +2,7 @@
   import { KeyValueList } from "../../../components/ui";
   import AssetFiles from "./AssetFiles.svelte";
   import AutoUpdateField from "./AutoUpdateField.svelte";
+  import ModColourField from "./ModColourField.svelte";
   import type { ModDetail } from "../../../lib/bindings";
   import { guardLinks, isHttpsUrl } from "../../../lib/external";
   import { renderMarkdown } from "../../../lib/markdown";
@@ -33,6 +34,7 @@
 </script>
 
 <div class="overview">
+  <div class="facts">
   {#if detail.manifest.description}
     <p class="description">{detail.manifest.description}</p>
   {/if}
@@ -52,6 +54,9 @@
   {#if !detail.summary.is_workspace_linked && !assetsOnly}
     <AutoUpdateField modId={detail.summary.id} />
   {/if}
+  {#if detail.summary.patch_count > 0 && !assetsOnly}
+    <ModColourField modId={detail.summary.id} modName={detail.summary.name} />
+  {/if}
   {#if links.length > 0}
     <ul class="links" {@attach guardLinks}>
       {#each links as link (link.label)}
@@ -60,15 +65,17 @@
     </ul>
   {/if}
   {#if detail.asset_files.length > 0 && assetsOnly}
-    <AssetFiles files={detail.asset_files} />
+    <AssetFiles files={detail.asset_files} modId={detail.summary.id} modName={detail.summary.name} />
   {/if}
+  </div>
+  <div class="read">
   {#if readme}
     <div class="markdown" {@attach guardLinks}>{@html readme}</div>
   {:else if !assetsOnly}
     <p class="qm-muted">This mod has no readme.</p>
   {/if}
   {#if detail.asset_files.length > 0 && !assetsOnly}
-    <AssetFiles files={detail.asset_files} />
+    <AssetFiles files={detail.asset_files} modId={detail.summary.id} modName={detail.summary.name} />
   {/if}
   {#if changelog}
     <details class="changelog">
@@ -76,6 +83,7 @@
       <div class="markdown" {@attach guardLinks}>{@html changelog}</div>
     </details>
   {/if}
+  </div>
 </div>
 
 <style>
@@ -83,6 +91,34 @@
     display: flex;
     flex-direction: column;
     gap: var(--qm-space-3);
+  }
+
+  .facts,
+  .read {
+    display: flex;
+    flex-direction: column;
+    gap: var(--qm-space-3);
+    min-width: 0;
+    max-width: var(--qm-measure);
+  }
+
+  /* A wide panel (the tab body is the container): the mod's facts on the left, its readme beside them. */
+  @container (min-width: 900px) {
+    .overview {
+      display: grid;
+      grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+      gap: var(--qm-space-6);
+      align-items: start;
+    }
+
+    .read {
+      padding-left: var(--qm-space-6);
+      border-left: 1px solid var(--qm-border);
+    }
+
+    .read > :global(:first-child) {
+      margin-top: 0;
+    }
   }
 
   .description {

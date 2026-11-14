@@ -2,7 +2,7 @@
   import { untrack } from "svelte";
   import { Button, EmptyState, ScrollRegion, Skeleton, Splitter } from "../../components/ui";
   import { cssVars } from "../../lib/actions/cssVars";
-  import type { ModPatchStatus } from "../../lib/bindings";
+  import type { ModPatchStatus, ModSummary } from "../../lib/bindings";
   import { clampListWidth, defaultListWidth, LIST_MIN, loadSplit, saveSplit, widthClass } from "../../lib/layout/split";
   import { filterRows, type FilterChip } from "../../lib/modlist/filter";
   import { movedBySolver, resolvedPosition, rowKey } from "../../lib/modlist/order";
@@ -18,6 +18,7 @@
   import { selection } from "../../lib/stores/selection.svelte";
   import { updates } from "../../lib/stores/updates.svelte";
   import DetailPanel from "./detail/DetailPanel.svelte";
+  import UninstallDialog from "./detail/UninstallDialog.svelte";
   import FilterBar from "./FilterBar.svelte";
   import { modList } from "./modlist-controller.svelte";
   import ModList from "./ModList.svelte";
@@ -147,6 +148,24 @@
 
   const focusedMod = $derived(selection.focused ? (modsById.get(selection.focused) ?? null) : null);
 
+  // Several mods picked (Ctrl or Shift click, or Select all): one bar acts on all of them.
+  const selectedMods = $derived(visible.flatMap((r) => (r.kind === "mod" && selection.selected.has(r.id) ? (modsById.get(r.id) ?? []) : [])));
+  const uninstallBlocked = $derived(installs.blockReason("uninstall"));
+  let removeOpen = $state(false);
+  /** The mods the dialog names, captured when it opened. */
+  let removeTargets = $state<ModSummary[]>([]);
+
+  function askUninstall(list: ModSummary[]) {
+    removeTargets = list;
+    removeOpen = true;
+  }
+
+  function selectAll() {
+    const ids = visible.flatMap((r) => (r.kind === "mod" ? [r.id] : []));
+    selection.selected = new Set(ids);
+    if (!selection.focused || !ids.includes(selection.focused)) selection.focused = ids[0] ?? null;
+  }
+
   function onWindowKey(e: KeyboardEvent) {
     const target = e.target as HTMLElement | null;
     if (e.key === "Escape" && narrow && overlayOpen && !e.defaultPrevented) {
@@ -187,8 +206,24 @@
       updateCount={updates.available.length}
       updateBlocked={installs.blockReason()}
       onupdateall={() => updates.installAll()}
+      onselectall={modItems.length > 1 ? selectAll : undefined}
     />
     <UpdatesNote />
+    {#if selectedMods.length > 1}
+      <div class="selection-bar" role="toolbar" aria-label="Selected mods">
+        <span class="count">{selectedMods.length} mods selected</span>
+        <Button size="sm" disabled={!canMutate} onclick={() => void modList.setEnabled(selectedMods.map((m) => m.id), true)}>Enable</Button>
+        <Button size="sm" disabled={!canMutate} onclick={() => void modList.setEnabled(selectedMods.map((m) => m.id), false)}>Disable</Button>
+        <Button
+          size="sm"
+          variant="danger"
+          disabled={!canMutate || uninstallBlocked !== null}
+          title={uninstallBlocked ?? undefined}
+          onclick={() => askUninstall(selectedMods)}>Uninstall...</Button
+        >
+        <Button size="sm" variant="ghost" onclick={() => (selection.selected = new Set(selection.focused ? [selection.focused] : []))}>Clear</Button>
+      </div>
+    {/if}
     <ScrollRegion class="list-scroll">
       {#if !ready}
         <div class="skeleton" aria-busy="true" aria-label="Loading mods">
@@ -214,6 +249,8 @@
           bind:cursor
           oneditseparator={(sep) => separators?.edit(sep)}
           onremoveseparator={(sep) => separators?.remove(sep)}
+          onuninstall={(mod) => askUninstall([mod])}
+          {uninstallBlocked}
         />
         {#if filtering && !visible.some((r) => r.kind === "mod")}
           <p class="qm-muted none">No mods match the filter.</p>
@@ -249,6 +286,7 @@
 </div>
 
 <SeparatorDialogs bind:this={separators} {cursor} />
+<UninstallDialog bind:open={removeOpen} targets={removeTargets} />
 
 <style>
   .installed {
@@ -295,6 +333,24 @@
     border-left: 1px solid var(--qm-border-strong);
     background: var(--qm-canvas);
     padding-left: var(--qm-space-3);
+  }
+
+  .selection-bar {
+    display: flex;
+    flex: none;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--qm-space-2);
+    padding: var(--qm-space-2) var(--qm-space-3);
+    border: 1px solid var(--qm-accent);
+    border-radius: var(--qm-radius-md);
+    background: color-mix(in srgb, var(--qm-accent) 10%, var(--qm-panel));
+    font-size: var(--qm-text-13);
+  }
+
+  .selection-bar .count {
+    margin-right: auto;
+    font-weight: 600;
   }
 
   .skeleton {

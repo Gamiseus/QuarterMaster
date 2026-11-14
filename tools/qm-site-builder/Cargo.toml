@@ -1,6 +1,6 @@
 [package]
 name = "qm-site-builder"
-version = "1.2.0"
+version = "1.2.1"
 edition = "2021"
 description = "Builds the gamiseus.github.io site and its mod index (runs in GitHub Actions; not shipped with the launcher)."
 publish = false

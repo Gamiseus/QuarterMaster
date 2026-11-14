@@ -80,6 +80,15 @@ class AppStore {
     });
   }
 
+  /** Writes every file of the game into `_game_dump` in the workspace mods folder (a tracked job). */
+  async dumpGame(): Promise<void> {
+    const id = await call(commands.gameDumpFull());
+    await jobs.track(id, {
+      label: "Writing the game's files",
+      success: (out) => `Wrote ${out ?? "the"} game files to _game_dump in the workspace mods folder.`,
+    });
+  }
+
   /** Looks for the game and save folders; changes nothing. */
   autoDetect(): Promise<DetectedPaths> {
     return call(commands.pathsAutoDetect());

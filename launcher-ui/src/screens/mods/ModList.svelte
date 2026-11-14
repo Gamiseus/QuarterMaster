@@ -29,6 +29,8 @@
     canMutate: boolean;
     oneditseparator: (sep: ProfileSeparator) => void;
     onremoveseparator: (sep: ProfileSeparator) => void;
+    onuninstall: (mod: ModSummary) => void;
+    uninstallBlocked?: string | null;
     /** Keyboard cursor row key (bindable; the screen inserts new separators before it). */
     cursor?: string | null;
   }
@@ -43,8 +45,13 @@
     canMutate,
     oneditseparator,
     onremoveseparator,
+    onuninstall,
+    uninstallBlocked = null,
     cursor = $bindable(null),
   }: Props = $props();
+
+  /** Some mod has more than one installed version, so the rows show a version picker. */
+  const anyVersions = $derived([...modsById.values()].some((m) => m.installed_versions.length > 1 && m.kind !== "assets"));
 
   /** Matches --qm-dur-fast (120ms) in tokens.css; dnd needs the number. */
   const FLIP_MS = 120;
@@ -310,6 +317,10 @@
             {handle}
             onenabledchange={(v) => controller.setEnabled([row.id], v)}
             ontogglelock={() => controller.toggleLock(row.id)}
+            onuninstall={() => onuninstall(mod)}
+            uninstallBlocked={mod.is_workspace_linked ? "This mod is a folder in your workspace folder. Remove it there." : uninstallBlocked}
+            onversionchange={(v) => controller.setVersion(row.id, v)}
+            versionPicker={anyVersions}
           />
         {/if}
       {/if}

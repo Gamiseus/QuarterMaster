@@ -31,6 +31,8 @@ pub enum JobKind {
     ModpackImport,
     /// Makes the Fixes view's suggestions (§9.3) after a simulation.
     FixSuggestions,
+    /// Writes every file of the game into the workspace mods folder.
+    GameDump,
 }
 
 impl JobKind {

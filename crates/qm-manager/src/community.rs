@@ -515,21 +515,14 @@ pub fn download_to_temp(
     }
 
     // Safety: Allow HTTPS downloads from GitHub, NexusMods, or user-approved hosts
-    if !trimmed_url.starts_with("https://") && !trimmed_url.starts_with("http://127.0.0.1") {
+    if !is_https_or_local(trimmed_url) {
         return Err("Only secure HTTPS download URLs are permitted".to_string());
     }
 
     let dl_dir = paths.cache_dir.join("downloads");
     fs::create_dir_all(&dl_dir).map_err(|e| format!("Failed to create download cache dir: {e}"))?;
 
-    let filename = trimmed_url
-        .split('?')
-        .next()
-        .unwrap_or("")
-        .rsplit('/')
-        .next()
-        .filter(|s| !s.is_empty() && s.ends_with(".zip"))
-        .unwrap_or("mod_download.zip");
+    let filename = download_file_name(trimmed_url);
 
     let dest_file = dl_dir.join(format!(
         "qm_{}_{}",
@@ -576,6 +569,35 @@ pub fn install_downloaded(
     })();
     let _ = fs::remove_file(zip);
     result
+}
+
+/// Whether `url` is `https://`, or plain http to this machine itself (tests). The host is
+/// compared whole, so `http://127.0.0.1.example.com` is not it.
+pub fn is_https_or_local(url: &str) -> bool {
+    url.starts_with("https://")
+        || url::Url::parse(url)
+            .is_ok_and(|u| u.scheme() == "http" && u.host_str() == Some("127.0.0.1"))
+}
+
+/// The name a download is kept under: the URL's last path segment when it is a plain
+/// `.zip` name (letters, digits, `.`, `_`, `-`, no `..`), else `mod_download.zip`. The URL
+/// is not trusted, so nothing that could be read as a path gets through.
+fn download_file_name(url: &str) -> String {
+    let path = url.split(['?', '#']).next().unwrap_or("");
+    let last = path.rsplit(['/', '\\']).next().unwrap_or("");
+    let plain = !last.is_empty()
+        && last.len() <= 120
+        && last.ends_with(".zip")
+        && !last.contains("..")
+        && !last.starts_with('.')
+        && last
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'));
+    if plain {
+        last.to_string()
+    } else {
+        "mod_download.zip".to_string()
+    }
 }
 
 fn size_limit_error(max_bytes: u64) -> String {
@@ -881,6 +903,34 @@ mod tests {
         } else {
             Err(format!("not allowed: {u}"))
         }
+    }
+
+    /// The kept name never carries a path: a backslash, a fragment or `..` in the URL falls
+    /// back to the fixed name.
+    #[test]
+    fn a_download_is_kept_under_a_plain_name() {
+        let base = "https://github.com/a/b/releases/download/v1";
+        assert_eq!(download_file_name(&format!("{base}/Example-Mod_1.2.zip?x=1")), "Example-Mod_1.2.zip");
+        for bad in [
+            "/real.zip#/..\\..\\..\\evil.zip",
+            "/..\\..\\evil.zip",
+            "/a..zip",
+            "/.zip",
+            "/name:stream.zip",
+            "/caf\u{e9}.zip",
+            "/mod.rar",
+            "/",
+        ] {
+            let name = download_file_name(&format!("{base}{bad}"));
+            let safe = name.ends_with(".zip")
+                && !name.contains("..")
+                && name.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'));
+            assert!(safe, "{bad}: {name}");
+        }
+        let paths = QuarterMasterPaths::resolve(Some(std::env::temp_dir().join("qm-dl-test").as_path()));
+        let deny = |_: &str| -> Result<(), String> { Err("no".into()) };
+        let err = download_to_temp(&paths, "http://127.0.0.1.example.com/x.zip", 10, &deny).unwrap_err();
+        assert!(err.contains("HTTPS"), "{err}");
     }
 
     #[test]

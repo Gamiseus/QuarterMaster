@@ -103,8 +103,58 @@ export function choicesOf(p: ModProfile): Record<string, string> {
 
 const show = (source: string) => (source === VANILLA ? "the game's own file" : source);
 
-/** The ledger with `choices`, as `assets_ledger` returns it. */
-export function ledgerWith(choices: Record<string, string>): AssetLedger {
+/** One `[[asset_choices]]` entry of a compatibility mod: one file and who wins it. */
+export interface CompatAssetChoice {
+  key: string;
+  group: string;
+  winner: string;
+  leaves_out: Record<string, string[]>;
+}
+
+/** The asset choices of the mock's compatibility mods: mod id -> entries. */
+export const COMPAT_ASSET_CHOICES: Record<string, CompatAssetChoice[]> = {};
+
+/**
+ * Slot key -> [winner, mod] from the enabled compatibility mods, where `choices` has nothing
+ * for the slot or its group (the profile's choice wins). A later mod wins a slot.
+ */
+export function compatPicks(p: ModProfile, choices: Record<string, string>): Record<string, [string, string]> {
+  const out: Record<string, [string, string]> = {};
+  for (const mod of p.enabled_mods.filter((m) => COMPAT_ASSET_CHOICES[m])) {
+    for (const e of COMPAT_ASSET_CHOICES[mod]) {
+      if (!(e.key in choices) && !(e.group in choices)) out[e.key] = [e.winner, mod];
+    }
+  }
+  return out;
+}
+
+/** The profile's ledger, as `assets_ledger` returns it. */
+export function ledgerOf(p: ModProfile, choices: Record<string, string> = choicesOf(p)): AssetLedger {
+  return ledgerWith(choices, compatPicks(p, choices));
+}
+
+/** The mod a source belongs to: a mod id, or the mod that has the faction. */
+export function modOfSource(source: string): string {
+  return source.startsWith("faction:") ? (FACTIONS.find((f) => f.faction_id === source.slice(8))?.mod_id ?? source.slice(8)) : source;
+}
+
+/** The profile's choice for `key` split by file (`assets_ledger::slot_exclusions`). */
+export function slotExclusions(p: ModProfile, key: string): CompatAssetChoice[] {
+  const out: CompatAssetChoice[] = [];
+  for (const g of ledgerOf(p).groups) {
+    for (const s of g.slots) {
+      const winner = s.choice && s.key === key ? s.choice : !s.choice && g.choice && g.key === key ? g.choice : null;
+      if (!winner || (winner !== VANILLA && !s.claims.some((c) => c.source === winner))) continue;
+      const leaves: Record<string, string[]> = {};
+      for (const c of s.claims.filter((x) => x.source !== winner)) (leaves[c.source] ??= []).push(c.target ?? c.file);
+      if (Object.keys(leaves).length > 0) out.push({ key: s.key, group: g.key, winner, leaves_out: leaves });
+    }
+  }
+  return out;
+}
+
+/** The ledger with `choices` and the compatibility mods' picks `compat`. */
+export function ledgerWith(choices: Record<string, string>, compat: Record<string, [string, string]> = {}): AssetLedger {
   if (!assetsOn()) return { has_game_files: true, groups: [] };
   const groups: AssetGroup[] = WORLD.map((g) => {
     const groupChoice = choices[g.key] ?? null;
@@ -139,7 +189,9 @@ export function ledgerWith(choices: Record<string, string>): AssetLedger {
         }
       }
       const fallback = s.claims[s.claims.length - 1]?.source ?? VANILLA;
-      const choice = choices[s.key] ?? groupChoice;
+      const own = choices[s.key] ?? groupChoice;
+      const pick = own ? undefined : compat[s.key];
+      const choice = own ?? pick?.[0] ?? null;
       let winner = fallback;
       if (choice === VANILLA) winner = VANILLA;
       else if (choice && s.claims.some((c) => c.source === choice)) winner = choice;
@@ -157,6 +209,7 @@ export function ledgerWith(choices: Record<string, string>): AssetLedger {
           ...(c.size ? { width: c.size[0], height: c.size[1] } : {}),
         })),
         ...(choices[s.key] ? { choice: choices[s.key] } : {}),
+        ...(pick ? { chosen_by: pick[1] } : {}),
         winner,
         notes: slotNotes,
       };
@@ -184,7 +237,7 @@ function scopeOf(ledger: AssetLedger, key: string): { sources: string[]; slots: 
 
 /** What giving `key` to `winner` leaves out, per source (`assets_ledger::exclusions_of`). */
 export function excludesOf(p: ModProfile, key: string, winner: string): Record<string, string[]> {
-  const after = ledgerWith({ ...choicesOf(p), [key]: winner });
+  const after = ledgerOf(p, { ...choicesOf(p), [key]: winner });
   const scope = scopeOf(after, key);
   const out: Record<string, string[]> = {};
   for (const s of scope?.slots ?? []) {
@@ -200,15 +253,15 @@ export function excludesOf(p: ModProfile, key: string, winner: string): Record<s
 
 /** Like the service: the key must be in the ledger and the winner one of its sources. */
 export function checkChoice(p: ModProfile, key: string, winner: string): void {
-  const scope = scopeOf(ledgerWith(choicesOf(p)), key);
+  const scope = scopeOf(ledgerOf(p), key);
   if (!scope) fail("not_found", "No enabled mod or faction claims that file or group any more.");
   if (winner !== VANILLA && !scope.sources.includes(winner)) fail("invalid_input", `${winner} has no file there.`);
 }
 
 export function choicePreview(p: ModProfile, key: string, winner: string): AssetChoicePreview {
   checkChoice(p, key, winner);
-  const before = ledgerWith(choicesOf(p));
-  const after = ledgerWith({ ...choicesOf(p), [key]: winner });
+  const before = ledgerOf(p);
+  const after = ledgerOf(p, { ...choicesOf(p), [key]: winner });
   const was = new Map(before.groups.flatMap((g) => g.slots).map((s) => [s.key, s.winner]));
   const scope = scopeOf(after, key);
   const changes = after.groups

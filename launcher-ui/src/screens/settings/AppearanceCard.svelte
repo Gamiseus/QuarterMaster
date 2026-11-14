@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Badge, FieldRow, Panel, RadioGroup, Section, Select, StencilHeading, Switch } from "../../components/ui";
+  import { Badge, FieldRow, Panel, Select, StencilHeading, Switch } from "../../components/ui";
   import type { ColourVision } from "../../lib/settings/cvd";
   import { normalizeTheme, type Theme } from "../../lib/settings/form";
   import { TEXT_SCALE_MAX, TEXT_SCALE_MIN, TEXT_SCALE_STEP, clampScale, scaledSize } from "../../lib/settings/typescale";
@@ -14,9 +14,9 @@
 
   const VISIONS: { value: ColourVision; label: string; description: string }[] = [
     { value: "standard", label: "Standard", description: "The default colours." },
-    { value: "deutan", label: "Deuteranopia (red-green, green weak)", description: "The most common; blue, yellow and orange replace green and red." },
-    { value: "protan", label: "Protanopia (red-green, red weak)", description: "Like deuteranopia, with a brighter danger colour, as reds look dark." },
-    { value: "tritan", label: "Tritanopia (blue-yellow)", description: "Rare; teal, pink and red replace blue and yellow." },
+    { value: "deutan", label: "Deuteranopia", description: "Red-green, green weak. The most common; blue, yellow and orange replace green and red." },
+    { value: "protan", label: "Protanopia", description: "Red-green, red weak. Like deuteranopia, with a brighter danger colour, as reds look dark." },
+    { value: "tritan", label: "Tritanopia", description: "Blue-yellow. Rare; teal, pink and red replace blue and yellow." },
     { value: "mono", label: "Monochrome", description: "Greys in clear steps, for greyscale filters. Status icons do the rest." },
   ];
 
@@ -24,6 +24,7 @@
   const disabled = $derived(!app.startupDone || !s);
   const theme = $derived(normalizeTheme(s?.theme ?? "system"));
   const vision = $derived((s?.color_vision ?? "standard") as ColourVision);
+  const visionHelp = $derived(VISIONS.find((v) => v.value === vision)?.description ?? "");
 
   /** The slider moves freely; the value is saved when it settles (change), not on every step. */
   let draftScale = $state<number | null>(null);
@@ -64,38 +65,35 @@
         bind:checked={() => s?.high_contrast ?? false, (v) => save({ high_contrast: v })}
       />
     </FieldRow>
-  </div>
-
-  <Section title="Colour vision">
-    <RadioGroup class="visions" label="Colour vision" hideLabel items={VISIONS} bind:value={() => vision, pickVision}>
-      {#snippet extra(mode)}
-        <span class="samples" data-cvd-preview={mode}>
-          <Badge tone="ok">OK</Badge>
-          <Badge tone="warn">Check</Badge>
-          <Badge tone="danger">Problem</Badge>
-          <Badge tone="info">Info</Badge>
-        </span>
-      {/snippet}
-    </RadioGroup>
-  </Section>
-
-  <Section title="Text size">
-    <div class="scale">
-      <label class="scale-label" for="qm-text-scale">Text size</label>
-      <input
-        id="qm-text-scale"
-        type="range"
-        min={TEXT_SCALE_MIN}
-        max={TEXT_SCALE_MAX}
-        step={TEXT_SCALE_STEP}
-        value={scale}
-        aria-valuetext="{percent}%"
-        {disabled}
-        oninput={(e) => (draftScale = Number(e.currentTarget.value))}
-        onchange={commitScale}
-      />
-      <output class="value" for="qm-text-scale">{percent}%</output>
+    <!-- One row, like the other settings: the list of modes is in the select, and the
+         samples show the mode in use, since a pick applies at once. -->
+    <FieldRow class="vision-row" label="Colour vision" help={visionHelp}>
+      <Select class="control-select" label="Colour vision" hideLabel items={VISIONS} {disabled} bind:value={() => vision, pickVision} />
+    </FieldRow>
+    <div class="samples" data-cvd-preview={vision} aria-label="Status colours in this mode">
+      <Badge tone="ok">OK</Badge>
+      <Badge tone="warn">Check</Badge>
+      <Badge tone="danger">Problem</Badge>
+      <Badge tone="info">Info</Badge>
     </div>
+    <FieldRow label="Text size" help="Small text grows most and headings least, so the layout keeps its shape.">
+      <div class="scale">
+        <input
+          id="qm-text-scale"
+          type="range"
+          aria-label="Text size"
+          min={TEXT_SCALE_MIN}
+          max={TEXT_SCALE_MAX}
+          step={TEXT_SCALE_STEP}
+          value={scale}
+          aria-valuetext="{percent}%"
+          {disabled}
+          oninput={(e) => (draftScale = Number(e.currentTarget.value))}
+          onchange={commitScale}
+        />
+        <output class="value" for="qm-text-scale">{percent}%</output>
+      </div>
+    </FieldRow>
     <!-- The sample uses the sizes the slider would give, before it is saved. -->
     <div
       class="sample"
@@ -106,30 +104,35 @@
         "--sample-12": `${scaledSize(12, scale)}px`,
       }}
     >
-      <p class="qm-stencil sample-heading">Field report</p>
-      <p class="sample-body">Small text grows most and headings least, so the layout keeps its shape.</p>
-      <p class="qm-muted sample-small">Captions and badges stay readable.</p>
+      <span class="qm-stencil sample-heading">Field report</span>
+      <span class="sample-body">Body text at this size.</span>
+      <span class="qm-muted sample-small">Captions and badges.</span>
     </div>
-  </Section>
+  </div>
 </Panel>
 
 <style>
-  :global(.visions .qm-radio-group) {
-    gap: var(--qm-space-2);
+  /* The samples close the Colour vision row, so the row's own line goes. */
+  :global(.qm-field-row.vision-row) {
+    padding-bottom: 0;
+    border-bottom: 0;
   }
 
   .samples {
     display: flex;
     flex-wrap: wrap;
     gap: var(--qm-space-1);
-    margin-top: var(--qm-space-1);
+    padding: var(--qm-space-2) 0 var(--qm-space-3);
+    border-bottom: 1px solid var(--qm-border);
   }
 
   .scale {
     display: grid;
-    grid-template-columns: auto 1fr 6ch;
+    grid-template-columns: 1fr 6ch;
     align-items: center;
-    gap: var(--qm-space-3);
+    gap: var(--qm-space-2);
+    width: calc(var(--qm-detail-w) * 0.5);
+    max-width: 100%;
   }
 
   .scale input {
@@ -143,19 +146,18 @@
   }
 
   .sample {
-    margin-top: var(--qm-space-3);
-    padding: var(--qm-space-3);
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: var(--qm-space-1) var(--qm-space-3);
+    margin-top: var(--qm-space-2);
+    padding: var(--qm-space-2) var(--qm-space-3);
     border: 1px solid var(--qm-border);
     border-radius: var(--qm-radius-sm);
     background: var(--qm-canvas);
   }
 
-  .sample p {
-    margin: 0;
-  }
-
   .sample .sample-heading {
-    margin-bottom: var(--qm-space-1);
     font-size: var(--sample-20);
   }
 

@@ -2,7 +2,7 @@ import * as assets from "../assets";
 import type { CompatExportRequest, ConfigValue, ConflictResolutionSuggestion, FixChangeDraft, FixDraft, JournalUndoChoice, LoadOrderUpdate } from "../../bindings";
 import { compatChanges, exportFixes, exportPreview } from "../compat";
 import { detailFor, resetConfig, savedConfig } from "../detail";
-import { loadOrderFor, mods, patchesFor, ready, simulationFor } from "../fixtures";
+import { diagnosticConflicts, loadOrderFor, mods, patchesFor, ready, simulationFor } from "../fixtures";
 import * as ledger from "../ledger";
 import { anchorCandidatesFor, fileDiffFor, glueFor, MOD_RELATIONS, patchDetailFor, previewFor, regionOptionsFor, regionVerdict, stacksFor } from "../patchworld";
 import type { InsertPosition, ModProfile, OrderRule, PreviewChanges, RegionOptions, RegionRef, SimulationOverview, StackMode } from "../../bindings";
@@ -111,6 +111,13 @@ function fixWrite<T>(write: (p: ModProfile) => T): T {
   return out;
 }
 
+/** Adds the conflicts no file lists, when the spec asked for them. */
+function withUnlisted(sim: SimulationOverview): SimulationOverview {
+  if (!state.init.unlistedConflicts) return sim;
+  const extra = diagnosticConflicts.filter((c) => c.kind === "shadowed_file" || c.kind === "var_collision");
+  return { ...sim, conflicts: [...sim.conflicts, ...extra] };
+}
+
 export const handlers: Handlers = {
   mods_list: () => {
     const enabled = new Set(activeProfile().enabled_mods);
@@ -141,7 +148,7 @@ export const handlers: Handlers = {
     state.simulating
       ? { status: "loading" }
       : ready({
-          ...simulationFor(activeProfile()),
+          ...withUnlisted(simulationFor(activeProfile())),
           plan_error: state.init.planError ?? null,
           load_errors: state.init.loadErrors ?? [],
           ...(state.init.orderReports ? ORDER_REPORTS : {}),
@@ -284,7 +291,7 @@ export const handlers: Handlers = {
     profileChanged(p);
     return null;
   },
-  assets_ledger: () => ready(assets.ledgerWith(assets.choicesOf(activeProfile()))),
+  assets_ledger: () => ready(assets.ledgerOf(activeProfile())),
   asset_choice_preview: (args) => assets.choicePreview(activeProfile(), String(args.key), String(args.winner)),
   asset_choice_clear: (args) =>
     fixWrite((p) => {

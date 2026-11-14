@@ -4,6 +4,7 @@
   import ProfilePicker from "../screens/profiles/ProfilePicker.svelte";
   import HealthSummary from "./HealthSummary.svelte";
   import LaunchButton from "./LaunchButton.svelte";
+  import ModsSourceSwitch from "./ModsSourceSwitch.svelte";
   import SaveSlotChip from "./SaveSlotChip.svelte";
 
   // Resolved per click so module load works outside Tauri.
@@ -17,6 +18,7 @@
 <header class="titlebar" data-tauri-drag-region>
   <img class="icon" src={iconUrl} alt="" data-tauri-drag-region />
   <ProfilePicker />
+  <ModsSourceSwitch />
   <SaveSlotChip />
   <span class="spacer" data-tauri-drag-region></span>
   <HealthSummary />

@@ -1,10 +1,11 @@
 <script lang="ts">
   import { untrack } from "svelte";
-  import { Button, Callout, EmptyState, ScrollRegion, Select, Skeleton } from "../../../components/ui";
+  import { IconClose } from "../../../components/icons";
+  import { Button, Callout, EmptyState, IconButton, ScrollRegion, Select, Skeleton } from "../../../components/ui";
   import type { PatchExecutionRecord, StackMode } from "../../../lib/bindings";
   import { waitingNotes } from "../../../lib/diagnostics/health";
   import { modOfName } from "../../../lib/patches/compat";
-  import { explainConflict, orderNotes, stackSentences, unlistedConflicts } from "../../../lib/patches/explain";
+  import { orderNotes, stackSentences, unlistedConflicts } from "../../../lib/patches/explain";
   import { STACK_MODES } from "../../../lib/patches/stacks";
   import { app } from "../../../lib/stores/app.svelte";
   import { loadOrder } from "../../../lib/stores/loadorder.svelte";
@@ -21,6 +22,7 @@
   import FileList from "./FileList.svelte";
   import FixesView from "./FixesView.svelte";
   import PatchInspector from "./PatchInspector.svelte";
+  import PatchNotes from "./PatchNotes.svelte";
   import PatchStrip from "./PatchStrip.svelte";
   import LineRulesNotice from "./LineRulesNotice.svelte";
   import StackingNotice from "./StackingNotice.svelte";
@@ -69,14 +71,20 @@
   const waiting = $derived(sim.status === "ready" ? waitingNotes(sim.data.fix_bindings) : []);
   /** Conflicts no file lists (a module, a `[vars]` name): counted in the summary, so shown here. */
   const unlisted = $derived(sim.status === "ready" ? unlistedConflicts(sim.data.conflicts, stats) : []);
+  const dismissed = $derived(sim.status === "ready" ? (sim.data.dismissed_conflicts ?? []) : []);
   const modNames = $derived(
-    Object.fromEntries((mods.list.status === "ready" ? mods.list.data : []).map((m) => [m.id, m.name])),
+    { qm_glue: "Your adjustments", ...Object.fromEntries((mods.list.status === "ready" ? mods.list.data : []).map((m) => [m.id, m.name])) } as Record<string, string>,
   );
   const canMutate = $derived(app.startupDone);
   /** Views that use the patch inspector; the narrow layout hides it for the others. */
   const inspectorShown = $derived(
     patchView.view === "changes" || (patchView.view === "order" && patchView.orderScope === "file"),
   );
+  /** With no patch picked there is nothing to detail: the file keeps the column's width. */
+  const inspectorEmpty = $derived(!patchView.detail);
+  let diffView = $state<DiffView>();
+  /** Fixes and Assets are about the whole profile: no file list or patch details beside them. */
+  const wholeProfile = $derived(patchView.view === "fixes" || patchView.view === "assets");
   const modName = (id: string) => modNames[id] ?? id;
   /** The selected patch's stacking notes in the shown file. */
   const stackNotes = $derived(
@@ -124,19 +132,7 @@
 </script>
 
 {#snippet waitingList()}
-  {#each waiting as note, i (`${note}:${i}`)}
-    <p class="compile-note" role="note" data-testid="waiting-note">{note}</p>
-  {/each}
-  {#if unlisted.length > 0}
-    <section class="unlisted" aria-label="Conflicts not in a file" data-testid="unlisted-conflicts">
-      <p class="unlisted-title">{unlisted.length === 1 ? "1 conflict is" : `${unlisted.length} conflicts are`} not tied to a line in a file:</p>
-      <ul>
-        {#each unlisted as c (c.id)}
-          <li>{explainConflict(c, { records: [], modName })}</li>
-        {/each}
-      </ul>
-    </section>
-  {/if}
+  <PatchNotes {unlisted} orderList={[]} {waiting} {modNames} {dismissed} {canMutate} />
 {/snippet}
 
 {#snippet views(scopes: boolean)}
@@ -179,7 +175,9 @@
   </div>
 {:else}
   <div class="patches-wrap" aria-busy={loadOrder.refreshing}>
+  <!-- The view switcher leads the tab and stays put while the columns under it change. -->
   <div class="pt-head">
+    {@render views(true)}
     {#key modeKey}
       <Select
         label="Code at shared lines"
@@ -196,25 +194,13 @@
   {#if lineRules.showNotice}
     <LineRulesNotice {canMutate} />
   {/if}
-  {#if compileNote}
-    <p class="compile-note" role="note" data-testid="compile-note">{compileNote}</p>
-  {/if}
-  {#if orderList.length > 0}
-    <section class="unlisted" aria-label="Order notes" data-testid="order-notes">
-      <p class="unlisted-title">{orderList.length === 1 ? "1 order rule or place is" : `${orderList.length} order rules or places are`} not used:</p>
-      <ul>
-        {#each orderList as note, i (`${note}:${i}`)}<li>{note}</li>{/each}
-      </ul>
-    </section>
-  {/if}
-  {@render waitingList()}
-  <div class={["patches-tab", { "no-inspector": !inspectorShown }]}>
+  <PatchNotes {unlisted} {orderList} {waiting} {compileNote} {modNames} {dismissed} {canMutate} />
+  <div class={["patches-tab", { "no-inspector": !inspectorShown, "inspector-empty": inspectorEmpty, "whole-profile": wholeProfile }]}>
     <ScrollRegion label="Changed files" class="pt-files">
       <FileList {stats} selected={patchView.file} {modNames} bind:modFilter onselect={(f) => patchView.selectFile(f)} />
     </ScrollRegion>
 
     <section class="center" aria-label="File changes">
-      {@render views(true)}
       {#if patchView.view === "fixes"}
         <ScrollRegion label="Fixes"><FixesView {modNames} {canMutate} /></ScrollRegion>
       {:else if patchView.view === "assets"}
@@ -249,14 +235,22 @@
           selected={patchView.patch}
           {modNames}
           colourMods={diff.result.mods_touching}
-          onselect={(id) => patchView.selectPatch(id)}
+          onselect={(id) => {
+            patchView.selectPatch(id);
+            diffView?.showPatch(id);
+          }}
         />
-        <div class="diff"><DiffView {diff} {modNames} /></div>
+        <div class="diff"><DiffView bind:this={diffView} {diff} {modNames} {modFilter} focusPatch={patchView.patch} /></div>
         {/if}
       {/if}
     </section>
 
     <ScrollRegion label="Patch details" class="pt-inspector">
+      {#if patchView.detail}
+        <div class="inspector-close">
+          <IconButton icon={IconClose} label="Close patch details" onclick={() => patchView.selectPatch(null)} />
+        </div>
+      {/if}
       {#if !patchView.detail}
         <p class="qm-muted">Pick a patch above the file to see what it does.</p>
       {:else if patchView.detail.status === "loading"}
@@ -302,6 +296,7 @@
     display: flex;
     flex-wrap: wrap;
     align-items: center;
+    justify-content: space-between;
     gap: var(--qm-space-3);
     padding-top: var(--qm-space-3);
   }
@@ -335,6 +330,37 @@
     grid-area: inspector;
   }
 
+  /* No patch picked: no empty column beside the file. */
+  .patches-tab.inspector-empty:not(.whole-profile) {
+    grid-template-columns: minmax(190px, 240px) minmax(0, 1fr);
+    grid-template-areas: "files center";
+  }
+
+  .patches-tab.inspector-empty :global(.pt-inspector) {
+    display: none;
+  }
+
+  /* The close button sits over the top right corner of the details. */
+  .inspector-close {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    justify-content: flex-end;
+    height: 0;
+  }
+
+  /* Fixes and Assets take the whole width. */
+  .patches-tab.whole-profile {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr);
+    grid-template-areas: "center";
+  }
+
+  .patches-tab.whole-profile :global(.pt-files),
+  .patches-tab.whole-profile :global(.pt-inspector) {
+    display: none;
+  }
+
   /* Narrow: the inspector goes under the diff so the code keeps its width. */
   @container (max-width: 1080px) {
     .patches-tab {
@@ -353,6 +379,17 @@
 
     .patches-tab.no-inspector :global(.pt-inspector) {
       display: none;
+    }
+
+    .patches-tab.inspector-empty:not(.whole-profile) {
+      grid-template-columns: minmax(170px, 210px) minmax(0, 1fr);
+      grid-template-rows: minmax(0, 1fr);
+      grid-template-areas: "files center";
+    }
+
+    .patches-tab.whole-profile {
+      grid-template-columns: minmax(0, 1fr);
+      grid-template-areas: "center";
     }
   }
 
@@ -386,24 +423,5 @@
 
   p {
     margin: 0;
-  }
-  .compile-note {
-    margin: 0 0 var(--qm-space-2);
-    color: var(--qm-text-muted);
-    font-size: var(--qm-text-13);
-  }
-
-  .unlisted {
-    margin: 0 0 var(--qm-space-2);
-    font-size: var(--qm-text-13);
-  }
-
-  .unlisted-title {
-    font-weight: 600;
-  }
-
-  .unlisted ul {
-    margin: var(--qm-space-1) 0 0;
-    padding-left: var(--qm-space-4);
   }
 </style>

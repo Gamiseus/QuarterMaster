@@ -2,6 +2,7 @@
   import { Badge, Skeleton, StencilHeading } from "../../../components/ui";
   import type { DiagnosticSeverity, ModManifest } from "../../../lib/bindings";
   import { loadOrder } from "../../../lib/stores/loadorder.svelte";
+  import { mods } from "../../../lib/stores/mods.svelte";
   import { patches } from "../../../lib/stores/patches.svelte";
   import { openPatchOrder } from "../mods-view.svelte";
 
@@ -30,8 +31,17 @@
     resolution?.diagnostics.filter((d) => d.mod_id === modId || d.related_mod_id === modId) ?? [],
   );
 
+  /** Installed mods by id; a mod that is not installed shows its id. */
+  const names = $derived(Object.fromEntries((mods.list.status === "ready" ? mods.list.data : []).map((m) => [m.id, m.name])));
+  const named = (id: string) => names[id] ?? id;
+
+  /** ">=1.0.0" reads as "1.0.0 or newer"; any other range is shown as written. */
+  const rangeText = (range: string) => {
+    const m = /^>=\s*(\d[\w.+-]*)$/.exec(range.trim());
+    return m ? `${m[1]} or newer` : range;
+  };
   const ranged = (map: Partial<Record<string, string>> | undefined) =>
-    Object.entries(map ?? {}).map(([id, range]) => (range && range !== "*" ? `${id} ${range}` : id));
+    Object.entries(map ?? {}).map(([id, range]) => (range && range !== "*" ? `${named(id)} (${rangeText(range)})` : named(id)));
 
   const relationships = $derived.by(() => {
     const r = manifest.relationships ?? {};
@@ -40,8 +50,8 @@
       { label: "Recommends", items: ranged(r.recommends) },
       { label: "Suggests", items: ranged(r.suggests) },
       { label: "Conflicts with", items: ranged(r.conflicts) },
-      { label: "Loads after", items: r.load_after ?? [] },
-      { label: "Loads before", items: r.load_before ?? [] },
+      { label: "Loads after", items: (r.load_after ?? []).map(named) },
+      { label: "Loads before", items: (r.load_before ?? []).map(named) },
       { label: "Provides", items: r.provides ?? [] },
     ].filter((g) => g.items.length > 0);
   });
@@ -54,7 +64,9 @@
       <Skeleton lines={2} />
     {:else if entry}
       <p class="position">Loads at position {entry.order_index + 1}</p>
-      {#if entry.reasons.length > 0}
+      {#if entry.reasons.length === 1}
+        <p class="qm-muted">{entry.reasons[0]}</p>
+      {:else if entry.reasons.length > 1}
         <ul class="list">
           {#each entry.reasons as reason, i (i)}
             <li>{reason}</li>
@@ -124,10 +136,12 @@
     box-shadow: var(--qm-focus-ring);
   }
 
+  /* The sections sit side by side when the panel is wide. */
   .load-order {
-    display: flex;
-    flex-direction: column;
-    gap: var(--qm-space-4);
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, calc(var(--qm-text-13) * 26)), 1fr));
+    gap: var(--qm-space-4) var(--qm-space-6);
+    align-items: start;
   }
 
   section {
