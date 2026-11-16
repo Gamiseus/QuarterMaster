@@ -746,6 +746,10 @@ pub enum PatchOutcomeStatus {
 pub struct PatchExecutionRecord {
     pub patch_id: String,
     pub patch_name: String,
+    /// The patch's `group` label from its qm.toml, if it has one.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    #[cfg_attr(feature = "specta", specta(optional))]
+    pub group: Option<String>,
     pub mod_id: String,
     pub source_file: String,
     pub target_file: String,

@@ -9,16 +9,15 @@
     checked: Record<string, boolean>;
     /** Mod id to what happens to the installed copy (installed mods only). */
     choices: Record<string, Choice>;
-    gameBusy: boolean;
   }
 
-  let { candidates, checked = $bindable(), choices = $bindable(), gameBusy }: Props = $props();
+  let { candidates, checked = $bindable(), choices = $bindable() }: Props = $props();
 </script>
 
 <ul class="list" aria-label="Mods in this archive">
   {#each candidates as c (c.manifest.id)}
     {@const id = c.manifest.id}
-    {@const items = choicesFor(c, gameBusy)}
+    {@const items = choicesFor(c)}
     <li>
       <Inset class="item">
         <Checkbox bind:checked={checked[id]} label="{c.manifest.name} {c.manifest.version}" />

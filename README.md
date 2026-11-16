@@ -20,11 +20,39 @@ The game packs its scripts and art inside `mnb.exe`, so changing them by hand me
 
 ## Installing
 
-1. Download `qm-launcher.exe` from the [releases](https://github.com/Gamiseus/QuarterMaster/releases) and run it.
-2. On first start it finds the game, or asks where `mnb.exe` is.
-3. Add mods, then press **Launch**.
+1. Download `QuarterMaster_<version>_x64-setup.exe` from the [latest release](https://github.com/Gamiseus/QuarterMaster/releases/latest) and run it. It installs to `C:\Program Files\QuarterMaster`. Setup can also install `qm`, the command-line tool for mod makers, and add it to PATH; the last page offers a Start menu entry and a desktop shortcut. Windows asks for permission once, for the install.
+2. Start QuarterMaster. The first start finds the game and your saves (press **Auto-detect**, or **Browse** to `mnb.exe`), suggests a workspace folder and asks how to start the game. All of it can be changed later in Settings.
+3. Add mods on the **Browse** tab, or drop `.zip` files and folders onto the window. Then press **Launch**.
 
-QuarterMaster works by placing a small library, `winmm.dll`, next to `mnb.exe` when it launches the game. [VERIFICATION.md](VERIFICATION.md) explains what that library does and does not touch, and how to build or inspect it yourself. Windows only.
+Windows only. QuarterMaster works by placing a small library, `winmm.dll`, next to `mnb.exe` when it launches the game. [VERIFICATION.md](VERIFICATION.md) explains what that library does and does not touch, and how to build or inspect it yourself.
+
+### Without the installer
+
+`QuarterMaster_<version>.zip` in the same release is the portable copy: unpack it into any folder you can write to and run `qm-launcher.exe`. Keep `qm_winmm.dll` and `portable.txt` beside it; `qm.exe` is the command-line tool.
+
+### Where your data is
+
+Either way, QuarterMaster keeps everything (mods, profiles, save slots, backups, settings) in `qm-data` beside the program, and nothing in the game folder but its `winmm.dll` and a `Mods` link while a modded profile is in use. An earlier copy kept its data in `%APPDATA%\QuarterMaster`; the first start offers to move that over.
+
+### Coming from a manual install
+
+If you installed an older QuarterMaster by hand (`winmm.dll` and a `Mods` folder in the game folder), leave them where they are and start the launcher. It finds them and offers **Import**: your mods go into its library, the old `Mods` folder is moved to its backups folder, and the old `winmm.dll` is deleted. A mod that states no version is imported as 0.0.0.
+
+### Updating and removing
+
+QuarterMaster checks for its own updates and for mod updates (Settings > Updates) and installs them when you say so. To remove it, use **Apps > Installed apps** in Windows: the uninstaller also takes `winmm.dll` and the `Mods` link out of the game folder, so the game runs without mods again. Tick **Also delete my mods, profiles, save slots, backups and settings** to remove `qm-data` as well; left unticked, it stays for a later install. Your mod workspace folder is never deleted.
+
+## Reporting a problem
+
+In the launcher, open **Diagnostics** and press **Report a problem** (it is also under Settings > About). Say what it is about and what happened; the launcher opens a new issue with your text filled in and makes a report file for you to drag onto it. The file holds your mod list, load order, QuarterMaster settings, the last lines of the logs and recent crash reports, with your Windows user name and Steam id removed. Nothing is sent until you press **Create** on GitHub.
+
+If the launcher will not start, [open an issue by hand](https://github.com/Gamiseus/QuarterMaster/issues/new/choose). A good report has:
+
+- the QuarterMaster version (Settings > About) and the game version;
+- what you did, what you expected and what happened instead;
+- for a crash or a mod that does not load: which mods were on, and the log. The launcher's log is `qm-data\logs\launcher.log`; the game's is under `qm-data\profiles\<profile>\Mods\qm\log`.
+
+Search the [open issues](https://github.com/Gamiseus/QuarterMaster/issues) first. A problem with one mod usually belongs to that mod's author. A GitHub account is free.
 
 ## Making mods
 
@@ -45,7 +73,7 @@ cd ..\crates\qm-launcher
 cargo tauri build
 ```
 
-[TESTING.md](TESTING.md) has the test commands.
+`tools\build-release.ps1` builds the installer, the portable zip and its checksum into `target\release\dist`. [TESTING.md](TESTING.md) has the test commands.
 
 | Folder | What it is |
 |---|---|

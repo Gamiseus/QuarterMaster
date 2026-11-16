@@ -7,6 +7,7 @@ use crate::patch::{InsertPosition, OnFailurePolicy, PatternPatch, Target};
 
 fn pat(mod_id: &str, id: &str, before: &[&str], after: &[&str]) -> Patch {
     Patch::Pattern(PatternPatch {
+        group: None,
         pattern: "-- anchor".to_string(),
         position: InsertPosition::After,
         target: Target::Single("main.lua".to_string()),
@@ -408,6 +409,7 @@ fn requirement_edges_run_the_required_patch_first() {
 
 fn copy(mod_id: &str, id: &str, after: &[&str]) -> Patch {
     Patch::Copy(crate::patch::copy::CopyPatch {
+        group: None,
         position: crate::patch::copy::CopyPosition::Prepend,
         target: Target::Single("main.lua".to_string()),
         sources: None,

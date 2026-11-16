@@ -61,7 +61,69 @@ pub struct FileView {
     pub data_url: Option<String>,
 }
 
+/// One file of an installed mod.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct ModFile {
+    /// Relative to the mod's folder, with forward slashes.
+    pub path: String,
+    pub size_bytes: u64,
+}
+
+/// The files a mod comes with, in path order.
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+pub struct ModFileList {
+    /// At most [`MAX_LISTED_FILES`]; the totals count every file.
+    pub files: Vec<ModFile>,
+    pub total_files: u32,
+    pub total_bytes: u64,
+}
+
+/// Most files a mod's file list carries.
+pub const MAX_LISTED_FILES: usize = 2000;
+
 impl Service {
+    /// Every file in a mod's folder as the active profile uses it (the folder
+    /// [`Service::file_view`] reads). Names that start with a dot, and links, are left out.
+    pub fn mod_files(&self, id: &str) -> QmResult<ModFileList> {
+        let root = self.mod_dir_of(id)?;
+        let mut files = Vec::new();
+        let mut stack = vec![root.clone()];
+        while let Some(d) = stack.pop() {
+            let Ok(rd) = std::fs::read_dir(&d) else {
+                continue;
+            };
+            for e in rd.filter_map(Result::ok) {
+                let path = e.path();
+                let Ok(meta) = std::fs::symlink_metadata(&path) else {
+                    continue;
+                };
+                // A dot name is a tool's own (`.git`, the launcher's integrity record).
+                if e.file_name().to_string_lossy().starts_with('.') {
+                    continue;
+                }
+                if meta.is_file() {
+                    if let Ok(rel) = path.strip_prefix(&root) {
+                        files.push(ModFile {
+                            path: rel.to_string_lossy().replace('\\', "/"),
+                            size_bytes: meta.len(),
+                        });
+                    }
+                } else if meta.is_dir() && !qm_manager::profiles::is_reparse_point(&path) {
+                    stack.push(path);
+                }
+            }
+        }
+        files.sort_by_cached_key(|f| f.path.to_ascii_lowercase());
+        let total_files = u32::try_from(files.len()).unwrap_or(u32::MAX);
+        let total_bytes = files.iter().map(|f| f.size_bytes).sum();
+        files.truncate(MAX_LISTED_FILES);
+        Ok(ModFileList {
+            files,
+            total_files,
+            total_bytes,
+        })
+    }
+
     /// `SettingsView` with what only the running launcher knows.
     pub(crate) fn settings_view(&self, s: &qm_manager::LauncherSettings) -> SettingsView {
         let mut v = SettingsView::from(s);
@@ -394,6 +456,54 @@ impl Service {
         self.notify(Scope::Profiles);
         self.notify(Scope::LoadOrder);
         Ok(())
+    }
+
+    /// Deletes one installed version of a mod; profiles pinned to it go back to the newest.
+    /// The only installed version is not removed this way.
+    pub fn mod_version_remove(&self, id: &str, version: &str) -> QmResult<()> {
+        self.ensure_not_running()?;
+        self.ensure_no_install()?;
+        let m = self.installed_mod(id)?;
+        if m.is_workspace_linked {
+            return Err(QmError::new(
+                ErrorKind::Conflict,
+                "This mod is a folder in the workspace mods folder. Remove it there.",
+            ));
+        }
+        if !is_plain_id(version) || !m.installed_versions.iter().any(|v| v == version) {
+            return Err(not_found(format!(
+                "Version {version} of {} is not installed.",
+                m.manifest.name
+            )));
+        }
+        if m.installed_versions.len() < 2 {
+            return Err(QmError::new(
+                ErrorKind::Conflict,
+                format!(
+                    "{version} is the only installed version of {}. Uninstall the mod instead.",
+                    m.manifest.name
+                ),
+            ));
+        }
+        let was_enabled = self
+            .active_profile()
+            .is_ok_and(|p| p.enabled_mods.iter().any(|x| x == id));
+        {
+            let _install = self.lock_install();
+            self.paths()
+                .remove_mod_version(id, version)
+                .or_kind(ErrorKind::Io)?;
+        }
+        self.invalidate(Scope::Mods);
+        let restaged = if was_enabled {
+            let active = self.paths().load_settings().active_profile_id;
+            self.stage_profile(&active)
+        } else {
+            Ok(())
+        };
+        // A profile pinned to the version was rewritten.
+        self.after_active_profile_change();
+        restaged
     }
 
     /// Picks which installed version of a mod the active profile uses; `None` goes back to

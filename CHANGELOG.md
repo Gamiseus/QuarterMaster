@@ -2,8 +2,25 @@
 
 Versions are `Major.Minor.Patch`.
 
-## 1.8.2
+## 1.9.1
 
+- a patch can be written in a short form: `[[pattern]]`, `[[regex]]`, `[[copy]]` or `[[module]]` in place of `[[patches]]` and `[patches.<type>]`. Both forms can be mixed in one `qm.toml`, and patches keep the order they are written in
+- added feature name `short_patches`
+- a patch can have a `group`; the launcher lists a mod's patches under their groups on its Patches tab
+- launcher: the first-run setup, the import and move offers and Report a problem no longer close on a click outside them or on Escape
+
+## 1.9.0
+
+- there is an installer, `QuarterMaster_<version>_x64-setup.exe`: it installs to Program Files, can install the `qm` command-line tool and add it to PATH, and offers a Start menu entry and a desktop shortcut
+- the uninstaller takes QuarterMaster's files out of the game folder and, when asked, deletes mods, profiles, save slots and settings; a mod workspace folder is never deleted
+- launcher: Settings is in three groups (Game, Mods and saves, QuarterMaster) on one grid, so cards in a row line up; copies of old Mods folders are a row of the Backups card, shown while there are some
+- an installed or unzipped launcher keeps its data in `qm-data` beside itself instead of `%APPDATA%\QuarterMaster`; at its first start it offers to move earlier data over
+- launcher: a manual install in the game folder (an old `winmm.dll` and a real `Mods` folder) is found and can be imported: the mods go into the library, the folder moves to the backups and the old `winmm.dll` is deleted
+- a mod that states no version is installed as 0.0.0 instead of 1.0.0
+- launcher: the first start has Auto-detect as the main button for the game and the save folder, and a step that explains the workspace folder and suggests one beside the launcher
+- launcher: new themes Graphite, Black, Midnight, Paper and Desert; Dark and Light are now named Field dark and Field light
+- launcher: a switch that is on follows the colour vision mode instead of staying green
+- launcher: Report a problem (Diagnostics, Settings > About) opens a filled-in issue and makes a report file to attach
 - launcher: a choice from the Assets view can be saved as a compatibility patch
 - added `[[asset_choices]]` in `qm.toml`: a compatibility patch names whose sound, image or font is used where two mods it requires replace the same one
 - a player's own choice for the file or its group wins over a compatibility patch's; the Assets view shows which mod chose a file
@@ -70,6 +87,17 @@ Versions are `Major.Minor.Patch`.
 - fixed: a copy of the game's Lua files that was cut short while being made is made again, instead of being used with files missing
 - fixed: a launcher update that fails half way puts the old launcher back, so one is always there to start
 - fixed: `qm verify-library` can repair an installed mod file that was edited in place; the library keeps its own copy of each file, which takes more disk space
+- launcher: a mod's Overview lists the files it comes with, by folder and with sizes; a file opens in the viewer, and a long list can be filtered
+- launcher: installing a newer version of a mod removes the version it takes the place of; before, every old version stayed in the library for good. This covers an archive or folder, the Browse tab, a mod update and the workspace mods folder. A version another profile is set to use stays
+- launcher: Add mod offers two choices for a mod that is already installed, Upgrade and Install alongside; Replace is gone, since Upgrade now does it
+- launcher: with several versions of a mod installed, its Overview lists them and each can be removed
+- launcher: fixed file copies of removed mods and versions staying in the library's file store; they are deleted with the mod
+- launcher: fixed a profile staying set to a version that a replace had removed
+- launcher: the file viewer wraps the lines of `.md` and `.txt` files
+- launcher: fixed dropping several archives or folders on the Mods screen adding only the first; Add mod lists the mods of each, and Browse zip and Browse folder can pick several
+- launcher: QuarterMaster updates itself: Settings > Updates shows the installed version, offers a newer release with Update and restart, and replaces the launcher and the loader together; Go back to the previous version puts the replaced pair back
+- launcher: the check for updates covers QuarterMaster as well as the mods
+- launcher: added the setting Keep the old version when a mod updates. Off, an update takes the old version's place in every profile; on, both stay and other profiles stay on the old one. Installing an installed mod again from the Browse tab follows it too
 
 ## 1.8.1
 

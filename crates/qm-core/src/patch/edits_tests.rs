@@ -224,6 +224,7 @@ fn pattern_patch(
     apply_as: Option<ApplyAs>,
 ) -> Patch {
     Patch::Pattern(PatternPatch {
+        group: None,
         pattern: pattern.to_string(),
         position,
         target: Target::Single(FILE.to_string()),

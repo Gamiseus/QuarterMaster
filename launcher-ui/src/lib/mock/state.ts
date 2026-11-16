@@ -2,6 +2,7 @@ import type {
   FixSuggestion,
   GameStatus,
   ImportRequest,
+  IssueReportRequest,
   JobInfo,
   LaunchRequest,
   LoadError,
@@ -24,6 +25,8 @@ export interface MockLog {
   imports: ImportRequest[];
   uninstalls: string[];
   updateInstalls: string[];
+  /** `install`, `apply` and `rollback` of QuarterMaster's own update, in order. */
+  launcherUpdates: string[];
   catalogInstalls: string[];
   reveals: RevealKind[];
   /** Dossier exports: the slot name and the text, as the save dialog would have written it. */
@@ -44,6 +47,12 @@ export interface MockLog {
   compatExports: string[];
   /** Test runs started from "Find the cause" (D68). */
   trials: TrialRequest[];
+  /** Manual installs imported, AppData moves and restarts asked for. */
+  manualImports: number;
+  legacyMoves: number;
+  restarts: number;
+  /** Reports made with "Report a problem". */
+  issueReports: IssueReportRequest[];
 }
 
 /** Set by e2e specs (via an init script) before the app loads to steer the mock backend. */
@@ -129,6 +138,14 @@ export interface MockInit {
   unlistedConflicts?: boolean;
   /** GCore has an older version installed beside the newest. */
   twoVersions?: boolean;
+  /** A newer QuarterMaster (9.9.0) is out. */
+  launcherUpdate?: boolean;
+  /** The launcher this one replaced can be put back. */
+  launcherRollback?: boolean;
+  /** The game folder holds a manual install: three mods, one unreadable folder and an old winmm.dll. */
+  manualInstall?: boolean;
+  /** An earlier QuarterMaster left its data in AppData. */
+  legacyData?: boolean;
 }
 
 declare global {
@@ -139,7 +156,7 @@ declare global {
   }
 }
 
-export const log: MockLog = { lastLoadOrderSet: null, launches: [], imports: [], uninstalls: [], updateInstalls: [], catalogInstalls: [], reveals: [], dossierExports: [], updateChecks: 0, settingsPatches: [], glueCreates: [], orderRules: [], stackingSets: [], noticeDismissals: [], fixes: [], compatExports: [], trials: [] };
+export const log: MockLog = { lastLoadOrderSet: null, launches: [], imports: [], uninstalls: [], updateInstalls: [], launcherUpdates: [], catalogInstalls: [], reveals: [], dossierExports: [], updateChecks: 0, settingsPatches: [], glueCreates: [], orderRules: [], stackingSets: [], noticeDismissals: [], fixes: [], compatExports: [], trials: [], manualImports: 0, legacyMoves: 0, restarts: 0, issueReports: [] };
 
 /** Running mock jobs, as `jobs_list` reports them. */
 export const jobs: JobInfo[] = [];

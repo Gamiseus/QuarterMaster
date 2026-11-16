@@ -1731,6 +1731,11 @@ print("[Mod] Initialized successfully!")
 /// Seconds the self-update swap/rollback scripts wait for the old launcher exe to unlock
 /// before giving up and restarting the current launcher unchanged.
 const SWAP_WAIT_MAX_TRIES: u32 = 60;
+/// The staged launcher and loader in `cache/updates/`, and the loader beside the launcher.
+const STAGED_EXE: &str = "qm-launcher-new.exe";
+const STAGED_DLL: &str = "qm_winmm-new.dll";
+const LOADER_DLL: &str = "qm_winmm.dll";
+const OLD_LOADER_DLL: &str = "qm_winmm.old.dll";
 
 impl QuarterMasterPaths {
     /// Discovers built-in and installed mod templates (e.g., `GCore/templates/`, `GMenu/templates/`).
@@ -1950,7 +1955,9 @@ impl QuarterMasterPaths {
         }
         let staging_dir = self.cache_dir.join("updates");
         fs::create_dir_all(&staging_dir).map_err(|e| format!("Failed to create updates dir: {e}"))?;
-        let staged_file = staging_dir.join("qm-launcher-new.exe");
+        let staged_file = staging_dir.join(STAGED_EXE);
+        // The launcher alone: a loader staged by an earlier download does not belong to it.
+        let _ = fs::remove_file(staging_dir.join(STAGED_DLL));
 
         let buffer = crate::community::fetch_capped(
             trimmed_url,
@@ -1974,10 +1981,81 @@ impl QuarterMasterPaths {
         Ok(staged_file)
     }
 
+    /// Stages a QuarterMaster release for the next swap: `qm-launcher.exe` and the loader
+    /// `qm_winmm.dll` are taken out of `zip` (at its top level or inside one folder) into
+    /// `cache/updates/`. Both must be there and be Windows programs, or nothing is staged.
+    pub fn stage_launcher_update_from_zip(&self, zip: &Path) -> Result<(), String> {
+        const MAX_PART_BYTES: u64 = 256 * 1024 * 1024;
+        let staging_dir = self.cache_dir.join("updates");
+        fs::create_dir_all(&staging_dir).map_err(|e| format!("Failed to create updates dir: {e}"))?;
+        let staged_exe = staging_dir.join(STAGED_EXE);
+        let staged_dll = staging_dir.join(STAGED_DLL);
+        // An earlier download must never be swapped in with half of this one.
+        let _ = fs::remove_file(&staged_exe);
+        let _ = fs::remove_file(&staged_dll);
+
+        let file = fs::File::open(zip).map_err(|e| format!("Failed to open the download: {e}"))?;
+        let mut archive = zip::ZipArchive::new(file)
+            .map_err(|e| format!("The download is not a zip archive: {e}"))?;
+        let mut exe: Option<Vec<u8>> = None;
+        let mut dll: Option<Vec<u8>> = None;
+        for i in 0..archive.len() {
+            let mut entry = archive
+                .by_index(i)
+                .map_err(|e| format!("The download could not be read: {e}"))?;
+            if entry.is_dir() {
+                continue;
+            }
+            let name = entry.name().replace('\\', "/");
+            let mut parts = name.rsplitn(2, '/');
+            let base = parts.next().unwrap_or_default().to_ascii_lowercase();
+            // Top level, or one folder down (a zip of a folder).
+            if parts.next().is_some_and(|dir| dir.contains('/')) {
+                continue;
+            }
+            let slot = match base.as_str() {
+                "qm-launcher.exe" => &mut exe,
+                "qm_winmm.dll" => &mut dll,
+                _ => continue,
+            };
+            if slot.is_some() {
+                return Err(format!("The download has more than one {base}."));
+            }
+            if entry.size() > MAX_PART_BYTES {
+                return Err(format!("{base} in the download is too large."));
+            }
+            let mut bytes = Vec::new();
+            std::io::Read::read_to_end(&mut (&mut entry).take(MAX_PART_BYTES + 1), &mut bytes)
+                .map_err(|e| format!("The download could not be read: {e}"))?;
+            if bytes.len() as u64 > MAX_PART_BYTES || !bytes.starts_with(b"MZ") {
+                return Err(format!("{base} in the download is not a Windows program."));
+            }
+            *slot = Some(bytes);
+        }
+        let (Some(exe), Some(dll)) = (exe, dll) else {
+            return Err(
+                "The download does not contain qm-launcher.exe and qm_winmm.dll.".to_string(),
+            );
+        };
+        // The loader first: the swap only runs when the launcher file is there.
+        fs::write(&staged_dll, dll).map_err(|e| format!("Failed to write staged update: {e}"))?;
+        fs::write(&staged_exe, exe).map_err(|e| {
+            let _ = fs::remove_file(&staged_dll);
+            format!("Failed to write staged update: {e}")
+        })?;
+        Ok(())
+    }
+
+    /// Whether a downloaded launcher is waiting in `cache/updates/` to be swapped in.
+    pub fn launcher_update_staged(&self) -> bool {
+        self.cache_dir.join("updates").join(STAGED_EXE).is_file()
+    }
+
     /// Generates a detached `swap-launcher.bat` stub that awaits launcher process exit,
     /// backs up current binary to `qm-launcher.old.exe`, swaps staged binary into place, and restarts.
     pub fn apply_launcher_update_and_restart(&self) -> Result<(), String> {
-        let staged_file = self.cache_dir.join("updates").join("qm-launcher-new.exe");
+        let staged_file = self.cache_dir.join("updates").join(STAGED_EXE);
+        let staged_dll = self.cache_dir.join("updates").join(STAGED_DLL);
         if !staged_file.is_file() {
             return Err("No staged update binary found at cache/updates/qm-launcher-new.exe".to_string());
         }
@@ -1987,46 +2065,13 @@ impl QuarterMasterPaths {
             .parent()
             .ok_or_else(|| "Could not resolve executable directory".to_string())?;
         let old_exe = exe_dir.join("qm-launcher.old.exe");
-
-
+        let loader_dll = exe_dir.join(LOADER_DLL);
+        let old_dll = exe_dir.join(OLD_LOADER_DLL);
 
         #[cfg(windows)]
         {
             let script_path = self.cache_dir.join("swap-launcher.bat");
-            let bat_content = format!(
-                r#"@echo off
-set LAUNCHER_EXE="{launcher_exe}"
-set STAGED_EXE="{staged_exe}"
-set OLD_EXE="{old_exe}"
-set TRIES=0
-
-rem Wait (at most {max_tries} s) until the launcher exe is no longer locked by the exiting process.
-if not exist %LAUNCHER_EXE% goto swap
-:wait_loop
-2>NUL (>>%LAUNCHER_EXE% (call )) && goto swap
-set /A TRIES+=1
-if %TRIES% GEQ {max_tries} goto give_up
-"%SystemRoot%\System32\PING.EXE" -n 2 127.0.0.1 >NUL
-goto wait_loop
-
-:swap
-if not exist %STAGED_EXE% goto give_up
-if exist %OLD_EXE% del /F /Q %OLD_EXE%
-if exist %LAUNCHER_EXE% move /Y %LAUNCHER_EXE% %OLD_EXE%
-move /Y %STAGED_EXE% %LAUNCHER_EXE%
-rem The new file did not arrive: the old launcher goes back, so one is always there.
-if not exist %LAUNCHER_EXE% if exist %OLD_EXE% move /Y %OLD_EXE% %LAUNCHER_EXE%
-
-:give_up
-rem On timeout the update is skipped and the current launcher is started again.
-if exist %LAUNCHER_EXE% start "" %LAUNCHER_EXE%
-(goto) 2>nul & del "%~f0"
-"#,
-                max_tries = SWAP_WAIT_MAX_TRIES,
-                launcher_exe = bat_path(&current_exe),
-                staged_exe = bat_path(&staged_file),
-                old_exe = bat_path(&old_exe),
-            );
+            let bat_content = swap_script(&current_exe, &staged_file, &old_exe, &loader_dll, &staged_dll, &old_dll, true);
             fs::write(&script_path, bat_content)
                 .map_err(|e| format!("Failed to write swap script: {e}"))?;
 
@@ -2043,7 +2088,7 @@ if exist %LAUNCHER_EXE% start "" %LAUNCHER_EXE%
         }
         #[cfg(not(windows))]
         {
-            let _ = old_exe;
+            let _ = (old_exe, loader_dll, old_dll, staged_dll);
             fs::rename(&staged_file, &current_exe)
                 .map_err(|e| format!("Failed to replace binary: {e}"))?;
             Ok(())
@@ -2062,39 +2107,13 @@ if exist %LAUNCHER_EXE% start "" %LAUNCHER_EXE%
         if !old_exe.is_file() {
             return Err("No previous launcher binary (qm-launcher.old.exe) found for rollback".to_string());
         }
-
-
+        let loader_dll = exe_dir.join(LOADER_DLL);
+        let old_dll = exe_dir.join(OLD_LOADER_DLL);
 
         #[cfg(windows)]
         {
             let script_path = self.cache_dir.join("rollback-launcher.bat");
-            let bat_content = format!(
-                r#"@echo off
-set LAUNCHER_EXE="{launcher_exe}"
-set OLD_EXE="{old_exe}"
-set TRIES=0
-
-rem Wait (at most {max_tries} s) until the launcher exe is no longer locked by the exiting process.
-if not exist %LAUNCHER_EXE% goto swap
-:wait_loop
-2>NUL (>>%LAUNCHER_EXE% (call )) && goto swap
-set /A TRIES+=1
-if %TRIES% GEQ {max_tries} goto give_up
-"%SystemRoot%\System32\PING.EXE" -n 2 127.0.0.1 >NUL
-goto wait_loop
-
-:swap
-if exist %OLD_EXE% move /Y %OLD_EXE% %LAUNCHER_EXE%
-
-:give_up
-rem On timeout the rollback is skipped and the current launcher is started again.
-if exist %LAUNCHER_EXE% start "" %LAUNCHER_EXE%
-(goto) 2>nul & del "%~f0"
-"#,
-                max_tries = SWAP_WAIT_MAX_TRIES,
-                launcher_exe = bat_path(&current_exe),
-                old_exe = bat_path(&old_exe),
-            );
+            let bat_content = rollback_script(&current_exe, &old_exe, &loader_dll, &old_dll, true);
             fs::write(&script_path, bat_content)
                 .map_err(|e| format!("Failed to write rollback script: {e}"))?;
 
@@ -2234,6 +2253,111 @@ if exist %LAUNCHER_EXE% start "" %LAUNCHER_EXE%
             "changed_files": changed_files,
         })
     }
+}
+
+/// What starts the launcher again at the end of a swap script (left out by tests).
+const RELAUNCH_LINE: &str = r#"if exist %LAUNCHER_EXE% start "" %LAUNCHER_EXE%"#;
+
+/// The script that swaps a staged launcher (and its loader, when one is staged) into place
+/// once the running launcher has exited.
+#[cfg(windows)]
+fn swap_script(
+    launcher: &Path,
+    staged: &Path,
+    old: &Path,
+    loader: &Path,
+    staged_loader: &Path,
+    old_loader: &Path,
+    relaunch: bool,
+) -> String {
+    format!(
+        r#"@echo off
+set LAUNCHER_EXE="{launcher_exe}"
+set STAGED_EXE="{staged_exe}"
+set OLD_EXE="{old_exe}"
+set LOADER_DLL="{loader_dll}"
+set STAGED_DLL="{staged_dll}"
+set OLD_DLL="{old_dll}"
+set TRIES=0
+
+rem Wait (at most {max_tries} s) until the launcher exe is no longer locked by the exiting process.
+if not exist %LAUNCHER_EXE% goto swap
+:wait_loop
+2>NUL (>>%LAUNCHER_EXE% (call )) && goto swap
+set /A TRIES+=1
+if %TRIES% GEQ {max_tries} goto give_up
+"%SystemRoot%\System32\PING.EXE" -n 2 127.0.0.1 >NUL
+goto wait_loop
+
+:swap
+if not exist %STAGED_EXE% goto give_up
+if exist %OLD_EXE% del /F /Q %OLD_EXE%
+if exist %LAUNCHER_EXE% move /Y %LAUNCHER_EXE% %OLD_EXE%
+move /Y %STAGED_EXE% %LAUNCHER_EXE%
+rem The new file did not arrive: the old launcher goes back, so one is always there.
+if not exist %LAUNCHER_EXE% if exist %OLD_EXE% move /Y %OLD_EXE% %LAUNCHER_EXE%
+rem The loader goes with the launcher it was built with, and only when that one arrived.
+if exist %STAGED_EXE% goto give_up
+if not exist %STAGED_DLL% goto give_up
+if exist %OLD_DLL% del /F /Q %OLD_DLL%
+if exist %LOADER_DLL% move /Y %LOADER_DLL% %OLD_DLL%
+move /Y %STAGED_DLL% %LOADER_DLL%
+if not exist %LOADER_DLL% if exist %OLD_DLL% move /Y %OLD_DLL% %LOADER_DLL%
+
+:give_up
+rem On timeout the update is skipped and the current launcher is started again.
+{relaunch}
+(goto) 2>nul & del "%~f0"
+"#,
+        max_tries = SWAP_WAIT_MAX_TRIES,
+        launcher_exe = bat_path(launcher),
+        staged_exe = bat_path(staged),
+        old_exe = bat_path(old),
+        loader_dll = bat_path(loader),
+        staged_dll = bat_path(staged_loader),
+        old_dll = bat_path(old_loader),
+        relaunch = if relaunch { RELAUNCH_LINE } else { "" },
+    )
+}
+
+/// The script that puts the previous launcher and loader back.
+#[cfg(windows)]
+fn rollback_script(launcher: &Path, old: &Path, loader: &Path, old_loader: &Path, relaunch: bool) -> String {
+    format!(
+        r#"@echo off
+set LAUNCHER_EXE="{launcher_exe}"
+set OLD_EXE="{old_exe}"
+set LOADER_DLL="{loader_dll}"
+set OLD_DLL="{old_dll}"
+set TRIES=0
+
+rem Wait (at most {max_tries} s) until the launcher exe is no longer locked by the exiting process.
+if not exist %LAUNCHER_EXE% goto swap
+:wait_loop
+2>NUL (>>%LAUNCHER_EXE% (call )) && goto swap
+set /A TRIES+=1
+if %TRIES% GEQ {max_tries} goto give_up
+"%SystemRoot%\System32\PING.EXE" -n 2 127.0.0.1 >NUL
+goto wait_loop
+
+:swap
+if not exist %OLD_EXE% goto give_up
+move /Y %OLD_EXE% %LAUNCHER_EXE%
+rem The loader that came with that launcher goes back with it.
+if not exist %OLD_EXE% if exist %OLD_DLL% move /Y %OLD_DLL% %LOADER_DLL%
+
+:give_up
+rem On timeout the rollback is skipped and the current launcher is started again.
+{relaunch}
+(goto) 2>nul & del "%~f0"
+"#,
+        max_tries = SWAP_WAIT_MAX_TRIES,
+        launcher_exe = bat_path(launcher),
+        old_exe = bat_path(old),
+        loader_dll = bat_path(loader),
+        old_dll = bat_path(old_loader),
+        relaunch = if relaunch { RELAUNCH_LINE } else { "" },
+    )
 }
 
 /// Registers `qm://`, `nxm://`, and `.qmpack` file associations in `HKCU\Software\Classes` (no UAC elevation needed).
@@ -3349,6 +3473,133 @@ pub fn save_mod_file(mod_dir: &Path, file_path: &str, content: &str) -> Result<P
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A folder with a launcher, its loader and (when given) a staged pair, as an update finds it.
+    #[cfg(windows)]
+    struct SwapDir {
+        _tmp: tempfile::TempDir,
+        launcher: PathBuf,
+        staged: PathBuf,
+        old: PathBuf,
+        loader: PathBuf,
+        staged_loader: PathBuf,
+        old_loader: PathBuf,
+        script: PathBuf,
+    }
+
+    #[cfg(windows)]
+    impl SwapDir {
+        fn new() -> Self {
+            let tmp = tempfile::tempdir().unwrap();
+            // A folder name with a space and a percent sign, as a user's folder may have.
+            let dir = tmp.path().join("Quarter Master 100%");
+            fs::create_dir_all(dir.join("cache")).unwrap();
+            let d = SwapDir {
+                launcher: dir.join("qm-launcher.exe"),
+                staged: dir.join("cache").join(STAGED_EXE),
+                old: dir.join("qm-launcher.old.exe"),
+                loader: dir.join(LOADER_DLL),
+                staged_loader: dir.join("cache").join(STAGED_DLL),
+                old_loader: dir.join(OLD_LOADER_DLL),
+                script: dir.join("cache").join("swap.bat"),
+                _tmp: tmp,
+            };
+            fs::write(&d.launcher, "launcher 1").unwrap();
+            fs::write(&d.loader, "loader 1").unwrap();
+            d
+        }
+
+        fn run(&self, script: String) {
+            fs::write(&self.script, script).unwrap();
+            let status = std::process::Command::new("cmd")
+                .arg("/C")
+                .arg(&self.script)
+                .status()
+                .unwrap();
+            assert!(status.success());
+        }
+
+        fn swap(&self) {
+            self.run(swap_script(
+                &self.launcher,
+                &self.staged,
+                &self.old,
+                &self.loader,
+                &self.staged_loader,
+                &self.old_loader,
+                false,
+            ));
+        }
+
+        fn rollback(&self) {
+            self.run(rollback_script(&self.launcher, &self.old, &self.loader, &self.old_loader, false));
+        }
+
+        fn text(p: &Path) -> Option<String> {
+            fs::read_to_string(p).ok()
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn the_swap_replaces_the_launcher_and_the_loader_and_keeps_the_old_pair() {
+        let d = SwapDir::new();
+        fs::write(&d.staged, "launcher 2").unwrap();
+        fs::write(&d.staged_loader, "loader 2").unwrap();
+        d.swap();
+        assert_eq!(SwapDir::text(&d.launcher).as_deref(), Some("launcher 2"));
+        assert_eq!(SwapDir::text(&d.loader).as_deref(), Some("loader 2"));
+        assert_eq!(SwapDir::text(&d.old).as_deref(), Some("launcher 1"));
+        assert_eq!(SwapDir::text(&d.old_loader).as_deref(), Some("loader 1"));
+        assert!(!d.staged.exists() && !d.staged_loader.exists());
+
+        // A second update keeps only the pair it replaced.
+        fs::write(&d.staged, "launcher 3").unwrap();
+        fs::write(&d.staged_loader, "loader 3").unwrap();
+        d.swap();
+        assert_eq!(SwapDir::text(&d.launcher).as_deref(), Some("launcher 3"));
+        assert_eq!(SwapDir::text(&d.old).as_deref(), Some("launcher 2"));
+        assert_eq!(SwapDir::text(&d.old_loader).as_deref(), Some("loader 2"));
+
+        // Going back restores that pair together.
+        d.rollback();
+        assert_eq!(SwapDir::text(&d.launcher).as_deref(), Some("launcher 2"));
+        assert_eq!(SwapDir::text(&d.loader).as_deref(), Some("loader 2"));
+        assert!(!d.old.exists() && !d.old_loader.exists());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_swap_with_only_a_launcher_staged_leaves_the_loader() {
+        let d = SwapDir::new();
+        fs::write(&d.staged, "launcher 2").unwrap();
+        d.swap();
+        assert_eq!(SwapDir::text(&d.launcher).as_deref(), Some("launcher 2"));
+        assert_eq!(SwapDir::text(&d.loader).as_deref(), Some("loader 1"));
+        assert!(!d.old_loader.exists());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_swap_with_nothing_staged_changes_nothing() {
+        let d = SwapDir::new();
+        // A loader alone must never go in under the old launcher.
+        fs::write(&d.staged_loader, "loader 2").unwrap();
+        d.swap();
+        assert_eq!(SwapDir::text(&d.launcher).as_deref(), Some("launcher 1"));
+        assert_eq!(SwapDir::text(&d.loader).as_deref(), Some("loader 1"));
+        assert!(!d.old.exists() && !d.old_loader.exists());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_rollback_with_no_previous_launcher_changes_nothing() {
+        let d = SwapDir::new();
+        fs::write(&d.old_loader, "loader 0").unwrap();
+        d.rollback();
+        assert_eq!(SwapDir::text(&d.launcher).as_deref(), Some("launcher 1"));
+        assert_eq!(SwapDir::text(&d.loader).as_deref(), Some("loader 1"));
+    }
 
     #[test]
     fn roundtrips_qm1_profile_share_code() {

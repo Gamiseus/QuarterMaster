@@ -70,6 +70,10 @@ pub struct LauncherSettings {
     /// Install available mod updates without asking (per-mod `auto_update_mods` entries win).
     #[serde(default)]
     pub auto_install_updates: bool,
+    /// A mod update keeps the version it updates from installed as well (profiles other than
+    /// the active one stay on it). Off: the new version takes the old one's place.
+    #[serde(default)]
+    pub keep_old_mod_versions: bool,
     /// "standard" | "deutan" | "protan" | "tritan" | "mono".
     #[serde(default = "default_color_vision")]
     pub color_vision: String,
@@ -230,6 +234,7 @@ impl Default for LauncherSettings {
             last_known_exe_sha256: None,
             auto_check_updates: true,
             auto_install_updates: false,
+            keep_old_mod_versions: false,
             color_vision: default_color_vision(),
             high_contrast: false,
             text_scale: default_text_scale(),
@@ -450,7 +455,7 @@ pub struct DetectedPaths {
 /// `reg query` prints). `key` starts with `HKCU\` or `HKLM\`. Read in-process on purpose: a
 /// spawned `reg.exe` is orphaned, suspended forever, when its parent exits during the spawn.
 #[cfg(windows)]
-fn read_registry_string(key: &str, value_name: &str) -> Option<String> {
+pub(crate) fn read_registry_string(key: &str, value_name: &str) -> Option<String> {
     use windows::core::PCWSTR;
     use windows::Win32::Foundation::{ERROR_MORE_DATA, ERROR_SUCCESS};
     use windows::Win32::System::Registry::{

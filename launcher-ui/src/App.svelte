@@ -14,6 +14,10 @@
   import { updates } from "./lib/stores/updates.svelte";
   import { openUpdates } from "./screens/mods/mods-view.svelte";
   import OnboardingDialog from "./screens/onboarding/OnboardingDialog.svelte";
+  import LegacyDataDialog from "./screens/setup/LegacyDataDialog.svelte";
+  import ManualInstallDialog from "./screens/setup/ManualInstallDialog.svelte";
+  import ReportIssueDialog from "./components/ReportIssueDialog.svelte";
+  import { setup } from "./lib/stores/setup.svelte";
   import DiagnosticsScreen from "./screens/diagnostics/DiagnosticsScreen.svelte";
   import ModEngineScreen from "./screens/modengine/ModEngineScreen.svelte";
   import ModsScreen from "./screens/mods/ModsScreen.svelte";
@@ -40,6 +44,17 @@
     if (app.startupDone && app.settings) untrack(() => updates.announce());
   });
 
+  // Once per start: data an earlier QuarterMaster left in AppData (asked before the first-run setup).
+  $effect(() => {
+    if (app.startupDone) untrack(() => void setup.checkLegacy());
+  });
+
+  // A manual install in the game folder, looked for once the game is set (and again when it changes).
+  const gamePath = $derived(app.startupDone && app.settings?.first_run_completed ? (app.settings.game_exe_path ?? null) : null);
+  $effect(() => {
+    if (gamePath !== null) untrack(() => void setup.checkManual());
+  });
+
   // Periodic checks while automatic checking is on; a derived flag, so other settings changes keep the timer.
   const autoCheck = $derived(app.startupDone && (app.settings?.auto_check_updates ?? false));
   $effect(() => {
@@ -61,7 +76,10 @@
     <PreLaunchDialog />
     <ConflictResolver />
     <JournalUndoDialog />
+    <LegacyDataDialog />
     <OnboardingDialog />
+    <ManualInstallDialog />
+    <ReportIssueDialog />
     <Toasts />
   </div>
 </Tooltip.Provider>

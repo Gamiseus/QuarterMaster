@@ -57,6 +57,7 @@ impl Service {
                 }
                 // A test run's plan must not stay staged after the launcher closed (D68).
                 self.restage_left_trial();
+                self.restage_after_move();
             }
         }
 

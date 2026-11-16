@@ -1135,6 +1135,7 @@ fn reanchored_glue(
         replaces_patch_id: Some(failed_rec.patch_id.clone()),
         priority: failed_rec.priority,
         patch: Patch::Pattern(PatternPatch {
+            group: None,
             pattern: anchor.to_string(),
             position: victim.position,
             target: Target::Single(target.to_string()),
@@ -1239,6 +1240,7 @@ mod tests {
 
     fn insert_after_anchor(mod_id: &str, id: &str, before: &[&str]) -> Patch {
         Patch::Pattern(PatternPatch {
+            group: None,
             pattern: "-- anchor".to_string(),
             position: InsertPosition::After,
             target: Target::Single("main.lua".to_string()),
@@ -1266,6 +1268,7 @@ mod tests {
 
     fn pattern(mod_id: &str, id: &str, anchor: &str, position: InsertPosition, payload: &str) -> Patch {
         Patch::Pattern(PatternPatch {
+            group: None,
             pattern: anchor.to_string(),
             position,
             target: Target::Single("main.lua".to_string()),
@@ -1469,6 +1472,7 @@ end
 "#;
 
         let to_patch = Patch::Pattern(PatternPatch {
+            group: None,
             pattern: "player.deployedTroops[i].targety = player.deployedTroops[i].y".to_string(),
             position: InsertPosition::After,
             target: Target::Single("main.lua".to_string()),
@@ -1494,6 +1498,7 @@ end
         });
 
         let gcore_patch = Patch::Pattern(PatternPatch {
+            group: None,
             pattern: "player.deployedTroops[i].targetx = player.deployedTroops[i].x\nplayer.deployedTroops[i].targety = player.deployedTroops[i].y\nif(spamTimer <= 0) then".to_string(),
             position: InsertPosition::At,
             target: Target::Single("main.lua".to_string()),

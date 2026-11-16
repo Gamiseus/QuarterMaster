@@ -9,7 +9,9 @@ use qm_manager::LauncherSettings;
 use std::path::{Path, PathBuf};
 
 const MAX_BACKUPS: std::ops::RangeInclusive<u32> = 1..=100;
-const THEMES: [&str; 3] = ["system", "dark", "light"];
+const THEMES: [&str; 8] = [
+    "system", "dark", "light", "graphite", "black", "midnight", "paper", "desert",
+];
 const COLOR_VISIONS: [&str; 5] = ["standard", "deutan", "protan", "tritan", "mono"];
 
 impl Service {
@@ -38,8 +40,27 @@ impl Service {
         self.apply_settings(patch, false)
     }
 
+    /// The game, the save folder and, when none is set, where a workspace mods folder would go.
     pub fn paths_auto_detect(&self) -> DetectedPaths {
-        self.paths().auto_detect_all_paths()
+        let mut found = self.paths().auto_detect_all_paths();
+        found.workspace_mods_dir = self
+            .paths()
+            .load_settings()
+            .workspace_mods_dir
+            .or_else(|| Some(self.default_workspace_dir()));
+        found
+    }
+
+    /// `mod-workspace` beside the program when the data is kept there, otherwise in the data
+    /// folder. Only a suggestion: the folder is made when it is saved.
+    pub fn default_workspace_dir(&self) -> PathBuf {
+        let paths = self.paths();
+        let base = if paths.is_portable {
+            paths.root_dir.parent().unwrap_or(&paths.root_dir)
+        } else {
+            &paths.root_dir
+        };
+        base.join("mod-workspace")
     }
 
     /// Apply the onboarding answers, mark onboarding done and warm the caches.
@@ -173,7 +194,8 @@ fn validate(p: &SettingsPatch) -> QmResult<()> {
     if let Some(t) = &p.theme {
         if !THEMES.contains(&t.as_str()) {
             return Err(invalid(format!(
-                "Theme must be system, dark or light (got {t:?})."
+                "Theme must be one of {} (got {t:?}).",
+                THEMES.join(", ")
             )));
         }
     }
@@ -242,6 +264,9 @@ fn apply(s: &mut LauncherSettings, p: SettingsPatch) {
     }
     if let Some(v) = p.auto_install_updates {
         s.auto_install_updates = v;
+    }
+    if let Some(v) = p.keep_old_mod_versions {
+        s.keep_old_mod_versions = v;
     }
     if let Some(v) = p.color_vision {
         s.color_vision = v;

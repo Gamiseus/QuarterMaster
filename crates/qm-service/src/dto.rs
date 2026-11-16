@@ -52,6 +52,8 @@ pub struct SettingsView {
     pub last_known_exe_sha256: Option<String>,
     pub auto_check_updates: bool,
     pub auto_install_updates: bool,
+    /// A mod update keeps the old version installed as well.
+    pub keep_old_mod_versions: bool,
     pub color_vision: String,
     pub high_contrast: bool,
     pub text_scale: f32,
@@ -86,6 +88,7 @@ impl From<&LauncherSettings> for SettingsView {
             last_known_exe_sha256: s.last_known_exe_sha256.clone(),
             auto_check_updates: s.auto_check_updates,
             auto_install_updates: s.auto_install_updates,
+            keep_old_mod_versions: s.keep_old_mod_versions,
             color_vision: s.color_vision.clone(),
             high_contrast: s.high_contrast,
             text_scale: s.text_scale,
@@ -113,6 +116,7 @@ pub struct SettingsPatch {
     pub dev_commands: Option<bool>,
     pub auto_check_updates: Option<bool>,
     pub auto_install_updates: Option<bool>,
+    pub keep_old_mod_versions: Option<bool>,
     /// `Some(true)` unsets the workspace mods folder (`workspace_mods_dir` is ignored then).
     pub clear_workspace_mods_dir: Option<bool>,
     pub color_vision: Option<String>,
@@ -236,6 +240,10 @@ pub enum PatchState {
 pub struct ModPatchStatus {
     pub patch_id: String,
     pub name: Option<String>,
+    /// The `group` its author gave it in qm.toml; the Patches tab lists patches by group.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    #[specta(optional)]
+    pub group: Option<String>,
     pub target_file: String,
     pub state: PatchState,
     pub conflicts: Vec<DetectedConflict>,
@@ -650,7 +658,9 @@ pub struct LauncherUpdateInfo {
     pub latest_version: String,
     pub update_available: bool,
     pub opt_in_prereleases: bool,
-    pub signature_verification: String,
+    /// The tag of the latest release (`v1.9.0`); empty until a check found one.
+    pub release_tag: String,
+    /// The launcher this one replaced is still beside it and can be put back.
     pub rollback_available: bool,
 }
 
@@ -1302,4 +1312,93 @@ pub enum JournalUndoChoice {
     PauseNewer,
     /// Bring the clashing old fixes back paused; the newer ones keep running.
     RestorePaused,
+}
+
+/// A QuarterMaster installed by hand in the game folder: a real `Mods` folder, a `winmm.dll`
+/// from an older download, or both.
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+pub struct ManualInstall {
+    pub game_dir: PathBuf,
+    /// `winmm.dll` in the game folder is a QuarterMaster build this launcher did not put there.
+    pub has_loader: bool,
+    pub has_mods_folder: bool,
+    pub mods: Vec<ManualMod>,
+    /// Folders that look like mods and cannot be read.
+    pub unreadable: Vec<ManualSkipped>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+pub struct ManualMod {
+    pub id: String,
+    pub name: String,
+    pub version: String,
+    /// The mod states no version; it is imported as 0.0.0.
+    pub version_missing: bool,
+    /// The version already in the library; such a mod is not imported again.
+    pub installed_version: Option<String>,
+    /// Its folder inside `Mods`.
+    pub folder: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+pub struct ManualSkipped {
+    pub folder: String,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+pub struct ManualImportResult {
+    /// Names of the mods now in the library.
+    pub imported: Vec<String>,
+    /// Names of the imported mods that stated no version.
+    pub unversioned: Vec<String>,
+    pub skipped: Vec<ManualSkipped>,
+    /// Whether the imported mods were switched on in the active profile.
+    pub enabled: bool,
+    /// Where the old `Mods` folder went.
+    pub backup_dir: Option<PathBuf>,
+    pub loader_removed: bool,
+}
+
+/// QuarterMaster data left in `%APPDATA%` by a copy that was not installed.
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+pub struct LegacyData {
+    pub path: PathBuf,
+    pub mods: u32,
+    pub profiles: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+pub struct LegacyMoveResult {
+    pub files: u32,
+    /// False when the old folder could not be deleted; it is then marked as moved.
+    pub old_removed: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "snake_case")]
+pub enum IssueArea {
+    Launcher,
+    /// The game with mods: the mod loader.
+    Loader,
+    /// One mod.
+    Mod,
+    Other,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+pub struct IssueReportRequest {
+    pub area: IssueArea,
+    pub title: String,
+    pub description: String,
+    /// Write the report file (logs, mod list, settings) to attach to the issue.
+    pub attach_files: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+pub struct IssueReportResult {
+    /// The new-issue page with the text filled in.
+    pub url: String,
+    /// The report file, when one was asked for.
+    pub file: Option<PathBuf>,
 }

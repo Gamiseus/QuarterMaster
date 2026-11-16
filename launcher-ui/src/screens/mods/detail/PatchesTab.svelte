@@ -87,6 +87,20 @@
   const ignored = $derived(compat ? ignoredLines(compat) : []);
   const idle = $derived(compat ? idleLines(compat) : []);
 
+  /** The patches under the groups their author gave them, in the order the groups first appear;
+   * patches with no group come last. One section with no heading when no patch has a group. */
+  const sections = $derived.by(() => {
+    const out: { group: string | null; items: ModPatchStatus[] }[] = [];
+    for (const p of list) {
+      const group = p.group ?? null;
+      let s = out.find((x) => x.group === group);
+      if (!s) out.push((s = { group, items: [] }));
+      s.items.push(p);
+    }
+    return [...out.filter((s) => s.group !== null), ...out.filter((s) => s.group === null)];
+  });
+  const grouped = $derived(sections.some((s) => s.group !== null));
+
   const nameOf = (p: ModPatchStatus) => p.name ?? p.patch_id;
   /** This mod's patches by id, so a conflict names them as the list above does. */
   const patchName = (id: string) => {
@@ -132,7 +146,11 @@
   {:else}
     <ul class="rows">
       <!-- A patch with several target files has a row per file: the file is part of the key. -->
-      {#each list as p (`${p.patch_id}|${p.target_file}`)}
+      {#each sections as sec (sec.group ?? "")}
+      {#if grouped}
+        <li class="group-label qm-stencil" data-testid="patch-group">{sec.group ?? "Other patches"}</li>
+      {/if}
+      {#each sec.items as p (`${p.patch_id}|${p.target_file}`)}
         <li class="row">
           <div class="main">
             <span class="name">{nameOf(p)}</span>
@@ -152,6 +170,7 @@
             onCheckedChange={(v: boolean) => toggle(p, v)}
           />
         </li>
+      {/each}
       {/each}
     </ul>
   {/if}
@@ -243,6 +262,13 @@
     margin: 0;
     padding: 0;
     list-style: none;
+  }
+
+  /* An author's group: a small stencil label above its patches. */
+  .group-label {
+    padding: var(--qm-space-2) 0 var(--qm-space-1);
+    color: var(--qm-text-muted);
+    font-size: var(--qm-text-12);
   }
 
   .row {

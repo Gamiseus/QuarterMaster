@@ -15,7 +15,7 @@
   ];
 
   let addOpen = $state(false);
-  let dropped = $state<{ path: string } | null>(null);
+  let dropped = $state<{ paths: string[] } | null>(null);
   let dragging = $state(false);
   let modpackPath = $state<string | null>(null);
   let modpackOpen = $state(false);
@@ -25,19 +25,21 @@
     addOpen = true;
   }
 
-  // Files dropped anywhere on the screen open the Add mod dialog with the first path. Inspecting is read-only;
+  // Files dropped anywhere on the screen open the Add mod dialog with every path. Inspecting is read-only;
   // the dialog's Install button waits for startup.
   $effect(() =>
     onFileDrop((e) => {
       dragging = e.type === "enter";
       if (e.type !== "drop" || e.paths.length === 0) return;
-      const path = e.paths[0];
-      if (path.toLowerCase().endsWith(".qmpack")) {
-        modpackPath = path;
+      const isPack = (p: string) => p.toLowerCase().endsWith(".qmpack");
+      const mods = e.paths.filter((p) => !isPack(p));
+      // A modpack has its own dialog; it opens when nothing else was dropped with it.
+      if (mods.length === 0) {
+        modpackPath = e.paths[0];
         modpackOpen = true;
         return;
       }
-      dropped = { path };
+      dropped = { paths: mods };
       addOpen = true;
     }),
   );

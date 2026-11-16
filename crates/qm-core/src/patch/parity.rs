@@ -493,6 +493,7 @@ mod tests {
 
     fn pattern(id: &str, pattern: &str, on_failure: OnFailurePolicy) -> Patch {
         Patch::Pattern(PatternPatch {
+            group: None,
             pattern: pattern.to_string(),
             position: InsertPosition::After,
             target: Target::Single("main.lua".to_string()),

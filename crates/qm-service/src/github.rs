@@ -103,7 +103,7 @@ fn percent_decode(s: &str) -> String {
 }
 
 /// Percent-encode everything but RFC 3986 unreserved characters (one path segment).
-fn encode_segment(s: &str) -> String {
+pub(crate) fn encode_segment(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for b in s.bytes() {
         if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'.' | b'_' | b'~') {

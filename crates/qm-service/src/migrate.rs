@@ -11,7 +11,7 @@ use qm_manager::LaunchMethod;
 pub(crate) const LAUNCH_MODEL_VERSION: u32 = 1;
 
 const MSG_CONSOLE: &str =
-    "The console is now one setting for all profiles. It is shown; turn it off in Settings.";
+    "The console is now one setting for all profiles. It opens only with Debug mode on (Settings, Launch).";
 
 impl Service {
     /// Runs the migration when it has not run yet; returns a notice when anything changed.

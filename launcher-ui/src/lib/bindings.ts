@@ -57,6 +57,63 @@ async reveal(kind: RevealKind) : Promise<Result<null, QmError>> {
 }
 },
 /**
+ * What an install by hand left in the game folder, if anything.
+ */
+async manualInstallCheck() : Promise<Result<ManualInstall | null, QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("manual_install_check") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async manualInstallImport() : Promise<Result<ManualImportResult, QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("manual_install_import") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Data an earlier, not installed QuarterMaster left in `%APPDATA%`.
+ */
+async legacyDataCheck() : Promise<Result<LegacyData | null, QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("legacy_data_check") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async legacyDataMove() : Promise<Result<LegacyMoveResult, QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("legacy_data_move") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Close and start again; used after the data folder was replaced.
+ */
+async appRestart() : Promise<Result<null, QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("app_restart") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async issueReportBuild(req: IssueReportRequest) : Promise<Result<IssueReportResult, QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("issue_report_build", { req }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Startup outcome, so the UI sees a recovery that ran before it listened for events.
  */
 async startupStatus() : Promise<Result<StartupStatus, QmError>> {
@@ -972,9 +1029,9 @@ async modUpdateInstall(modId: string) : Promise<Result<JobId, QmError>> {
     else return { status: "error", error: e  as any };
 }
 },
-async launcherUpdateDownload(downloadUrl: string, sha256: string) : Promise<Result<JobId, QmError>> {
+async launcherUpdateInstall() : Promise<Result<JobId, QmError>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("launcher_update_download", { downloadUrl, sha256 }) };
+    return { status: "ok", data: await TAURI_INVOKE("launcher_update_install") };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -1067,6 +1124,22 @@ async gameDumpFull() : Promise<Result<JobId, QmError>> {
 async fileView(source: string, path: string) : Promise<Result<FileView, QmError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("file_view", { source, path }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async modFiles(id: string) : Promise<Result<ModFileList, QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("mod_files", { id }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async modVersionRemove(id: string, version: string) : Promise<Result<null, QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("mod_version_remove", { id, version }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -1538,7 +1611,11 @@ export type ConsumerKind =
  * The consumer removed the line and wrote nothing in its place.
  */
 "deleted"
-export type CopyPatch = { position: CopyPosition; target: Target; sources: string[] | null; payload: string | null; id: string | null; name: string | null; priority: number | null; before?: string[]; after?: string[]; on_failure?: OnFailurePolicy }
+export type CopyPatch = { position: CopyPosition; target: Target; sources: string[] | null; payload: string | null; id: string | null; 
+/**
+ * A label the launcher lists this patch under (`group = "HUD"`). The loader does not use it.
+ */
+group?: string | null; name: string | null; priority: number | null; before?: string[]; after?: string[]; on_failure?: OnFailurePolicy }
 export type CopyPosition = "prepend" | "append"
 /**
  * Structured crash diagnostic report written to `Mods/qm/log/crashes/crash-{timestamp}.json`
@@ -2169,6 +2246,29 @@ reason: string;
  * The same in plain words.
  */
 detail: string; source: string }
+export type IssueArea = "launcher" | 
+/**
+ * The game with mods: the mod loader.
+ */
+"loader" | 
+/**
+ * One mod.
+ */
+"mod" | "other"
+export type IssueReportRequest = { area: IssueArea; title: string; description: string; 
+/**
+ * Write the report file (logs, mod list, settings) to attach to the issue.
+ */
+attach_files: boolean }
+export type IssueReportResult = { 
+/**
+ * The new-issue page with the text filled in.
+ */
+url: string; 
+/**
+ * The report file, when one was asked for.
+ */
+file: string | null }
 export type JobId = number
 export type JobInfo = { id: JobId; kind: JobKind; progress: number; label: string; cancelling: boolean }
 export type JobKind = "warm_mods" | "warm_vanilla" | "simulation" | "updates_refresh" | "catalog_refresh" | "catalog_install" | "mod_import" | "mod_update_install" | "launcher_update_download" | "diagnostic_bundle" | 
@@ -2285,7 +2385,15 @@ export type LaunchRequest = { profile_id: string; method: LaunchMethod | null;
  * profile and its save slot stay active.
  */
 without_mods?: boolean }
-export type LauncherUpdateInfo = { current_version: string; latest_version: string; update_available: boolean; opt_in_prereleases: boolean; signature_verification: string; rollback_available: boolean }
+export type LauncherUpdateInfo = { current_version: string; latest_version: string; update_available: boolean; opt_in_prereleases: boolean; 
+/**
+ * The tag of the latest release (`v1.9.0`); empty until a check found one.
+ */
+release_tag: string; 
+/**
+ * The launcher this one replaced is still beside it and can be put back.
+ */
+rollback_available: boolean }
 /**
  * A plain-text note on a group or a slot. `code` is stable; `text` is for the user.
  */
@@ -2328,6 +2436,15 @@ cleanable: string[];
  * Leftover field -> the mods the stamp lists for it.
  */
 owners?: Partial<{ [key in string]: string[] }> }
+/**
+ * QuarterMaster data left in `%APPDATA%` by a copy that was not installed.
+ */
+export type LegacyData = { path: string; mods: number; profiles: number }
+export type LegacyMoveResult = { files: number; 
+/**
+ * False when the old folder could not be deleted; it is then marked as moved.
+ */
+old_removed: boolean }
 /**
  * What the line rules change in one profile, from the older rules to the newer ones.
  */
@@ -2373,12 +2490,72 @@ export type LoadOrderResolution = { ordered_mods: ResolvedModOrderEntry[]; diagn
 export type LoadOrderUpdate = { mod_priorities: Partial<{ [key in string]: number }>; user_load_after: Partial<{ [key in string]: string[] }>; locked_mods: string[]; separators: ProfileSeparator[] }
 export type Loadable<T> = { status: "loading" } | { status: "ready"; data: T }
 export type LogSource = "runtime" | "runtime_errors" | "launcher"
+export type ManualImportResult = { 
+/**
+ * Names of the mods now in the library.
+ */
+imported: string[]; 
+/**
+ * Names of the imported mods that stated no version.
+ */
+unversioned: string[]; skipped: ManualSkipped[]; 
+/**
+ * Whether the imported mods were switched on in the active profile.
+ */
+enabled: boolean; 
+/**
+ * Where the old `Mods` folder went.
+ */
+backup_dir: string | null; loader_removed: boolean }
+/**
+ * A QuarterMaster installed by hand in the game folder: a real `Mods` folder, a `winmm.dll`
+ * from an older download, or both.
+ */
+export type ManualInstall = { game_dir: string; 
+/**
+ * `winmm.dll` in the game folder is a QuarterMaster build this launcher did not put there.
+ */
+has_loader: boolean; has_mods_folder: boolean; mods: ManualMod[]; 
+/**
+ * Folders that look like mods and cannot be read.
+ */
+unreadable: ManualSkipped[] }
+export type ManualMod = { id: string; name: string; version: string; 
+/**
+ * The mod states no version; it is imported as 0.0.0.
+ */
+version_missing: boolean; 
+/**
+ * The version already in the library; such a mod is not imported again.
+ */
+installed_version: string | null; 
+/**
+ * Its folder inside `Mods`.
+ */
+folder: string }
+export type ManualSkipped = { folder: string; reason: string }
 export type ModConfigSchema = { mod_id: string | null; name: string; options: ConfigOptionDef[]; modes: ConfigModeDef[]; pages: ConfigPageDef[]; keybinds: KeybindDef[] }
 export type ModDetail = { summary: ModSummary; manifest: ModManifest; readme_md: string | null; changelog_md: string | null; config_schema: ModConfigSchema | null; saved_config: Partial<{ [key in string]: ConfigValue }>; security_report: SecurityScanReport; integrity: IntegrityVerifyResult; 
 /**
  * The files the autoloader picks up from `assets/`, in path order (empty for most mods).
  */
 asset_files: AssetFile[] }
+/**
+ * One file of an installed mod.
+ */
+export type ModFile = { 
+/**
+ * Relative to the mod's folder, with forward slashes.
+ */
+path: string; size_bytes: number }
+/**
+ * The files a mod comes with, in path order.
+ */
+export type ModFileList = { 
+/**
+ * At most [`MAX_LISTED_FILES`]; the totals count every file.
+ */
+files: ModFile[]; total_files: number; total_bytes: number }
 /**
  * How a library folder is loaded: through its patch files, as a faction (`faction.toml` and no
  * patch files), as an `assets/` folder only (the autoloader), or neither.
@@ -2420,7 +2597,11 @@ save_content?: SaveContentDecl | null }
 /**
  * One patch of a mod as seen by the cached simulation.
  */
-export type ModPatchStatus = { patch_id: string; name: string | null; target_file: string; state: PatchState; conflicts: DetectedConflict[]; 
+export type ModPatchStatus = { patch_id: string; name: string | null; 
+/**
+ * The `group` its author gave it in qm.toml; the Patches tab lists patches by group.
+ */
+group?: string | null; target_file: string; state: PatchState; conflicts: DetectedConflict[]; 
 /**
  * The compatibility mods that changed this patch, as the engine bound them.
  */
@@ -2554,7 +2735,11 @@ bundled: boolean }
  * with their own profiles.
  */
 export type ModsSource = "library" | "workspace"
-export type ModulePatch = { source: string; before?: string | null; name: string; load_now?: boolean; id: string | null; priority: number | null; on_failure?: OnFailurePolicy }
+export type ModulePatch = { source: string; before?: string | null; name: string; load_now?: boolean; id: string | null; 
+/**
+ * A label the launcher lists this patch under (`group = "HUD"`). The loader does not use it.
+ */
+group?: string | null; priority: number | null; on_failure?: OnFailurePolicy }
 export type NewProfile = { name: string; id: string | null; clone_from: string | null; linked_save_profile_id: string | null; description: string | null }
 /**
  * The trial to launch next, or the one running or waiting for an answer.
@@ -2646,7 +2831,11 @@ runs_as?: RunsAsVerdict | null }
 /**
  * Telemetry record for a single patch execution on a target file.
  */
-export type PatchExecutionRecord = { patch_id: string; patch_name: string; mod_id: string; source_file: string; target_file: string; patch_type: string; priority: number; matched_count: number; expected_count: number | null; on_failure: OnFailurePolicy; status: PatchOutcomeStatus; warnings: string[]; regions: PatchRegion[]; 
+export type PatchExecutionRecord = { patch_id: string; patch_name: string; 
+/**
+ * The patch's `group` label from its qm.toml, if it has one.
+ */
+group?: string | null; mod_id: string; source_file: string; target_file: string; patch_type: string; priority: number; matched_count: number; expected_count: number | null; on_failure: OnFailurePolicy; status: PatchOutcomeStatus; warnings: string[]; regions: PatchRegion[]; 
 /**
  * Sites where stacking put this patch's code away from today's slot (§5.3).
  */
@@ -2748,7 +2937,11 @@ export type PatternPatch = { pattern: string; position: InsertPosition; target: 
 /**
  * We keep this field around for legacy compat. It doesn't do anything (and never has).
  */
-overwrite?: boolean; id: string | null; name: string | null; description?: string | null; requires?: string[]; priority: number | null; 
+overwrite?: boolean; id: string | null; 
+/**
+ * A label the launcher lists this patch under (`group = "HUD"`). The loader does not use it.
+ */
+group?: string | null; name: string | null; description?: string | null; requires?: string[]; priority: number | null; 
 /**
  * Patches this one must run before. Each entry is a patch id (`hud_overlay`, or a full id
  * like `gcore:main_lua:1`), `mod_id:patch_id`, or `mod_id:*` for every patch of that mod.
@@ -2922,7 +3115,11 @@ export type QmEvent = { type: "game_status_changed"; status: GameStatus } | { ty
  * adding a Tauri dependency to `qm-service`. Serializes exactly like `QmEvent`.
  */
 export type QmEventPayload = QmEvent
-export type RegexPatch = { target: Target; pattern: string; position: InsertPosition; root_capture: string | null; payload: string; line_prepend?: string; times?: number | null; verbose?: boolean; id: string | null; name: string | null; description?: string | null; requires?: string[]; priority: number | null; 
+export type RegexPatch = { target: Target; pattern: string; position: InsertPosition; root_capture: string | null; payload: string; line_prepend?: string; times?: number | null; verbose?: boolean; id: string | null; 
+/**
+ * A label the launcher lists this patch under (`group = "HUD"`). The loader does not use it.
+ */
+group?: string | null; name: string | null; description?: string | null; requires?: string[]; priority: number | null; 
 /**
  * Patches this one must run before. Each entry is a patch id (`hud_overlay`, or a full id
  * like `gcore:main_lua:1`), `mod_id:patch_id`, or `mod_id:*` for every patch of that mod.
@@ -3314,7 +3511,7 @@ export type SecurityScanReport = { capabilities: SecurityCapability[]; findings:
 /**
  * Fields left `None` are unchanged.
  */
-export type SettingsPatch = { game_exe_path: string | null; save_dir_path: string | null; workspace_mods_dir: string | null; theme: string | null; default_launch_method: LaunchMethod | null; opt_in_prereleases: boolean | null; auto_backup_saves: boolean | null; max_save_backups: number | null; disable_console_on_launch: boolean | null; debug_mode: boolean | null; dev_commands: boolean | null; auto_check_updates: boolean | null; auto_install_updates: boolean | null; 
+export type SettingsPatch = { game_exe_path: string | null; save_dir_path: string | null; workspace_mods_dir: string | null; theme: string | null; default_launch_method: LaunchMethod | null; opt_in_prereleases: boolean | null; auto_backup_saves: boolean | null; max_save_backups: number | null; disable_console_on_launch: boolean | null; debug_mode: boolean | null; dev_commands: boolean | null; auto_check_updates: boolean | null; auto_install_updates: boolean | null; keep_old_mod_versions: boolean | null; 
 /**
  * `Some(true)` unsets the workspace mods folder (`workspace_mods_dir` is ignored then).
  */
@@ -3322,7 +3519,11 @@ clear_workspace_mods_dir: boolean | null; color_vision: string | null; high_cont
 /**
  * `LauncherSettings` without the token itself.
  */
-export type SettingsView = { game_exe_path: string | null; save_dir_path: string | null; workspace_mods_dir: string | null; theme: string; default_launch_method: LaunchMethod; opt_in_prereleases: boolean; auto_backup_saves: boolean; max_save_backups: number; disable_console_on_launch: boolean; debug_mode: boolean; dev_commands: boolean; first_run_completed: boolean; active_profile_id: string; active_save_profile_id: string; portable_mode: boolean; auto_update_mods: Partial<{ [key in string]: boolean }>; last_known_exe_sha256: string | null; auto_check_updates: boolean; auto_install_updates: boolean; color_vision: string; high_contrast: boolean; text_scale: number; 
+export type SettingsView = { game_exe_path: string | null; save_dir_path: string | null; workspace_mods_dir: string | null; theme: string; default_launch_method: LaunchMethod; opt_in_prereleases: boolean; auto_backup_saves: boolean; max_save_backups: number; disable_console_on_launch: boolean; debug_mode: boolean; dev_commands: boolean; first_run_completed: boolean; active_profile_id: string; active_save_profile_id: string; portable_mode: boolean; auto_update_mods: Partial<{ [key in string]: boolean }>; last_known_exe_sha256: string | null; auto_check_updates: boolean; auto_install_updates: boolean; 
+/**
+ * A mod update keeps the old version installed as well.
+ */
+keep_old_mod_versions: boolean; color_vision: string; high_contrast: boolean; text_scale: number; 
 /**
  * Mod id -> the colour (1 to 8) picked for it.
  */

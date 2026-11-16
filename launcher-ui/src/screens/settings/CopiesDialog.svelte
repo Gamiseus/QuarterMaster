@@ -1,29 +1,22 @@
 <script lang="ts">
-  import { Button, ConfirmDialog, Panel, StencilHeading } from "../../components/ui";
+  import { Button, ConfirmDialog, Dialog } from "../../components/ui";
   import { call } from "../../lib/api";
   import { commands, type LeftoverBackup } from "../../lib/bindings";
   import { formatBytes } from "../../lib/saves/format";
   import { app } from "../../lib/stores/app.svelte";
   import { toasts } from "../../lib/stores/toasts.svelte";
 
-  let copies = $state<LeftoverBackup[]>([]);
-  let loaded = $state(false);
-  let target = $state<LeftoverBackup | null>(null);
-  let confirmOpen = $state(false);
-
-  async function load() {
-    try {
-      copies = await call(commands.leftoverBackupsList());
-    } catch {
-      // call() showed the error.
-    } finally {
-      loaded = true;
-    }
+  interface Props {
+    open?: boolean;
+    copies: LeftoverBackup[];
+    /** Called after a copy was deleted, to read the list again. */
+    onchanged: () => Promise<void>;
   }
 
-  $effect(() => {
-    if (app.startupDone) void load();
-  });
+  let { open = $bindable(false), copies, onchanged }: Props = $props();
+
+  let target = $state<LeftoverBackup | null>(null);
+  let confirmOpen = $state(false);
 
   const total = $derived(copies.reduce((n, c) => n + c.size_bytes, 0));
 
@@ -45,19 +38,17 @@
     const gone = target;
     await call(commands.leftoverBackupDelete(gone.name));
     toasts.info(`Deleted the copy from ${when(gone)} (${formatBytes(gone.size_bytes)}).`);
-    await load();
+    await onchanged();
   }
 </script>
 
-<Panel class="settings-card">
-  <StencilHeading level={2}>Copies of old Mods folders</StencilHeading>
-  <p class="qm-muted note">
-    When the game folder holds a real Mods folder that the launcher did not make, the launcher copies it here before
-    putting its own in place, so nothing is lost. The copies are never used again; delete the ones you do not need.
-  </p>
-  {#if !loaded}
-    <p class="qm-muted note" aria-busy="true">Looking for copies...</p>
-  {:else if copies.length === 0}
+<Dialog
+  bind:open
+  title="Copies of old Mods folders"
+  description="When the game folder held a real Mods folder that the launcher did not make, the launcher copied it to its backups folder before putting its own in place. The copies are never used again; delete the ones you do not need."
+  size="lg"
+>
+  {#if copies.length === 0}
     <p class="note" data-testid="no-leftovers">There are no copies.</p>
   {:else}
     <p class="note" data-testid="leftover-total">
@@ -78,10 +69,11 @@
       {/each}
     </ul>
   {/if}
-  <div class="row">
-    <Button size="sm" aria-label="Open the backups folder" onclick={() => app.reveal("backups").catch(() => {})}>Open folder</Button>
-  </div>
-</Panel>
+  {#snippet footer()}
+    <Button onclick={() => app.reveal("backups").catch(() => {})}>Open the backups folder</Button>
+    <Button variant="primary" onclick={() => (open = false)}>Done</Button>
+  {/snippet}
+</Dialog>
 
 <ConfirmDialog
   bind:open={confirmOpen}
@@ -93,8 +85,8 @@
 
 <style>
   .note {
-    margin: 0;
-    font-size: var(--qm-text-12);
+    margin: 0 0 var(--qm-space-2);
+    font-size: var(--qm-text-13);
   }
 
   .copies {
@@ -134,8 +126,4 @@
     white-space: nowrap;
   }
 
-  .row {
-    display: flex;
-    gap: var(--qm-space-2);
-  }
 </style>

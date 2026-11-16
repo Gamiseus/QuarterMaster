@@ -93,7 +93,7 @@
     Game window settings, which it writes and turns on in the active profile. Turn that mod on in other profiles from
     the mod list. The Vanilla profile never uses it.
   </p>
-  <div>
+  <div class="settings-fields">
     <FieldRow label="Window size" help="Width and height in pixels. Empty: the game's 1280 by 720.">
       <span class="size">
         <TextField class="number" label="Window width" hideLabel type="number" min="320" max="16384" placeholder="1280" bind:value={width} />

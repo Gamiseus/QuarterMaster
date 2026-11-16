@@ -9,6 +9,7 @@ const SRC: &str = "function f()\n  x()\n  y()\n  z()\nend\n";
 
 fn pattern(mod_id: &str, id: &str, anchor: &str, position: InsertPosition, payload: &str) -> Patch {
     Patch::Pattern(PatternPatch {
+        group: None,
         pattern: anchor.to_string(),
         position,
         target: Target::Single("main.lua".to_string()),

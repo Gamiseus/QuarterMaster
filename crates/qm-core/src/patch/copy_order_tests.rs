@@ -11,6 +11,7 @@ const AI: &str = "local ai = 1\n";
 
 fn pattern(id: &str, target: &str, pattern: &str, payload: &str) -> Patch {
     Patch::Pattern(PatternPatch {
+        group: None,
         pattern: pattern.to_string(),
         position: InsertPosition::After,
         target: Target::Single(target.to_string()),
@@ -39,6 +40,7 @@ fn pattern(id: &str, target: &str, pattern: &str, payload: &str) -> Patch {
 /// A main.lua prepend of `copied = 1`.
 fn copy(id: &str, after: &[&str]) -> Patch {
     Patch::Copy(CopyPatch {
+        group: None,
         position: CopyPosition::Prepend,
         target: Target::Single("main.lua".to_string()),
         sources: None,

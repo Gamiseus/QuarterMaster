@@ -4,12 +4,12 @@ import { settings } from "../fixtures";
 import { runMockJob } from "../jobs";
 import { ensureNotRunning, fail, log, type Handlers } from "../state";
 
-const THEMES = ["system", "dark", "light"];
+const THEMES = ["system", "dark", "light", "graphite", "black", "midnight", "paper", "desert"];
 
 const detected: DetectedPaths = {
   game_exe_path: "C:\\Games\\Mud and Blood\\mnb.exe",
   save_dir_path: "C:\\Users\\Player\\AppData\\Roaming\\mnb",
-  workspace_mods_dir: null,
+  workspace_mods_dir: "C:\\Program Files\\QuarterMaster\\mod-workspace",
   library_dir_path: "C:\\QuarterMaster\\library",
   is_steam: true,
   game_version: "3.0.0",
@@ -24,7 +24,7 @@ function validate(p: SettingsPatch): void {
     }
   }
   if (p.theme !== null && !THEMES.includes(p.theme)) {
-    fail("invalid_input", `Theme must be system, dark or light (got "${p.theme}").`);
+    fail("invalid_input", `Theme must be one of ${THEMES.join(", ")} (got "${p.theme}").`);
   }
   if (p.max_save_backups !== null && (p.max_save_backups < 1 || p.max_save_backups > 100)) {
     fail("invalid_input", "Keep between 1 and 100 save backups.");
@@ -54,7 +54,7 @@ function apply(p: SettingsPatch, onboarding: boolean): SettingsView {
 export const handlers: Handlers = {
   settings_get: () => ({ ...settings }),
   settings_update: (args) => apply(args.patch as SettingsPatch, false),
-  paths_auto_detect: () => ({ ...detected }),
+  paths_auto_detect: () => ({ ...detected, workspace_mods_dir: settings.workspace_mods_dir ?? detected.workspace_mods_dir }),
   onboarding_complete: (args) => apply(args.patch as SettingsPatch, true),
   workspace_sync: () => {
     if (!settings.workspace_mods_dir) fail("not_found", "The workspace mods folder is not set.");

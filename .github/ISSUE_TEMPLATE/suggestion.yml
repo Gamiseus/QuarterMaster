@@ -1,0 +1,16 @@
+name: Suggest something
+description: An idea for the launcher, the mod loader or the documentation.
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would you like?
+      description: What you are trying to do, and how QuarterMaster could help with it.
+    validations:
+      required: true
+  - type: textarea
+    id: today
+    attributes:
+      label: How do you do it today?
+      description: A workaround you use, if there is one.

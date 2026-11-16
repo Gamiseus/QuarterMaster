@@ -17,6 +17,7 @@ const SRC: &str = "function unit(u)\n  u.speed = 10\n  u.armor = 2\n  u.range = 
 
 fn at(mod_id: &str, id: &str, pattern: &str, payload: &str) -> PatternPatch {
     PatternPatch {
+        group: None,
         pattern: pattern.to_string(),
         position: InsertPosition::At,
         target: Target::Single(FILE.to_string()),

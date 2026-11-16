@@ -8,7 +8,11 @@ use qm_manager::{
     ProfileDiff, SaveBackupEntry, SaveProfile, SharedStack,
 };
 use qm_schema::{ConfigValue, SaveComparison, SaveSummary};
-use qm_service::ops::extras::{FileView, LeftoverBackup};
+use qm_service::dto::{
+    IssueReportRequest, IssueReportResult, LegacyData, LegacyMoveResult, ManualImportResult,
+    ManualInstall,
+};
+use qm_service::ops::extras::{FileView, LeftoverBackup, ModFileList};
 use qm_service::ops::modpacks::ModpackPreview;
 use qm_service::ops::sprites::{RibbonInfo, SpriteKind};
 use qm_service::{
@@ -97,6 +101,49 @@ pub async fn reveal(svc: Svc<'_>, kind: RevealKind) -> Result<(), QmError> {
             })
     })
     .await
+}
+
+/// What an install by hand left in the game folder, if anything.
+#[tauri::command]
+#[specta::specta]
+pub async fn manual_install_check(svc: Svc<'_>) -> Result<Option<ManualInstall>, QmError> {
+    run(&svc, move |s| Ok(s.manual_install_check())).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn manual_install_import(svc: Svc<'_>) -> Result<ManualImportResult, QmError> {
+    run(&svc, move |s| s.manual_install_import()).await
+}
+
+/// Data an earlier, not installed QuarterMaster left in `%APPDATA%`.
+#[tauri::command]
+#[specta::specta]
+pub async fn legacy_data_check(svc: Svc<'_>) -> Result<Option<LegacyData>, QmError> {
+    run(&svc, move |s| Ok(s.legacy_data_check())).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn legacy_data_move(svc: Svc<'_>) -> Result<LegacyMoveResult, QmError> {
+    run(&svc, move |s| s.legacy_data_move()).await
+}
+
+/// Close and start again; used after the data folder was replaced.
+#[tauri::command]
+#[specta::specta]
+pub async fn app_restart(app: tauri::AppHandle) -> Result<(), QmError> {
+    app.request_restart();
+    Ok(())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn issue_report_build(
+    svc: Svc<'_>,
+    req: IssueReportRequest,
+) -> Result<IssueReportResult, QmError> {
+    run(&svc, move |s| s.issue_report_build(req)).await
 }
 
 /// `%SystemRoot%\explorer.exe` by absolute path, never a PATH or app-dir search.
@@ -1093,15 +1140,8 @@ pub async fn mod_update_install(svc: Svc<'_>, mod_id: String) -> Result<JobId, Q
 
 #[tauri::command]
 #[specta::specta]
-pub async fn launcher_update_download(
-    svc: Svc<'_>,
-    download_url: String,
-    sha256: String,
-) -> Result<JobId, QmError> {
-    run(&svc, move |s| {
-        s.launcher_update_download(&download_url, sha256)
-    })
-    .await
+pub async fn launcher_update_install(svc: Svc<'_>) -> Result<JobId, QmError> {
+    run(&svc, move |s| s.launcher_update_install()).await
 }
 
 #[tauri::command]
@@ -1186,6 +1226,18 @@ pub async fn game_dump_full(svc: Svc<'_>) -> Result<JobId, QmError> {
 #[specta::specta]
 pub async fn file_view(svc: Svc<'_>, source: String, path: String) -> Result<FileView, QmError> {
     run(&svc, move |s| s.file_view(&source, &path)).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn mod_version_remove(svc: Svc<'_>, id: String, version: String) -> Result<(), QmError> {
+    run(&svc, move |s| s.mod_version_remove(&id, &version)).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn mod_files(svc: Svc<'_>, id: String) -> Result<ModFileList, QmError> {
+    run(&svc, move |s| s.mod_files(&id)).await
 }
 
 #[tauri::command]

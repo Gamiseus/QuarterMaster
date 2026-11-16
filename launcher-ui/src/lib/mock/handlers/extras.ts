@@ -1,4 +1,4 @@
-import type { FileView, LeftoverBackup, ModsSource, WindowSettings } from "../../bindings";
+import type { FileView, LeftoverBackup, ModFile, ModFileList, ModsSource, WindowSettings } from "../../bindings";
 import { emitMock } from "../../events";
 import { mods, settings } from "../fixtures";
 import { runMockJob } from "../jobs";
@@ -35,6 +35,32 @@ function fileView(source: string, path: string): FileView {
     return { source, path, kind: "text", size_bytes: text.length, text, data_url: null };
   }
   return { source, path, kind: "other", size_bytes: 4096, text: null, data_url: null };
+}
+
+/** A plausible folder for a mod: more files for the mods with many patches. */
+function modFiles(id: string): ModFileList {
+  const m = mods.find((x) => x.id === id) ?? fail("not_found", `Mod '${id}' is not installed.`);
+  const files: ModFile[] = [
+    { path: "mod.json", size_bytes: 412 },
+    { path: "qm.toml", size_bytes: 1800 + m.patch_count * 420 },
+    { path: "README.md", size_bytes: 2304 },
+    { path: "CHANGELOG.md", size_bytes: 1126 },
+    { path: "includes/main.lua", size_bytes: 9216 },
+    { path: "includes/util.lua", size_bytes: 3072 },
+  ];
+  for (let i = 1; i <= Math.min(m.patch_count, 12); i++) files.push({ path: `includes/patches/part${i}.lua`, size_bytes: 600 + i * 173 });
+  // One big mod, so closed folders and the filter have something to show.
+  if (id === "gcore") {
+    for (let i = 1; i <= 14; i++) files.push({ path: `includes/core/module${i}.lua`, size_bytes: 2048 + i * 311 });
+    for (let i = 1; i <= 9; i++) files.push({ path: `assets/sprites/units/unit${i}.png`, size_bytes: 3500 + i * 97 });
+    files.push({ path: "assets/sounds/click.ogg", size_bytes: 20480 }, { path: "tools/pack.bin", size_bytes: 150_000 });
+  }
+  if (m.patch_count > 2 && id !== "gcore") {
+    for (const n of ["icon", "panel", "cursor"]) files.push({ path: `assets/sprites/ui/${n}.png`, size_bytes: 4096 });
+    files.push({ path: "assets/sounds/click.ogg", size_bytes: 20480 });
+  }
+  files.sort((a, b) => a.path.toLowerCase().localeCompare(b.path.toLowerCase()));
+  return { files, total_files: files.length, total_bytes: files.reduce((n, f) => n + f.size_bytes, 0) };
 }
 
 const settingsChanged = () => setTimeout(() => emitMock({ type: "invalidated", scope: "settings" }), 0);
@@ -87,6 +113,26 @@ export const handlers: Handlers = {
     return runMockJob("game_dump", "Writing the game's files", () => ({ output: "1284" }));
   },
   file_view: (args) => fileView(String(args.source), String(args.path)),
+  mod_files: (args) => modFiles(String(args.id)),
+  mod_version_remove: (args) => {
+    ensureNotRunning();
+    const id = String(args.id);
+    const version = String(args.version);
+    const m = mods.find((x) => x.id === id) ?? fail("not_found", `Mod '${id}' is not installed.`);
+    if (!m.installed_versions.includes(version)) fail("not_found", `Version ${version} of ${m.name} is not installed.`);
+    if (m.installed_versions.length < 2) fail("conflict", `${version} is the only installed version of ${m.name}. Uninstall the mod instead.`);
+    m.installed_versions = m.installed_versions.filter((v) => v !== version);
+    const p = activeProfile();
+    if (p.pinned_versions?.[id] === version) {
+      const pins = { ...p.pinned_versions };
+      delete pins[id];
+      p.pinned_versions = pins;
+    }
+    if (m.version === version) m.version = m.installed_versions[0];
+    profileChanged(p);
+    setTimeout(() => emitMock({ type: "invalidated", scope: "mods" }), 0);
+    return null;
+  },
   conflict_dismiss: (args) => {
     ensureNotRunning();
     const id = String(args.conflictId);

@@ -9,6 +9,7 @@ import { handlers as mods } from "./handlers/mods";
 import { handlers as profiles } from "./handlers/profiles";
 import { handlers as savesHandlers } from "./handlers/saves";
 import { handlers as settingsHandlers } from "./handlers/settings";
+import { handlers as setupHandlers } from "./handlers/setup";
 import { handlers as updates } from "./handlers/updates";
 import { addCompatScenario, COMPAT_MOD, seedExportClash } from "./compat";
 import { releaseSuggestions, seedAmbiguousFix, seedDriftedFixes, seedFactionOrder, seedGameUpdate, seedLegacyCopy } from "./ledger";
@@ -18,7 +19,7 @@ import { fail, log, restoreProfiles, state, type Handlers } from "./state";
 export type { MockInit, MockLog } from "./state";
 
 const all = new Map<string, Handlers[string]>(
-  [app, settingsHandlers, profiles, savesHandlers, mods, install, updates, diagnostics, extras].flatMap((h) => Object.entries(h)),
+  [app, settingsHandlers, setupHandlers, profiles, savesHandlers, mods, install, updates, diagnostics, extras].flatMap((h) => Object.entries(h)),
 );
 
 function handle(cmd: string, args: Record<string, unknown> | undefined): unknown {
@@ -33,7 +34,10 @@ function handle(cmd: string, args: Record<string, unknown> | undefined): unknown
 function applyInit(): void {
   const init = window.__qmMockInit ?? {};
   state.init = { ...init, dialog: init.dialog ? [...init.dialog] : undefined };
-  if (init.firstRun) settings.first_run_completed = false;
+  if (init.firstRun) {
+    settings.first_run_completed = false;
+    settings.workspace_mods_dir = null;
+  }
   if (init.twoVersions) {
     const gcore = fixtureMods.find((m) => m.id === "gcore");
     if (gcore) gcore.installed_versions = [gcore.version, "1.0.0"];

@@ -1,6 +1,6 @@
 import type { SettingsView } from "../bindings";
 import { COLOUR_VISIONS, type ColourVision } from "./cvd";
-import { normalizeTheme } from "./form";
+import { normalizeTheme, type Theme } from "./form";
 import { applyTextScale, clampScale, textScaleVars } from "./typescale";
 
 /**
@@ -10,7 +10,7 @@ import { applyTextScale, clampScale, textScaleVars } from "./typescale";
 export const APPEARANCE_KEY = "qm.appearance";
 
 export interface BootAppearance {
-  theme: "dark" | "light" | null;
+  theme: Exclude<Theme, "system"> | null;
   cvd: Exclude<ColourVision, "standard"> | null;
   contrast: "high" | null;
   vars: Record<string, string>;

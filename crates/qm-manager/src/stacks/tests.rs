@@ -20,6 +20,7 @@ fn meta(id: &str, requires: &[&str], ix: u32) -> ModMeta {
 
 fn pat(target: &str, id: &str, anchor: &str, position: InsertPosition, payload: &str) -> Patch {
     Patch::Pattern(PatternPatch {
+        group: None,
         pattern: anchor.to_string(),
         position,
         target: Target::Single(target.to_string()),
@@ -365,6 +366,7 @@ fn implicit_anchors_make_a_stack_only_while_implicit_chains_are_on() {
 
 fn cp(id: &str, position: qm_core::patch::copy::CopyPosition, payload: &str) -> Patch {
     Patch::Copy(qm_core::patch::copy::CopyPatch {
+        group: None,
         position,
         target: Target::Single("conf.lua".to_string()),
         sources: None,

@@ -20,6 +20,14 @@ use std::sync::atomic::Ordering;
 const UPDATE_CACHE_FILE: &str = "update-etags.json";
 const MSG_HASH_MISMATCH: &str =
     "The download does not match the published mod. It was not installed.";
+/// QuarterMaster's own releases: `QuarterMaster_<version>.zip` holds the launcher and loader.
+const LAUNCHER_OWNER: &str = "Gamiseus";
+const LAUNCHER_REPO: &str = "QuarterMaster";
+/// The launcher's entry in the stored check results (mods are keyed by their update key).
+const LAUNCHER_CACHE_KEY: &str = "launcher";
+const SELF_UPDATE_AGENT: &str = "QuarterMaster-Launcher/1.0 (Self-Update)";
+const MSG_LAUNCHER_HASH: &str =
+    "The download does not match the checksum published with the release. It was not installed.";
 
 impl Service {
     /// Cached update report; a miss starts a refresh (unless one is running) and returns
@@ -92,7 +100,7 @@ impl Service {
                 &zip,
                 &url,
                 mod_id.as_deref(),
-                "upgrade",
+                svc.update_policy(),
             )
             .map_err(download_error)?;
             let ids = imported_ids(&v);
@@ -106,9 +114,21 @@ impl Service {
         }))
     }
 
+    /// What an update does with the installed version, from the `keep_old_mod_versions`
+    /// setting: `upgrade` (the new one takes its place) or `alongside` (both stay).
+    fn update_policy(&self) -> &'static str {
+        if self.paths().load_settings().keep_old_mod_versions {
+            "alongside"
+        } else {
+            "upgrade"
+        }
+    }
+
     /// Install the update the cached report offers for `mod_id` in a `ModUpdateInstall` job (not
-    /// cancellable). The new version goes in alongside the old one: the active profile moves to
-    /// it, other profiles stay pinned to the version they used. The output is the new version.
+    /// cancellable). The active profile moves to the new version. By default it takes the old
+    /// version's place in every profile (a version a profile was set to by hand stays); with
+    /// `keep_old_mod_versions` the old version stays installed and other profiles stay on it.
+    /// The output is the new version.
     pub fn mod_update_install(&self, mod_id: &str) -> QmResult<JobId> {
         if !is_plain_id(mod_id) {
             return Err(QmError::new(
@@ -160,9 +180,9 @@ impl Service {
                 return Err(e);
             }
             ctx.progress(0.6, "Installing");
-            let v =
-                community::install_downloaded(svc.paths(), &zip, &url, Some(&mod_id), "alongside")
-                    .map_err(download_error)?;
+            let policy = svc.update_policy();
+            let v = community::install_downloaded(svc.paths(), &zip, &url, Some(&mod_id), policy)
+                .map_err(download_error)?;
             let Some(version) = imported_version(&v, &mod_id) else {
                 return Err(QmError::new(
                     ErrorKind::InvalidInput,
@@ -174,6 +194,14 @@ impl Service {
             let had_pin = active.pinned_versions.remove(&mod_id).is_some();
             if had_pin || active.enabled_mods.contains(&mod_id) {
                 svc.commit_active_profile(active)?;
+            }
+            // The active profile may have been on an older version by choice; with its pin
+            // gone that version is unused too.
+            if policy == "upgrade" {
+                let removed = svc.paths().prune_unused_versions(&mod_id, &version);
+                if !removed.is_empty() {
+                    svc.paths().prune_file_store();
+                }
             }
             svc.invalidate(Scope::Mods);
             svc.mark_updated(&mod_id, &version);
@@ -199,34 +227,77 @@ impl Service {
         }
     }
 
-    /// Download and stage a launcher build; `sha256` must match. The output is the staged path.
-    pub fn launcher_update_download(&self, download_url: &str, sha256: String) -> QmResult<JobId> {
-        self.check_download(download_url)?;
-        let sha = sha256.trim().to_ascii_lowercase();
-        if sha.len() != 64 || !sha.bytes().all(|b| b.is_ascii_hexdigit()) {
-            return Err(QmError::new(
-                ErrorKind::InvalidInput,
-                "SHA-256 must be 64 hexadecimal characters.",
-            ));
-        }
-        let url = download_url.trim().to_string();
+    /// Download the launcher update the cached report offers and stage it (launcher and
+    /// loader) for [`Service::launcher_update_apply`]. The address is built here from
+    /// QuarterMaster's own repository and the release tag; nothing the caller passes is
+    /// downloaded. The output is the new version.
+    pub fn launcher_update_install(&self) -> QmResult<JobId> {
+        self.ensure_not_running()?;
+        let info = self
+            .inner
+            .caches
+            .updates
+            .get()
+            .map(|r| r.launcher)
+            .filter(|l| l.update_available && !l.release_tag.is_empty())
+            .ok_or_else(|| {
+                QmError::new(
+                    ErrorKind::InvalidInput,
+                    "No QuarterMaster update is available.",
+                )
+            })?;
+        let version = info.latest_version.clone();
+        let base = self.net().github_base.trim_end_matches('/').to_string();
+        let url = format!(
+            "{base}/{LAUNCHER_OWNER}/{LAUNCHER_REPO}/releases/download/{}/QuarterMaster_{}.zip",
+            github::encode_segment(&info.release_tag),
+            github::encode_segment(&version)
+        );
+        self.check_download(&url)?;
         let svc = self.clone();
         Ok(self
             .jobs()
             .spawn(JobKind::LauncherUpdateDownload, move |ctx| {
                 check_cancel(ctx)?;
                 ctx.progress(0.1, "Downloading");
-                let staged = svc
-                    .paths()
-                    .download_and_stage_launcher_update(
-                        &url,
-                        Some(&sha),
-                        MAX_DOWNLOAD_BYTES,
-                        svc.net().allow_download.as_ref(),
-                    )
+                let allow = svc.net().allow_download.as_ref();
+                let zip = community::download_to_temp(svc.paths(), &url, MAX_DOWNLOAD_BYTES, allow)
                     .map_err(download_error)?;
-                svc.notify(Scope::Updates);
-                Ok(Some(staged.display().to_string()))
+                let staged = (|| {
+                    check_cancel(ctx)?;
+                    // A release may publish `<zip>.sha256`; when it does, the zip must match.
+                    let published = community::fetch_capped(
+                        &format!("{url}.sha256"),
+                        SELF_UPDATE_AGENT,
+                        allow,
+                        4096,
+                    )
+                    .ok()
+                    .and_then(|b| {
+                        String::from_utf8_lossy(&b)
+                            .split_whitespace()
+                            .next()
+                            .map(str::to_ascii_lowercase)
+                    })
+                    .filter(|h| h.len() == 64 && h.bytes().all(|c| c.is_ascii_hexdigit()));
+                    if let Some(expected) = published {
+                        let actual = std::fs::read(&zip)
+                            .map(|b| qm_schema::sha256_hex(&b).to_ascii_lowercase())
+                            .or_kind(ErrorKind::Io)?;
+                        if actual != expected {
+                            return Err(QmError::new(ErrorKind::Integrity, MSG_LAUNCHER_HASH));
+                        }
+                    }
+                    ctx.progress(0.8, "Getting the update ready");
+                    svc.paths()
+                        .stage_launcher_update_from_zip(&zip)
+                        .map_err(download_error)
+                })();
+                if let Err(rm) = std::fs::remove_file(&zip) {
+                    tracing::warn!("could not remove {}: {rm}", zip.display());
+                }
+                staged?;
+                Ok(Some(version))
             }))
     }
 
@@ -321,6 +392,36 @@ impl Service {
                     m.update_available = false;
                     m.download_url = None;
                 }
+            }
+        }
+        // QuarterMaster itself: the latest release of its own repository.
+        if network && !busy {
+            match github::latest_release(self.net(), LAUNCHER_OWNER, LAUNCHER_REPO, None) {
+                Ok(rel) => merge_entry(&mut entries, LAUNCHER_CACHE_KEY, |e| {
+                    e.insert("tag".into(), rel.tag.into());
+                    e.insert("checked_at".into(), now().into());
+                }),
+                Err(CheckError::NotFound) => {
+                    entries.remove(LAUNCHER_CACHE_KEY);
+                }
+                Err(CheckError::Busy) => busy = true,
+                Err(CheckError::Network(e)) => {
+                    tracing::warn!("update check for QuarterMaster failed: {e}");
+                }
+            }
+        }
+        report.launcher.release_tag = String::new();
+        if let Some(tag) = entries
+            .get(LAUNCHER_CACHE_KEY)
+            .and_then(|e| e.get("tag"))
+            .and_then(Value::as_str)
+        {
+            let version = tag.trim_start_matches(['v', 'V']);
+            if ParsedVersion::parse(version).is_ok() {
+                report.launcher.release_tag = tag.to_string();
+                report.launcher.latest_version = version.to_string();
+                report.launcher.update_available =
+                    is_newer(version, &report.launcher.current_version);
             }
         }
         report.rate_limit_mode = if busy { "busy" } else { "normal" }.to_string();

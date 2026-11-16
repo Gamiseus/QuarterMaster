@@ -1264,6 +1264,7 @@ impl PatchTable {
                     raw_records.push((
                         usize::MAX,
                         PatchExecutionRecord {
+                            group: patch.group().map(str::to_string),
                             patch_id,
                             patch_name,
                             mod_id,
@@ -1293,6 +1294,7 @@ impl PatchTable {
                 raw_records.push((
                     usize::MAX,
                     PatchExecutionRecord {
+                        group: patch.group().map(str::to_string),
                         patch_id,
                         patch_name,
                         mod_id,
@@ -1372,6 +1374,7 @@ impl PatchTable {
                 raw_records.push((
                     usize::MAX,
                     PatchExecutionRecord {
+                        group: patch.group().map(str::to_string),
                         patch_id,
                         patch_name,
                         mod_id,
@@ -1493,6 +1496,7 @@ impl PatchTable {
                 raw_records.push((
                     entry_idx,
                     PatchExecutionRecord {
+                        group: patch.group().map(str::to_string),
                         patch_id,
                         patch_name,
                         mod_id,
@@ -1722,6 +1726,7 @@ fn copy_record(
     warnings: Vec<String>,
 ) -> PatchExecutionRecord {
     PatchExecutionRecord {
+        group: copy.group.clone(),
         patch_id,
         patch_name: copy
             .name
@@ -1845,6 +1850,7 @@ mod tests {
         table.targets.insert("main.lua".to_string());
 
         let p1 = Patch::Pattern(PatternPatch {
+            group: None,
             pattern: "local x = 1".to_string(),
             position: InsertPosition::After,
             target: Target::Single("main.lua".to_string()),
@@ -1887,6 +1893,7 @@ mod tests {
         table.targets.insert("main.lua".to_string());
 
         let p1 = Patch::Pattern(PatternPatch {
+            group: None,
             pattern: "local x = 1".to_string(),
             position: InsertPosition::After,
             target: Target::Single("main.lua".to_string()),
@@ -2006,6 +2013,7 @@ match_indent = true
 
     fn stamp_patch(id: &str, payload: &str) -> Patch {
         Patch::Pattern(PatternPatch {
+            group: None,
             pattern: "local x = 1".to_string(),
             position: InsertPosition::After,
             target: Target::Single("main.lua".to_string()),
@@ -2159,6 +2167,7 @@ match_indent = true
         use crate::patch::RegexPatch;
         let regex = |payload: &str| {
             Patch::Regex(RegexPatch {
+                group: None,
                 target: Target::Single("main.lua".to_string()),
                 pattern: "x".to_string(),
                 position: InsertPosition::After,
@@ -2350,6 +2359,7 @@ match_indent = true
         on_failure: OnFailurePolicy,
     ) -> Patch {
         Patch::Pattern(PatternPatch {
+            group: None,
             pattern: pattern.to_string(),
             position,
             target: Target::Single("main.lua".to_string()),

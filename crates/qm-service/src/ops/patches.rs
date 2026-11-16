@@ -35,6 +35,7 @@ impl Service {
                 out.push(ModPatchStatus {
                     patch_id: r.patch_id.clone(),
                     name: Some(r.patch_name.clone()).filter(|n| !n.is_empty()),
+                    group: r.group.clone().filter(|g| !g.trim().is_empty()),
                     target_file: r.target_file.clone(),
                     state,
                     conflicts: report
@@ -58,6 +59,7 @@ impl Service {
                     out.push(ModPatchStatus {
                         patch_id: id.clone(),
                         name: Some(name.to_string()).filter(|n| !n.is_empty()),
+                        group: None,
                         target_file: String::new(),
                         state: PatchState::Disabled,
                         conflicts: Vec::new(),
@@ -112,6 +114,7 @@ mod tests {
 
     fn record(status: PatchOutcomeStatus, warnings: Vec<String>) -> PatchExecutionRecord {
         PatchExecutionRecord {
+            group: None,
             patch_id: "a:1".into(),
             patch_name: "One".into(),
             mod_id: "a".into(),

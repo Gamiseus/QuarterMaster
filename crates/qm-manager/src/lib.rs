@@ -11,6 +11,7 @@ pub mod library;
 pub mod line_rules;
 pub mod profiles;
 pub mod region;
+pub mod relocate;
 mod same_line;
 pub mod semantic;
 mod resolution;
@@ -21,6 +22,7 @@ pub mod solver;
 pub mod stacks;
 pub mod storage;
 pub mod suggestions;
+pub mod syspath;
 pub mod vanilla_assets;
 pub mod winproc;
 

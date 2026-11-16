@@ -1,10 +1,21 @@
 import type { DetectedPaths, SettingsPatch, SettingsView } from "../bindings";
 
-export type Theme = "system" | "dark" | "light";
+/** Every theme, in the order Settings lists them. `system` follows Windows between Field dark and Field light. */
+export const THEMES = [
+  { value: "system", label: "System", scheme: null },
+  { value: "dark", label: "Field dark", scheme: "dark" },
+  { value: "light", label: "Field light", scheme: "light" },
+  { value: "graphite", label: "Graphite", scheme: "dark" },
+  { value: "black", label: "Black", scheme: "dark" },
+  { value: "midnight", label: "Midnight", scheme: "dark" },
+  { value: "paper", label: "Paper", scheme: "light" },
+  { value: "desert", label: "Desert", scheme: "light" },
+] as const;
+export type Theme = (typeof THEMES)[number]["value"];
 
-/** The backend accepts only these three; anything else (a legacy or hand-edited value) shows as System. */
+/** The backend accepts only these; anything else (a legacy or hand-edited value) shows as System. */
 export function normalizeTheme(t: string): Theme {
-  return t === "dark" || t === "light" ? t : "system";
+  return THEMES.find((x) => x.value === t)?.value ?? "system";
 }
 
 /** Auto-backups to keep: a whole number from 1 to 100. */
@@ -26,8 +37,8 @@ export function pathsPatch(detected: Pick<DetectedPaths, PathKey>, current: Sett
   return patch;
 }
 
-export type OnboardingStep = "detect" | "confirm" | "launch";
-const STEPS: OnboardingStep[] = ["detect", "confirm", "launch"];
+export type OnboardingStep = "game" | "workspace" | "launch";
+const STEPS: OnboardingStep[] = ["game", "workspace", "launch"];
 
 export function nextStep(s: OnboardingStep): OnboardingStep {
   return STEPS[Math.min(STEPS.length - 1, STEPS.indexOf(s) + 1)];

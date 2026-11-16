@@ -27,6 +27,7 @@ fn pat(
     payload: &str,
 ) -> Patch {
     Patch::Pattern(PatternPatch {
+        group: None,
         pattern: pattern.to_string(),
         position,
         target: Target::Single(file.to_string()),

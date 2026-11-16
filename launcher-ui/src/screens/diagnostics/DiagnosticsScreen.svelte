@@ -3,6 +3,7 @@
   import { Button, Screen } from "../../components/ui";
   import { diagnostics } from "../../lib/stores/diagnostics.svelte";
   import { jobs } from "../../lib/stores/jobs.svelte";
+  import { setup } from "../../lib/stores/setup.svelte";
   import CrashList from "./CrashList.svelte";
   import HealthCard from "./HealthCard.svelte";
   import LogConsole from "./LogConsole.svelte";
@@ -31,6 +32,7 @@
   {#snippet actions()}
     <Button onclick={() => (traceOpen = true)}>Trace globals...</Button>
     <Button disabled={bundleRunning} onclick={bugReport}>Create bug report</Button>
+    <Button variant="primary" onclick={() => (setup.reportOpen = true)}>Report a problem...</Button>
   {/snippet}
   <div class="diag">
     <div class="top">

@@ -1,14 +1,27 @@
 import type { CatalogQuery, CatalogResult, UpdatesReport } from "../../bindings";
 import { emitMock } from "../../events";
 import { catalogFixture } from "../catalog";
-import { mods, ready, updatesReport } from "../fixtures";
+import { mods, ready, settings, updatesReport } from "../fixtures";
 import { runMockJob } from "../jobs";
 import { ensureNotRunning, fail, log, state, type Handlers } from "../state";
 
 const invalidate = (scope: "updates" | "mods" | "catalog") => emitMock({ type: "invalidated", scope });
 
+/** QuarterMaster's own update, once installed in this mock session. */
+let launcherUpdated = false;
+
 function report(): UpdatesReport {
-  return { ...updatesReport, rate_limit_mode: state.init.githubBusy ? "busy" : updatesReport.rate_limit_mode };
+  const offered = Boolean(state.init.launcherUpdate) && !launcherUpdated;
+  return {
+    ...updatesReport,
+    rate_limit_mode: state.init.githubBusy ? "busy" : updatesReport.rate_limit_mode,
+    launcher: {
+      ...updatesReport.launcher,
+      ...(offered ? { latest_version: "9.9.0", release_tag: "v9.9.0", update_available: true } : {}),
+      ...(launcherUpdated ? { current_version: "9.9.0", latest_version: "9.9.0", release_tag: "v9.9.0" } : {}),
+      rollback_available: Boolean(state.init.launcherRollback) || launcherUpdated,
+    },
+  };
 }
 
 function installUpdate(modId: string) {
@@ -20,8 +33,10 @@ function installUpdate(modId: string) {
     ensureNotRunning();
     const m = mods.find((x) => x.id === modId);
     if (m) {
+      // The setting decides whether the version it updates from stays installed.
+      const kept = settings.keep_old_mod_versions ? m.installed_versions : [];
       m.version = info.latest_version;
-      m.installed_versions = [...new Set([...m.installed_versions, info.latest_version])];
+      m.installed_versions = [...new Set([info.latest_version, ...kept])];
     }
     info.installed_version = info.latest_version;
     info.update_available = false;
@@ -106,6 +121,27 @@ export const handlers: Handlers = {
     });
   },
   mod_update_install: (args) => installUpdate(String(args.modId)),
+  launcher_update_install: () => {
+    ensureNotRunning();
+    if (!report().launcher.update_available) fail("invalid_input", "No QuarterMaster update is available.");
+    log.launcherUpdates.push("install");
+    return runMockJob("launcher_update_download", "Downloading", () => ({ output: "9.9.0" }));
+  },
+  // The real launcher closes and starts again here; the mock carries on as the new version.
+  launcher_update_apply: () => {
+    ensureNotRunning();
+    log.launcherUpdates.push("apply");
+    launcherUpdated = true;
+    setTimeout(() => invalidate("updates"), 0);
+    return null;
+  },
+  launcher_update_rollback: () => {
+    ensureNotRunning();
+    log.launcherUpdates.push("rollback");
+    launcherUpdated = false;
+    setTimeout(() => invalidate("updates"), 0);
+    return null;
+  },
   catalog_get: (args) => catalogGet(args.query as CatalogQuery),
   catalog_refresh: () =>
     runMockJob("catalog_refresh", "Loading community catalog", () => {

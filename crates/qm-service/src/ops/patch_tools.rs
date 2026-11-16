@@ -1292,6 +1292,7 @@ fn retargeted(
         }
     };
     Ok(Patch::Pattern(PatternPatch {
+        group: None,
         pattern: pattern.to_string(),
         position,
         target,
@@ -1333,6 +1334,7 @@ fn count_matches(target: &str, text: &str, anchor: &str) -> usize {
     let mut t = PatchTable::default();
     t.targets.insert(target.to_string());
     let probe = Patch::Pattern(PatternPatch {
+        group: None,
         pattern: anchor.to_string(),
         position: InsertPosition::At,
         target: Target::Single(target.to_string()),

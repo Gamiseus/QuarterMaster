@@ -12,7 +12,7 @@
   }
   if (!a || typeof a !== "object") return;
   var root = document.documentElement;
-  var THEMES = { dark: 1, light: 1 };
+  var THEMES = { dark: 1, light: 1, graphite: 1, black: 1, midnight: 1, paper: 1, desert: 1 };
   var CVD = { deutan: 1, protan: 1, tritan: 1, mono: 1 };
   if (THEMES[a.theme] === 1) root.setAttribute("data-theme", a.theme);
   if (CVD[a.cvd] === 1) root.setAttribute("data-cvd", a.cvd);

@@ -50,6 +50,9 @@
   $effect(() => {
     if (open && current) void load(current);
   });
+
+  /** Written text (a readme, notes): its lines wrap. Code and data keep their lines. */
+  const isProse = (path: string) => /\.(md|txt)$/i.test(path);
 </script>
 
 <Dialog bind:open {title} size="lg" initialFocus="content">
@@ -74,7 +77,7 @@
           {#if current.path.toLowerCase().endsWith(".lua")}
             <LuaCode code={entry.data.text ?? ""} label={`${current.label}: ${current.path}`} />
           {:else}
-            <pre aria-label={`${current.label}: ${current.path}`}>{entry.data.text ?? ""}</pre>
+            <pre class={{ prose: isProse(current.path) }} aria-label={`${current.label}: ${current.path}`}>{entry.data.text ?? ""}</pre>
           {/if}
         </div>
       {:else if entry.data.kind === "image" && entry.data.data_url}
@@ -130,6 +133,11 @@
     font-family: var(--qm-font-mono);
     font-size: var(--qm-text-12);
     white-space: pre;
+  }
+
+  .code pre.prose {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
   }
 
   /* Game art is small pixel art: shown larger, with hard pixels, on a neutral ground. */

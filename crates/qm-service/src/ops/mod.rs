@@ -13,5 +13,6 @@ pub mod patch_tools;
 pub mod patches;
 pub mod profiles;
 pub mod saves;
+pub mod setup;
 pub mod sprites;
 pub mod updates;

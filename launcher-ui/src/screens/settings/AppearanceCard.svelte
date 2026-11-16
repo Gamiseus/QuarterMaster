@@ -1,16 +1,12 @@
 <script lang="ts">
   import { Badge, FieldRow, Panel, Select, StencilHeading, Switch } from "../../components/ui";
   import type { ColourVision } from "../../lib/settings/cvd";
-  import { normalizeTheme, type Theme } from "../../lib/settings/form";
+  import { normalizeTheme, THEMES, type Theme } from "../../lib/settings/form";
   import { TEXT_SCALE_MAX, TEXT_SCALE_MIN, TEXT_SCALE_STEP, clampScale, scaledSize } from "../../lib/settings/typescale";
   import { cssVars } from "../../lib/actions/cssVars";
   import { app } from "../../lib/stores/app.svelte";
 
-  const THEMES: { value: Theme; label: string }[] = [
-    { value: "system", label: "System" },
-    { value: "dark", label: "Dark" },
-    { value: "light", label: "Light" },
-  ];
+  const THEME_ITEMS = THEMES.map((t) => ({ value: t.value as Theme, label: t.label }));
 
   const VISIONS: { value: ColourVision; label: string; description: string }[] = [
     { value: "standard", label: "Standard", description: "The default colours." },
@@ -53,9 +49,10 @@
 
 <Panel class="settings-card">
   <StencilHeading level={2}>Appearance</StencilHeading>
-  <div>
-    <FieldRow label="Theme" help="System follows Windows.">
-      <Select class="control-select" label="Theme" hideLabel items={THEMES} {disabled} bind:value={() => theme, pickTheme} />
+  <div class="settings-fields">
+    <div>
+    <FieldRow label="Theme" help="System follows Windows. Graphite and Black are neutral dark themes.">
+      <Select class="control-select" label="Theme" hideLabel items={THEME_ITEMS} {disabled} bind:value={() => theme, pickTheme} />
     </FieldRow>
     <FieldRow label="High contrast" help="Stronger text and borders. Works with any colour mode.">
       <Switch
@@ -76,6 +73,8 @@
       <Badge tone="danger">Problem</Badge>
       <Badge tone="info">Info</Badge>
     </div>
+    </div>
+    <div>
     <FieldRow label="Text size" help="Small text grows most and headings least, so the layout keeps its shape.">
       <div class="scale">
         <input
@@ -107,6 +106,7 @@
       <span class="qm-stencil sample-heading">Field report</span>
       <span class="sample-body">Body text at this size.</span>
       <span class="qm-muted sample-small">Captions and badges.</span>
+    </div>
     </div>
   </div>
 </Panel>

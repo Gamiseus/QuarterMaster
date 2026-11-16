@@ -685,17 +685,148 @@ impl QuarterMasterPaths {
                     }
                 }
             }
+            if policy != "alongside" {
+                // A profile cannot stay on a version that is gone ("replace" removed them all).
+                self.drop_pins_to_missing_versions(&manifest.id);
+            }
+            if policy == "upgrade" {
+                // An upgrade takes the place of what was installed: versions no profile is
+                // pinned to go. "alongside" is the choice that keeps them.
+                self.prune_unused_versions(&manifest.id, &manifest.version);
+            }
 
             let installed = inspect_mod_directory(&target_dir, false)?;
             imported_mods.push(installed);
         }
 
+        self.prune_file_store();
         Ok(ImportSummary {
             imported_mods,
             was_multi_mod_pack,
             upgraded_from_versions,
             cas_deduplicated_files,
         })
+    }
+
+    /// The real version folders of a mod (links, which are workspace mods, are left out).
+    fn real_version_dirs(&self, mod_id: &str) -> Vec<(String, PathBuf)> {
+        let Ok(rd) = fs::read_dir(self.library_dir.join(mod_id)) else {
+            return Vec::new();
+        };
+        rd.filter_map(|e| e.ok())
+            .filter_map(|e| {
+                let name = e.file_name().to_str()?.to_string();
+                let path = e.path();
+                (path.is_dir() && !name.starts_with('.') && !crate::profiles::is_reparse_point(&path))
+                    .then_some((name, path))
+            })
+            .collect()
+    }
+
+    /// Removes a profile's pin on `mod_id` when the pinned version is not installed.
+    fn drop_pins_to_missing_versions(&self, mod_id: &str) {
+        for mut prof in self.list_profiles() {
+            let gone = prof
+                .pinned_versions
+                .get(mod_id)
+                .is_some_and(|v| !self.library_dir.join(mod_id).join(v).is_dir());
+            if gone {
+                prof.pinned_versions.remove(mod_id);
+                let _ = self.save_profile(&prof);
+            }
+        }
+    }
+
+    /// Deletes every installed version of `mod_id` other than `keep` that no profile is pinned
+    /// to. Links (workspace mods) are never touched. Returns the versions removed.
+    pub fn prune_unused_versions(&self, mod_id: &str, keep: &str) -> Vec<String> {
+        if !is_safe_segment(mod_id) || !self.library_dir.join(mod_id).join(keep).is_dir() {
+            return Vec::new();
+        }
+        let pinned: BTreeSet<String> = self
+            .list_profiles()
+            .into_iter()
+            .filter_map(|p| p.pinned_versions.get(mod_id).cloned())
+            .collect();
+        let mut removed = Vec::new();
+        for (version, path) in self.real_version_dirs(mod_id) {
+            if version != keep && !pinned.contains(&version) && fs::remove_dir_all(&path).is_ok() {
+                removed.push(version);
+            }
+        }
+        removed
+    }
+
+    /// Deletes one installed version of a mod. Profiles pinned to it go back to the newest
+    /// version. The only installed version is not removed this way (uninstall the mod).
+    pub fn remove_mod_version(&self, mod_id: &str, version: &str) -> Result<(), String> {
+        if !is_safe_segment(mod_id) || !is_safe_segment(version) || version.starts_with('.') {
+            return Err(format!("Invalid mod version '{mod_id}' {version}"));
+        }
+        let versions = self.real_version_dirs(mod_id);
+        let Some((_, dir)) = versions.iter().find(|(v, _)| v == version) else {
+            return Err(format!("Version {version} of '{mod_id}' is not installed"));
+        };
+        if versions.len() < 2 {
+            return Err(format!(
+                "{version} is the only installed version of '{mod_id}'. Uninstall the mod instead."
+            ));
+        }
+        fs::remove_dir_all(dir).map_err(|e| format!("Failed to delete {}: {e}", dir.display()))?;
+        self.drop_pins_to_missing_versions(mod_id);
+        self.prune_file_store();
+        Ok(())
+    }
+
+    /// Deletes the stored file copies (`library/.cas`) that no installed version lists any
+    /// more. Returns how many were deleted. Nothing is deleted when a version's file list
+    /// cannot be read, so a copy that may still be needed for a repair stays.
+    pub fn prune_file_store(&self) -> usize {
+        let cas_root = self.library_dir.join(".cas");
+        if !cas_root.is_dir() {
+            return 0;
+        }
+        let mut used: BTreeSet<String> = BTreeSet::new();
+        let Ok(mod_dirs) = fs::read_dir(&self.library_dir) else {
+            return 0;
+        };
+        for mod_dir in mod_dirs.filter_map(|e| e.ok()) {
+            let Some(id) = mod_dir.file_name().to_str().map(String::from) else {
+                return 0;
+            };
+            if id.starts_with('.') || !mod_dir.path().is_dir() {
+                continue;
+            }
+            for (_, dir) in self.real_version_dirs(&id) {
+                let Some(integrity) = fs::read_to_string(dir.join(".qm-integrity.json"))
+                    .ok()
+                    .and_then(|t| serde_json::from_str::<IntegrityManifest>(&t).ok())
+                else {
+                    return 0;
+                };
+                used.extend(integrity.files.into_values().map(|s| s.to_ascii_lowercase()));
+            }
+        }
+        let mut deleted = 0;
+        for entry in WalkDir::new(&cas_root)
+            .min_depth(2)
+            .max_depth(2)
+            .into_iter()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().is_file())
+        {
+            let name = entry.file_name().to_string_lossy().to_ascii_lowercase();
+            if !used.contains(&name) && fs::remove_file(entry.path()).is_ok() {
+                deleted += 1;
+            }
+        }
+        // Emptied shard folders go too.
+        if let Ok(shards) = fs::read_dir(&cas_root) {
+            for shard in shards.filter_map(|e| e.ok()).filter(|e| e.path().is_dir()) {
+                let _ = fs::remove_dir(shard.path());
+            }
+        }
+        deleted
     }
 
     /// Copy `src` into `staging` and write the normalized `mod.json` and `.qm-integrity.json`.
@@ -831,6 +962,7 @@ impl QuarterMasterPaths {
                 self.save_profile(&profile)?;
             }
         }
+        self.prune_file_store();
         Ok(())
     }
 }
@@ -1038,6 +1170,37 @@ fn find_mod_roots_in_tree(root: &Path) -> Vec<PathBuf> {
     mod_roots
 }
 
+/// The version given to a mod whose files state none.
+pub const UNVERSIONED: &str = "0.0.0";
+
+/// Whether the mod folder states its own version: a `mod.json`, or a `qm.toml` with a manifest.
+pub fn declares_version(mod_root: &Path) -> bool {
+    if mod_root.join("mod.json").is_file() {
+        return true;
+    }
+    fs::read_to_string(mod_root.join("qm.toml"))
+        .ok()
+        .is_some_and(|raw| toml::from_str::<PatchFile>(&raw).is_ok())
+}
+
+/// Every mod folder under `root` with the manifest an import would give it, or the reason it
+/// cannot be read. One unreadable mod does not hide the others.
+pub fn scan_mod_roots(root: &Path) -> Vec<(PathBuf, Result<ModManifest, String>)> {
+    find_mod_roots_in_tree(root)
+        .into_iter()
+        .map(|dir| {
+            let name = dir
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("mod")
+                .to_string();
+            let manifest = load_or_synthesize_manifest(&dir, &name)
+                .and_then(|m| check_manifest_segments(&m).map(|()| m));
+            (dir, manifest)
+        })
+        .collect()
+}
+
 fn load_or_synthesize_manifest(
     mod_root: &Path,
     fallback_name: &str,
@@ -1047,7 +1210,8 @@ fn load_or_synthesize_manifest(
         return ModManifest::from_path(&mod_json_path);
     }
 
-    // Fallback: synthesize from qm.toml [manifest] if mod.json is missing
+    // Fallback: synthesize from qm.toml [manifest] if mod.json is missing. A mod that states no
+    // version gets `UNVERSIONED`, which is below any version an author would give.
     let qm_toml_path = mod_root.join("qm.toml");
     let (version, priority) = if qm_toml_path.is_file() {
         let raw = fs::read_to_string(&qm_toml_path)
@@ -1055,10 +1219,10 @@ fn load_or_synthesize_manifest(
         if let Ok(pf) = toml::from_str::<PatchFile>(&raw) {
             (pf.manifest.version, pf.manifest.priority)
         } else {
-            ("1.0.0".to_string(), 50)
+            (UNVERSIONED.to_string(), 50)
         }
     } else {
-        ("1.0.0".to_string(), 50)
+        (UNVERSIONED.to_string(), 50)
     };
 
     let id = fallback_name

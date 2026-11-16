@@ -17,6 +17,9 @@
     size?: "md" | "lg";
     /** False keeps the dialog open: Escape, an outside click and Close do nothing (e.g. while a confirm runs). */
     dismissible?: boolean;
+    /** True: only the Close button (and the dialog's own buttons) close it; Escape and a click outside do nothing.
+     * For dialogs where a stray click would lose a choice or typed text. */
+    explicitClose?: boolean;
     children?: Snippet;
   }
 
@@ -29,6 +32,7 @@
     initialFocus = "first",
     size = "md",
     dismissible = true,
+    explicitClose = false,
     children,
   }: Props = $props();
 
@@ -70,7 +74,7 @@
 
   /** While not dismissible, Escape and an outside click do nothing. */
   function holdOpen(e: Event) {
-    if (!dismissible) e.preventDefault();
+    if (!dismissible || explicitClose) e.preventDefault();
   }
 
   /** Open focus goes to a usable `[data-autofocus]` control anywhere in the dialog, else the first usable control in

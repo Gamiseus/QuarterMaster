@@ -620,6 +620,44 @@ pub fn generate_mod_json_schema() -> serde_json::Value {
 
 /// Generates the official JSON Schema for `qm.toml` patch files.
 pub fn generate_qm_toml_schema() -> serde_json::Value {
+    let mut schema = qm_toml_schema_long_form();
+    add_short_patch_lists(&mut schema);
+    schema
+}
+
+/// Every patch type takes `group`, and each type is also a top-level list (`[[pattern]]`,
+/// `[[regex]]`, `[[copy]]`, `[[module]]`) whose entries are that type's table.
+fn add_short_patch_lists(schema: &mut serde_json::Value) {
+    const TYPES: [&str; 4] = ["pattern", "regex", "copy", "module"];
+    let group = serde_json::json!({
+        "type": "string",
+        "description": "A label the launcher lists this patch under, such as \"HUD\". The loader does not use it."
+    });
+    let mut lists = Vec::new();
+    for name in TYPES {
+        let Some(table) = schema.pointer_mut(&format!("/properties/patches/items/properties/{name}")) else {
+            continue;
+        };
+        if let Some(props) = table.get_mut("properties").and_then(|p| p.as_object_mut()) {
+            props.insert("group".to_string(), group.clone());
+        }
+        lists.push((name, table.clone()));
+    }
+    if let Some(props) = schema.get_mut("properties").and_then(|p| p.as_object_mut()) {
+        for (name, table) in lists {
+            props.insert(
+                name.to_string(),
+                serde_json::json!({
+                    "type": "array",
+                    "description": format!("{name} patches in the short form: each [[{name}]] entry is one patch, the same table as [patches.{name}] under [[patches]]. Both forms can be mixed in one file."),
+                    "items": table
+                }),
+            );
+        }
+    }
+}
+
+fn qm_toml_schema_long_form() -> serde_json::Value {
     serde_json::json!({
         "$schema": "http://json-schema.org/draft-07/schema#",
         "title": "QuarterMaster Patch Manifest (qm.toml)",
@@ -1059,5 +1097,18 @@ mod tests {
 
         assert!(schemas_dir.join("mod.schema.json").exists());
         assert!(schemas_dir.join("qm.schema.json").exists());
+    }
+
+    #[test]
+    fn the_qm_toml_schema_has_the_short_patch_lists_and_group() {
+        let schema = generate_qm_toml_schema();
+        for name in ["pattern", "regex", "copy", "module"] {
+            let short = schema.pointer(&format!("/properties/{name}/items/properties")).unwrap();
+            let long = schema
+                .pointer(&format!("/properties/patches/items/properties/{name}/properties"))
+                .unwrap();
+            assert_eq!(short, long, "{name}");
+            assert!(short.get("group").is_some(), "{name}");
+        }
     }
 }

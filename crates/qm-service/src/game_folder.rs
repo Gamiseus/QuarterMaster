@@ -55,7 +55,7 @@ fn hash_file(path: &Path) -> QmResult<String> {
 }
 
 impl Service {
-    fn lock_game_folder(&self) -> MutexGuard<'_, ()> {
+    pub(crate) fn lock_game_folder(&self) -> MutexGuard<'_, ()> {
         self.inner
             .game_folder
             .lock()
@@ -292,7 +292,7 @@ impl Service {
         }
     }
 
-    fn game_dir(&self) -> QmResult<PathBuf> {
+    pub(crate) fn game_dir(&self) -> QmResult<PathBuf> {
         let settings = self.paths().load_settings();
         settings
             .game_exe_path
@@ -335,7 +335,7 @@ impl Service {
             .collect()
     }
 
-    fn known_hashes(&self) -> HashSet<String> {
+    pub(crate) fn known_hashes(&self) -> HashSet<String> {
         let mut set: HashSet<String> = self.recorded_hashes().into_iter().collect();
         if let Ok(h) = source_dll_path().and_then(|p| hash_file(&p)) {
             set.insert(h);

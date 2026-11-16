@@ -66,6 +66,7 @@ pub struct Manifest {
 
 // Represents a single .toml file after deserialization.
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(from = "RawPatchFile")]
 pub struct PatchFile {
     pub manifest: Manifest,
     #[serde(default)]
@@ -99,6 +100,54 @@ pub struct PatchFile {
     /// An older loader warns about the unknown key and shows images at their pixel size.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub sprites: std::collections::BTreeMap<String, SpriteRule>,
+}
+
+/// `qm.toml` as written. A patch is either an entry of `[[patches]]` holding one table named
+/// after its type (`[patches.pattern]`), or an entry of the list named after its type
+/// (`[[pattern]]`, `[[regex]]`, `[[module]]`, `[[copy]]`). Both forms may be mixed in one file;
+/// `PatchFile::patches` holds them all in the order they are written.
+#[derive(Deserialize)]
+struct RawPatchFile {
+    manifest: Manifest,
+    #[serde(default)]
+    patches: Vec<toml::Spanned<Patch>>,
+    #[serde(default)]
+    pattern: Vec<toml::Spanned<PatternPatch>>,
+    #[serde(default)]
+    regex: Vec<toml::Spanned<RegexPatch>>,
+    #[serde(default)]
+    module: Vec<toml::Spanned<ModulePatch>>,
+    #[serde(default)]
+    copy: Vec<toml::Spanned<CopyPatch>>,
+    #[serde(default)]
+    vars: HashMap<String, String>,
+    #[serde(default, deserialize_with = "crate::lenient::lenient_list")]
+    overrides: Vec<crate::lenient::Lenient<compat::Override>>,
+    #[serde(default, deserialize_with = "crate::lenient::lenient_list")]
+    asset_choices: Vec<crate::lenient::Lenient<compat::AssetChoiceEntry>>,
+    #[serde(default)]
+    sprites: std::collections::BTreeMap<String, SpriteRule>,
+}
+
+impl From<RawPatchFile> for PatchFile {
+    fn from(raw: RawPatchFile) -> Self {
+        // Patch ids without an `id` key are numbered by position, so the order of the file is kept.
+        let mut all: Vec<(usize, Patch)> = Vec::new();
+        all.extend(raw.patches.into_iter().map(|p| (p.span().start, p.into_inner())));
+        all.extend(raw.pattern.into_iter().map(|p| (p.span().start, Patch::Pattern(p.into_inner()))));
+        all.extend(raw.regex.into_iter().map(|p| (p.span().start, Patch::Regex(p.into_inner()))));
+        all.extend(raw.module.into_iter().map(|p| (p.span().start, Patch::Module(p.into_inner()))));
+        all.extend(raw.copy.into_iter().map(|p| (p.span().start, Patch::Copy(p.into_inner()))));
+        all.sort_by_key(|(at, _)| *at);
+        PatchFile {
+            manifest: raw.manifest,
+            patches: all.into_iter().map(|(_, p)| p).collect(),
+            vars: raw.vars,
+            overrides: raw.overrides,
+            asset_choices: raw.asset_choices,
+            sprites: raw.sprites,
+        }
+    }
 }
 
 /// One `[sprites.<name>]` entry. Exactly one key is used: `size`, `scale` or `like`.
@@ -269,6 +318,16 @@ impl Patch {
             Patch::Copy(c) => c.name.as_deref(),
             Patch::Pattern(p) => p.name.as_deref(),
             Patch::Regex(r) => r.name.as_deref(),
+        }
+    }
+
+    /// The author's `group` label, for the launcher's lists.
+    pub fn group(&self) -> Option<&str> {
+        match self {
+            Patch::Module(m) => m.group.as_deref(),
+            Patch::Copy(c) => c.group.as_deref(),
+            Patch::Pattern(p) => p.group.as_deref(),
+            Patch::Regex(r) => r.group.as_deref(),
         }
     }
 

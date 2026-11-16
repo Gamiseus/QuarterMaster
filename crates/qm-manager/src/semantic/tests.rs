@@ -11,6 +11,7 @@ use crate::conflict::{simulate_and_analyze_patches, DetectedConflict, Simulation
 
 fn pattern(mod_id: &str, id: &str, target: &str, anchor: &str, position: InsertPosition, payload: &str) -> Patch {
     Patch::Pattern(PatternPatch {
+        group: None,
         pattern: anchor.to_string(),
         position,
         target: Target::Single(target.to_string()),
@@ -42,6 +43,7 @@ fn after(mod_id: &str, id: &str, anchor: &str, payload: &str) -> Patch {
 
 fn module(mod_id: &str, name: &str, content: &str) -> Patch {
     Patch::Module(ModulePatch {
+        group: None,
         source: PathBuf::from(format!("{name}.lua")),
         before: None,
         name: name.to_string(),

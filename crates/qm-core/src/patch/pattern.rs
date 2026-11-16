@@ -52,6 +52,9 @@ pub struct PatternPatch {
     pub overwrite: bool,
 
     pub id: Option<String>,
+    /// A label the launcher lists this patch under (`group = "HUD"`). The loader does not use it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group: Option<String>,
     pub name: Option<String>,
     #[serde(default)]
     pub description: Option<String>,

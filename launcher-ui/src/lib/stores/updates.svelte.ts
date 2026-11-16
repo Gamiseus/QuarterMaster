@@ -1,5 +1,5 @@
 import { call } from "../api";
-import { commands, type JobKind, type Loadable, type ModUpdateInfo, type QmEvent, type UpdatesReport } from "../bindings";
+import { commands, type JobKind, type LauncherUpdateInfo, type Loadable, type ModUpdateInfo, type QmEvent, type UpdatesReport } from "../bindings";
 import { app } from "./app.svelte";
 import { game } from "./game.svelte";
 import { jobs } from "./jobs.svelte";
@@ -33,6 +33,41 @@ class UpdatesStore {
   get available(): ModUpdateInfo[] {
     if (this.report.status !== "ready") return [];
     return this.report.data.mods.filter((m) => m.update_available && m.download_url);
+  }
+
+  /** QuarterMaster's own versions, once a report is in. */
+  get launcher(): LauncherUpdateInfo | null {
+    return this.report.status === "ready" ? this.report.data.launcher : null;
+  }
+
+  /** A QuarterMaster update is being downloaded or swapped in. */
+  updatingLauncher = $state(false);
+
+  /**
+   * Downloads the newer QuarterMaster (launcher and loader), then closes this one; the new one
+   * starts by itself. Failures are reported where they happen.
+   */
+  async installLauncher(): Promise<void> {
+    if (this.updatingLauncher) return;
+    const version = this.launcher?.latest_version ?? "";
+    const retry = () => this.installLauncher().catch(() => {});
+    this.updatingLauncher = true;
+    try {
+      const id = await call(commands.launcherUpdateInstall(), { retry });
+      await jobs.track(id, {
+        label: `Downloading QuarterMaster ${version}`,
+        success: () => `QuarterMaster ${version} is ready. Starting it now.`,
+        retry,
+      });
+      await call(commands.launcherUpdateApply());
+    } finally {
+      this.updatingLauncher = false;
+    }
+  }
+
+  /** Puts the previous QuarterMaster back and starts it. */
+  async rollbackLauncher(): Promise<void> {
+    await call(commands.launcherUpdateRollback());
   }
 
   /** github.com answered 429 to a fallback check; the rest kept their cached results. */
@@ -78,6 +113,17 @@ class UpdatesStore {
     const s = app.settings;
     // Nothing during the first-run dialog; the next settings load after it runs this again.
     if (!s || !s.first_run_completed || !app.startupDone || this.report.status !== "ready") return;
+    const own = this.report.data.launcher;
+    const ownKey = `quartermaster@${own.latest_version}`;
+    if (own.update_available && !this.#announced.has(ownKey)) {
+      this.#announced.add(ownKey);
+      // Never by itself: it closes the launcher, so the user picks the moment.
+      toasts.notice(
+        `QuarterMaster ${own.latest_version} is available.`,
+        [{ label: "Update and restart", run: () => void this.installLauncher().catch(() => {}) }],
+        READY_TOAST_MS,
+      );
+    }
     const fresh = this.eligible.filter((u) => !this.#announced.has(key(u)));
     if (fresh.length === 0) return;
     for (const u of fresh) this.#announced.add(key(u));
@@ -158,6 +204,7 @@ class UpdatesStore {
     this.#seq++;
     this.report = { status: "loading" };
     this.installing = false;
+    this.updatingLauncher = false;
     this.#announced.clear();
     this.#readyToast = null;
   }

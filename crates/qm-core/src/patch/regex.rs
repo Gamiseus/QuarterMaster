@@ -220,6 +220,9 @@ pub struct RegexPatch {
     pub verbose: bool,
 
     pub id: Option<String>,
+    /// A label the launcher lists this patch under (`group = "HUD"`). The loader does not use it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group: Option<String>,
     pub name: Option<String>,
     #[serde(default)]
     pub description: Option<String>,
@@ -877,6 +880,7 @@ mod tests {
 
     fn regex_patch(pattern: &str, root_capture: Option<&str>, payload: &str) -> RegexPatch {
         RegexPatch {
+            group: None,
             target: Target::Single("main.lua".to_string()),
             pattern: pattern.to_string(),
             position: InsertPosition::After,

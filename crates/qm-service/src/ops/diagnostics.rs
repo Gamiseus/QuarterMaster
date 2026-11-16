@@ -65,50 +65,65 @@ impl Service {
         let svc = self.clone();
         Ok(self.jobs().spawn(JobKind::DiagnosticBundle, move |ctx| {
             ctx.progress(0.1, "Collecting diagnostics");
-            let mut bundle = svc
-                .paths()
-                .build_redacted_diagnostic_bundle()
-                .or_kind(ErrorKind::Io)?;
-            ctx.progress(0.7, "Adding logs and crash reports");
-            let log = svc.logs_tail(LogSource::Launcher, BUNDLE_LOG_LINES)?;
-            let runtime = svc.logs_tail(LogSource::Runtime, BUNDLE_LOG_LINES)?;
-            let runtime_errors = svc.logs_tail(LogSource::RuntimeErrors, BUNDLE_LOG_LINES)?;
-            // Newest first; the whole bundle is redacted below.
-            let mut crashes = svc.crashes_list();
-            crashes.truncate(BUNDLE_CRASHES);
-            match bundle.as_object_mut() {
-                Some(obj) => {
-                    obj.insert("launcher_log".into(), serde_json::json!(log));
-                    obj.insert("runtime_log".into(), serde_json::json!(runtime));
-                    obj.insert(
-                        "runtime_errors_log".into(),
-                        serde_json::json!(runtime_errors),
-                    );
-                    obj.insert("crashes".into(), serde_json::json!(crashes));
-                }
-                None => {
-                    return Err(QmError::new(
-                        ErrorKind::Internal,
-                        "Diagnostic bundle is not a JSON object.",
-                    ))
-                }
-            }
-            let dir = svc.paths().cache_dir.join("diagnostics");
-            std::fs::create_dir_all(&dir).or_kind(ErrorKind::Io)?;
-            let json = serde_json::to_string_pretty(&bundle)
-                .map_err(|e| QmError::new(ErrorKind::Internal, e.to_string()))?;
-            let profile_leaf = std::env::var_os("USERPROFILE").and_then(|p| {
-                Path::new(&p)
-                    .file_name()
-                    .map(|n| n.to_string_lossy().into_owned())
-            });
-            let username = std::env::var("USERNAME").ok();
-            let json = redact_bundle_text(&json, profile_leaf.as_deref(), username.as_deref());
+            let json = svc.redacted_bundle_json()?;
+            let dir = svc.diagnostics_dir()?;
             let stamp = jiff::Zoned::now().strftime("%Y%m%d-%H%M%S").to_string();
             let (path, mut file) = create_unique(&dir, &format!("bundle-{stamp}"), "json")?;
             file.write_all(json.as_bytes()).or_kind(ErrorKind::Io)?;
             Ok(Some(path.display().to_string()))
         }))
+    }
+
+    /// `<data>/cache/diagnostics`, made when missing.
+    pub(crate) fn diagnostics_dir(&self) -> QmResult<PathBuf> {
+        let dir = self.paths().cache_dir.join("diagnostics");
+        std::fs::create_dir_all(&dir).or_kind(ErrorKind::Io)?;
+        Ok(dir)
+    }
+
+    /// The diagnostic bundle as JSON text: settings, mods, health, the last lines of the logs
+    /// and recent crash reports, with user names and Steam ids removed.
+    pub(crate) fn redacted_bundle_json(&self) -> QmResult<String> {
+        let mut bundle = self
+            .paths()
+            .build_redacted_diagnostic_bundle()
+            .or_kind(ErrorKind::Io)?;
+        let log = self.logs_tail(LogSource::Launcher, BUNDLE_LOG_LINES)?;
+        let runtime = self.logs_tail(LogSource::Runtime, BUNDLE_LOG_LINES)?;
+        let runtime_errors = self.logs_tail(LogSource::RuntimeErrors, BUNDLE_LOG_LINES)?;
+        // Newest first; the whole bundle is redacted below.
+        let mut crashes = self.crashes_list();
+        crashes.truncate(BUNDLE_CRASHES);
+        match bundle.as_object_mut() {
+            Some(obj) => {
+                obj.insert("launcher_log".into(), serde_json::json!(log));
+                obj.insert("runtime_log".into(), serde_json::json!(runtime));
+                obj.insert(
+                    "runtime_errors_log".into(),
+                    serde_json::json!(runtime_errors),
+                );
+                obj.insert("crashes".into(), serde_json::json!(crashes));
+            }
+            None => {
+                return Err(QmError::new(
+                    ErrorKind::Internal,
+                    "Diagnostic bundle is not a JSON object.",
+                ))
+            }
+        }
+        let json = serde_json::to_string_pretty(&bundle)
+            .map_err(|e| QmError::new(ErrorKind::Internal, e.to_string()))?;
+        let profile_leaf = std::env::var_os("USERPROFILE").and_then(|p| {
+            Path::new(&p)
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+        });
+        let username = std::env::var("USERNAME").ok();
+        Ok(redact_bundle_text(
+            &json,
+            profile_leaf.as_deref(),
+            username.as_deref(),
+        ))
     }
 
     /// Disable the mod a crash report blames, in the active profile. When the suspect is an
@@ -561,7 +576,11 @@ fn redact_steam_ids(text: &str) -> String {
 }
 
 /// Create `<stem>.<ext>` in `dir`, or `<stem>-2.<ext>`, `-3`... if taken (atomic `create_new`).
-fn create_unique(dir: &Path, stem: &str, ext: &str) -> QmResult<(PathBuf, std::fs::File)> {
+pub(crate) fn create_unique(
+    dir: &Path,
+    stem: &str,
+    ext: &str,
+) -> QmResult<(PathBuf, std::fs::File)> {
     for n in 1..1000 {
         let name = if n == 1 {
             format!("{stem}.{ext}")

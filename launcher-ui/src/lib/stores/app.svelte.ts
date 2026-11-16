@@ -32,6 +32,7 @@ export function emptyPatch(): SettingsPatch {
     dev_commands: null,
     auto_check_updates: null,
     auto_install_updates: null,
+    keep_old_mod_versions: null,
     clear_workspace_mods_dir: null,
     color_vision: null,
     high_contrast: null,

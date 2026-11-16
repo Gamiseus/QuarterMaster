@@ -16,6 +16,7 @@ fn src() -> String {
 
 fn at_patch(id: &str, pattern: &str, payload: &str) -> PatternPatch {
     PatternPatch {
+        group: None,
         pattern: pattern.to_string(),
         position: InsertPosition::At,
         target: Target::Single(FILE.to_string()),

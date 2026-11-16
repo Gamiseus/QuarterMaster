@@ -214,6 +214,7 @@ mod tests {
 
     fn pat(id: &str, pattern: &str, position: InsertPosition, payload: &str) -> Patch {
         Patch::Pattern(PatternPatch {
+            group: None,
             pattern: pattern.to_string(),
             position,
             target: Target::Single("test.lua".to_string()),

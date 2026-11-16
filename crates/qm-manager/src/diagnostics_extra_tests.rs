@@ -7,6 +7,7 @@ use std::path::PathBuf;
 
 fn pattern(mod_id: &str, id: &str, target: &str, anchor: &str, payload: &str) -> Patch {
     Patch::Pattern(PatternPatch {
+        group: None,
         pattern: anchor.to_string(),
         position: InsertPosition::After,
         target: Target::Single(target.to_string()),

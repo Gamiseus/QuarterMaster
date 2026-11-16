@@ -5,13 +5,16 @@
 
   // Fixed kinds only: the backend resolves each to its folder, so no path ever comes from the UI.
   const FOLDERS: { kind: RevealKind; label: string; name: string }[] = [
-    { kind: "logs", label: "Logs", name: "logs" },
-    { kind: "library", label: "Mod library", name: "mod library" },
     { kind: "data_dir", label: "QuarterMaster data", name: "data" },
+    { kind: "library", label: "Mod library", name: "mod library" },
+    { kind: "profile_dir", label: "Active profile", name: "profile" },
+    { kind: "logs", label: "Logs", name: "logs" },
     { kind: "game_dir", label: "Game", name: "game" },
     { kind: "save_dir", label: "Saves", name: "save" },
-    { kind: "profile_dir", label: "Active profile", name: "profile" },
   ];
+
+  /** Where everything is kept, shown under the data folder's name. */
+  const dataDir = $derived(app.info?.data_dir ?? undefined);
 </script>
 
 <Panel class="settings-card">
@@ -19,7 +22,7 @@
   <ul class="list" aria-label="Folders">
     {#each FOLDERS as f (f.kind)}
       <li>
-        <FieldRow label={f.label}>
+        <FieldRow label={f.label} help={f.kind === "data_dir" ? dataDir : undefined}>
           <Button size="sm" aria-label="Open the {f.name} folder" onclick={() => app.reveal(f.kind).catch(() => {})}>
             Open
           </Button>
@@ -39,5 +42,10 @@
   /* The FieldRow divider sits between rows, not under the last one. */
   .list li:last-child :global(.qm-field-row) {
     border-bottom: 0;
+  }
+
+  /* The data folder's path wraps anywhere, like every path. */
+  .list :global(.help) {
+    overflow-wrap: anywhere;
   }
 </style>

@@ -54,8 +54,9 @@ function installOne(c: ArchiveModCandidate, policy: ImportRequest["conflict_poli
     });
     return;
   }
-  const others = policy === "replace" ? [] : existing.installed_versions.filter((v) => v !== version);
-  existing.installed_versions = [...others, version];
+  // Only Install alongside keeps the versions already there.
+  const others = policy === "install_alongside" ? existing.installed_versions.filter((v) => v !== version) : [];
+  existing.installed_versions = [version, ...others];
   if (policy !== "install_alongside") existing.version = version;
 }
 

@@ -296,6 +296,7 @@ fn skip_hunk_is_made_as_a_fix() {
 
 fn at(mod_id: &str, id: &str, anchor: &str, payload: &str) -> Patch {
     Patch::Pattern(PatternPatch {
+        group: None,
         pattern: anchor.to_string(),
         position: InsertPosition::At,
         target: Target::Single("conf.lua".to_string()),

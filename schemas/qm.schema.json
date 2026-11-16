@@ -276,6 +276,58 @@
       },
       "type": "array"
     },
+    "copy": {
+      "description": "copy patches in the short form: each [[copy]] entry is one patch, the same table as [patches.copy] under [[patches]]. Both forms can be mixed in one file.",
+      "items": {
+        "properties": {
+          "group": {
+            "description": "A label the launcher lists this patch under, such as \"HUD\". The loader does not use it.",
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "payload": {
+            "type": "string"
+          },
+          "position": {
+            "enum": [
+              "prepend",
+              "append"
+            ],
+            "type": "string"
+          },
+          "sources": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "target": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            ]
+          }
+        },
+        "required": [
+          "target",
+          "position"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
     "manifest": {
       "properties": {
         "dump_lua": {
@@ -295,6 +347,39 @@
         "version"
       ],
       "type": "object"
+    },
+    "module": {
+      "description": "module patches in the short form: each [[module]] entry is one patch, the same table as [patches.module] under [[patches]]. Both forms can be mixed in one file.",
+      "items": {
+        "properties": {
+          "before": {
+            "type": "string"
+          },
+          "group": {
+            "description": "A label the launcher lists this patch under, such as \"HUD\". The loader does not use it.",
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "load_now": {
+            "default": false,
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "name"
+        ],
+        "type": "object"
+      },
+      "type": "array"
     },
     "overrides": {
       "description": "Changes to other mods' patches. Every mod an entry names must be in this mod's requires.",
@@ -320,6 +405,10 @@
           },
           "copy": {
             "properties": {
+              "group": {
+                "description": "A label the launcher lists this patch under, such as \"HUD\". The loader does not use it.",
+                "type": "string"
+              },
               "id": {
                 "type": "string"
               },
@@ -368,6 +457,10 @@
           "module": {
             "properties": {
               "before": {
+                "type": "string"
+              },
+              "group": {
+                "description": "A label the launcher lists this patch under, such as \"HUD\". The loader does not use it.",
                 "type": "string"
               },
               "id": {
@@ -423,6 +516,10 @@
               "expect": {
                 "minimum": 1,
                 "type": "integer"
+              },
+              "group": {
+                "description": "A label the launcher lists this patch under, such as \"HUD\". The loader does not use it.",
+                "type": "string"
               },
               "id": {
                 "type": "string"
@@ -519,6 +616,10 @@
                 "minimum": 1,
                 "type": "integer"
               },
+              "group": {
+                "description": "A label the launcher lists this patch under, such as \"HUD\". The loader does not use it.",
+                "type": "string"
+              },
               "id": {
                 "type": "string"
               },
@@ -610,6 +711,115 @@
       },
       "type": "array"
     },
+    "pattern": {
+      "description": "pattern patches in the short form: each [[pattern]] entry is one patch, the same table as [patches.pattern] under [[patches]]. Both forms can be mixed in one file.",
+      "items": {
+        "properties": {
+          "anchors": {
+            "items": {
+              "$ref": "#/definitions/rung"
+            },
+            "type": "array"
+          },
+          "apply_as": {
+            "default": "literal",
+            "description": "\"edits\" runs an \"at\" patch as separate edits next to the lines it keeps.",
+            "enum": [
+              "literal",
+              "edits"
+            ],
+            "type": "string"
+          },
+          "expect": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "group": {
+            "description": "A label the launcher lists this patch under, such as \"HUD\". The loader does not use it.",
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "match_indent": {
+            "default": false,
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          },
+          "on_failure": {
+            "enum": [
+              "warn",
+              "skip_patch",
+              "skip_mod",
+              "abort"
+            ],
+            "type": "string"
+          },
+          "pattern": {
+            "type": "string"
+          },
+          "payload": {
+            "type": "string"
+          },
+          "position": {
+            "enum": [
+              "at",
+              "before",
+              "after"
+            ],
+            "type": "string"
+          },
+          "requires": {
+            "description": "Patches this patch needs, by id, \"mod_id:patch_id\" or \"mod_id:*\". One in the same file runs first; when it did not apply, this patch is skipped.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "sites": {
+            "items": {
+              "$ref": "#/definitions/site"
+            },
+            "type": "array"
+          },
+          "stack": {
+            "description": "Where this patch's block goes among the code other patches add at its line: \"first\" on top (it runs first), \"last\" at the bottom. A mod it needs stays above it.",
+            "enum": [
+              "first",
+              "last"
+            ],
+            "type": "string"
+          },
+          "target": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            ]
+          },
+          "times": {
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "target",
+          "pattern",
+          "position",
+          "payload"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
     "publish": {
       "description": "Lists the mod on the QuarterMaster site and in the launcher's Browse tab. The game ignores this table. See the modding wiki, Part 11: https://gamiseus.github.io/wiki/",
       "properties": {
@@ -641,6 +851,112 @@
         "repository"
       ],
       "type": "object"
+    },
+    "regex": {
+      "description": "regex patches in the short form: each [[regex]] entry is one patch, the same table as [patches.regex] under [[patches]]. Both forms can be mixed in one file.",
+      "items": {
+        "properties": {
+          "anchors": {
+            "items": {
+              "$ref": "#/definitions/rung"
+            },
+            "type": "array"
+          },
+          "expect": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "group": {
+            "description": "A label the launcher lists this patch under, such as \"HUD\". The loader does not use it.",
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "line_prepend": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "on_failure": {
+            "enum": [
+              "warn",
+              "skip_patch",
+              "skip_mod",
+              "abort"
+            ],
+            "type": "string"
+          },
+          "pattern": {
+            "type": "string"
+          },
+          "payload": {
+            "type": "string"
+          },
+          "position": {
+            "enum": [
+              "at",
+              "before",
+              "after"
+            ],
+            "type": "string"
+          },
+          "requires": {
+            "description": "Patches this patch needs, by id, \"mod_id:patch_id\" or \"mod_id:*\". One in the same file runs first; when it did not apply, this patch is skipped.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "root_capture": {
+            "type": "string"
+          },
+          "sites": {
+            "items": {
+              "$ref": "#/definitions/site"
+            },
+            "type": "array"
+          },
+          "stack": {
+            "description": "Where this patch's block goes among the code other patches add at its line: \"first\" on top (it runs first), \"last\" at the bottom. A mod it needs stays above it.",
+            "enum": [
+              "first",
+              "last"
+            ],
+            "type": "string"
+          },
+          "target": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            ]
+          },
+          "times": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "verbose": {
+            "default": false,
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "target",
+          "pattern",
+          "position",
+          "payload"
+        ],
+        "type": "object"
+      },
+      "type": "array"
     },
     "sprites": {
       "additionalProperties": {

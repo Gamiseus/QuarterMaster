@@ -246,6 +246,7 @@ fn pattern_patch(
     payload: String,
 ) -> Patch {
     Patch::Pattern(PatternPatch {
+        group: None,
         pattern: pattern.to_string(),
         position,
         target: Target::Single(target.to_string()),
@@ -413,6 +414,7 @@ const MAGAZINE_PAYLOAD: &str = r#"  if __qm_mag_sprites and __qm_mag_sprites[typ
 
 fn regex_patch(id: &str, name: &str, target: &str, pattern: &str, payload: &str) -> Patch {
     Patch::Regex(RegexPatch {
+        group: None,
         target: Target::Single(target.to_string()),
         pattern: pattern.to_string(),
         position: InsertPosition::At,

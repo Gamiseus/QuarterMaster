@@ -14,11 +14,13 @@
     onchange: (path: string) => void;
     /** Finds the path automatically; null when nothing was found. */
     detect?: () => Promise<string | null>;
+    /** Auto-detect is the main button of the row (first-run setup). */
+    highlightDetect?: boolean;
     /** More buttons after Browse (and Auto-detect). */
     actions?: Snippet;
   }
 
-  let { label, value, kind, disabled = false, onchange, detect, actions }: Props = $props();
+  let { label, value, kind, disabled = false, onchange, detect, highlightDetect = false, actions }: Props = $props();
 
   let detecting = $state(false);
 
@@ -55,8 +57,11 @@
   <span class="label">{label}</span>
   <code class={["path", { unset: !value }]}>{value ?? "Not set"}</code>
   <div class="buttons">
+    {#if detect && highlightDetect}
+      <Button size="sm" variant="primary" disabled={disabled || detecting} onclick={autoDetect}>Auto-detect</Button>
+    {/if}
     <Button size="sm" {disabled} onclick={browse}>Browse</Button>
-    {#if detect}
+    {#if detect && !highlightDetect}
       <Button size="sm" variant="ghost" disabled={disabled || detecting} onclick={autoDetect}>Auto-detect</Button>
     {/if}
     {@render actions?.()}

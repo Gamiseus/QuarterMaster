@@ -1,0 +1,49 @@
+name: Report a problem
+description: Something in the launcher, the game with mods, or a mod does not work.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The easiest way to fill this in is **Report a problem** in the launcher (Diagnostics, or Settings > About): it opens this form with your text in place and makes the report file to attach.
+  - type: dropdown
+    id: area
+    attributes:
+      label: What is it about?
+      options:
+        - The launcher
+        - The game with mods (mod loader)
+        - A mod
+        - Something else
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: QuarterMaster version
+      description: Settings > About in the launcher.
+      placeholder: "2.0.0"
+    validations:
+      required: true
+  - type: input
+    id: game-version
+    attributes:
+      label: Game version
+      placeholder: "0.5.3b"
+  - type: input
+    id: windows
+    attributes:
+      label: Windows version
+      placeholder: "Windows 11 24H2"
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What you did, what you expected and what happened instead. If it happens every time, say how to make it happen. For a problem with a mod, name the mod.
+    validations:
+      required: true
+  - type: textarea
+    id: files
+    attributes:
+      label: Report file, logs and screenshots
+      description: Drag the report file the launcher made (QuarterMaster-report-....zip) here, and screenshots if they help. Without the launcher, attach `qm-data\logs\launcher.log` and the game's log from `qm-data\profiles\<profile>\Mods\qm\log`.

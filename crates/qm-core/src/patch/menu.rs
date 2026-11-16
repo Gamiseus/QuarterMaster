@@ -41,6 +41,7 @@ fn pattern_patch(
     payload: String,
 ) -> Patch {
     Patch::Pattern(PatternPatch {
+        group: None,
         pattern: pattern.to_string(),
         position,
         target: Target::Single(target.to_string()),

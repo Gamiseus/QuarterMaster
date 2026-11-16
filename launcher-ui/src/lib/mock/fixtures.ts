@@ -23,6 +23,7 @@ export const settings: SettingsView = {
   last_known_exe_sha256: null,
   auto_check_updates: true,
   auto_install_updates: false,
+  keep_old_mod_versions: false,
   color_vision: "standard",
   high_contrast: false,
   text_scale: 1,
@@ -345,8 +346,8 @@ const candidateConflicts: DetectedConflict[] = [conflict, conflictMedics];
 /** Base per-mod patches (before enabled state and conflicts apply); GMenu and AI Tweaks each have one broken patch (GMenu without a conflict). */
 export const patchesByMod: Record<string, ModPatchStatus[]> = {
   gcore: [
-    { patch_id: "core-init", name: "Core init", target_file: "main.lua", state: "applied", conflicts: [] },
-    { patch_id: "core-targets", name: "Target picker", target_file: "scripts/ai.lua", state: "applied", conflicts: [] },
+    { patch_id: "core-init", name: "Core init", group: "Startup", target_file: "main.lua", state: "applied", conflicts: [] },
+    { patch_id: "core-targets", name: "Target picker", group: "AI", target_file: "scripts/ai.lua", state: "applied", conflicts: [] },
   ],
   gmenu: [
     { patch_id: "menu-entry", name: "Menu entry", target_file: "scripts/ui/menu.lua", state: "applied", conflicts: [] },
@@ -483,7 +484,7 @@ export const updatesReport: UpdatesReport = {
     latest_version: "1.0.0-mock",
     update_available: false,
     opt_in_prereleases: false,
-    signature_verification: "verified",
+    release_tag: "",
     rollback_available: false,
   },
   mods: [

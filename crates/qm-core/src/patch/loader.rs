@@ -1517,6 +1517,7 @@ pub fn build_sprite_rules_patch(
         format!("{mod_id}_sprite_sizes_{}", ordinal + 1)
     };
     let patch = Patch::Pattern(crate::patch::PatternPatch {
+        group: None,
         pattern: "setOptionVolume()".to_string(),
         position: crate::patch::InsertPosition::Before,
         target: crate::patch::Target::Single("main.lua".to_string()),
@@ -1557,6 +1558,7 @@ pub fn build_auto_asset_patch(
     let (payload, name, description) = auto_asset_texts(mod_id, &dir, assets);
 
     Some(Patch::Pattern(crate::patch::PatternPatch {
+        group: None,
         pattern: "setOptionVolume()".to_string(),
         position: crate::patch::InsertPosition::Before,
         target: crate::patch::Target::Single("main.lua".to_string()),
@@ -3290,8 +3292,8 @@ fn parse_patch_file(content: &str, file_identifier: &str, mod_dir: &Path) -> Res
             concat!(
                 "\n",
                 "The same key is written twice in one patch. This is not about two patches sharing an id: ",
-                "most often the lines that start the next patch (`[[patches]]` and `[patches.<type>]`) ",
-                "are missing above this line, so its keys landed in the patch before it."
+                "most often the line that starts the next patch (`[[pattern]]`, or `[[patches]]` and ",
+                "`[patches.<type>]`) is missing above this line, so its keys landed in the patch before it."
             )
         } else {
             ""
@@ -3299,6 +3301,110 @@ fn parse_patch_file(content: &str, file_identifier: &str, mod_dir: &Path) -> Res
         anyhow::anyhow!("{}{hint}", e.to_string().trim_end())
             .context(format!("Failed to parse patch file {file_identifier}"))
     })
+}
+
+#[cfg(test)]
+mod short_form_tests {
+    use super::*;
+
+    const MIXED: &str = r#"[manifest]
+version = "1.0.0"
+
+# Says hello
+[[pattern]]
+id = "m:first"
+group = "Startup"
+target = "main.lua"
+pattern = "x"
+position = "after"
+payload = "-- one"
+
+[[patches]]
+[patches.regex]
+id = "m:second"
+target = "main.lua"
+pattern = 'y'
+position = "after"
+payload = "-- two"
+
+# Adds a file
+[[module]]
+id = "m:third"
+group = "Files"
+source = "extra.lua"
+name = "extra"
+
+[[copy]]
+id = "m:fourth"
+target = "main.lua"
+position = "append"
+payload = "-- four"
+
+[[regex]]
+id = "m:fifth"
+group = "Startup"
+target = "main.lua"
+pattern = 'z'
+position = "before"
+payload = "-- five"
+"#;
+
+    /// The short lists and `[[patches]]` mix in one file, and the patches keep the file's order.
+    #[test]
+    fn typed_lists_and_patches_entries_are_read_in_the_order_written() {
+        let mut warned = Vec::new();
+        let parsed: PatchFile = serde_ignored::deserialize(toml::Deserializer::new(MIXED), |key| {
+            warned.push(key.to_string())
+        })
+        .unwrap();
+        assert!(warned.is_empty(), "no key is unknown: {warned:?}");
+        let seen: Vec<(&str, Option<&str>, Option<&str>)> = parsed
+            .patches
+            .iter()
+            .map(|p| (p.type_name(), p.id(), p.group()))
+            .collect();
+        assert_eq!(
+            seen,
+            [
+                ("Pattern", Some("m:first"), Some("Startup")),
+                ("Regex", Some("m:second"), None),
+                ("Module", Some("m:third"), Some("Files")),
+                ("Copy", Some("m:fourth"), None),
+                ("Regex", Some("m:fifth"), Some("Startup")),
+            ]
+        );
+        // The same file through the loader's own parser.
+        let again = parse_patch_file(MIXED, "qm.toml", Path::new(".")).unwrap();
+        assert_eq!(again.patches.len(), 5);
+        assert_eq!(again.patches[4].id(), Some("m:fifth"));
+    }
+
+    /// A file in the long form alone reads exactly as before.
+    #[test]
+    fn the_long_form_alone_is_unchanged() {
+        let long = "[manifest]\nversion = \"1.0.0\"\n\n[[patches]]\n[patches.pattern]\ntarget = \"main.lua\"\npattern = \"x\"\nposition = \"after\"\npayload = \"-- a\"\n\n[[patches]]\n[patches.copy]\ntarget = \"main.lua\"\nposition = \"append\"\npayload = \"-- b\"\n";
+        let parsed = parse_patch_file(long, "qm.toml", Path::new(".")).unwrap();
+        let kinds: Vec<&str> = parsed.patches.iter().map(Patch::type_name).collect();
+        assert_eq!(kinds, ["Pattern", "Copy"]);
+        assert_eq!(parsed.patches[0].group(), None);
+    }
+
+    /// A comment above a patch is found for either kind of header, in file order.
+    #[test]
+    fn comments_above_short_headers_are_found() {
+        let comments = extract_patch_comments(MIXED);
+        assert_eq!(
+            comments,
+            [Some("Says hello".to_string()), None, Some("Adds a file".to_string()), None, None]
+        );
+    }
+
+    /// A key that belongs to no patch type is still an error in the short form.
+    #[test]
+    fn a_short_patch_with_a_missing_key_fails_like_the_long_form() {
+        let bad = "[manifest]\nversion = \"1.0.0\"\n\n[[pattern]]\ntarget = \"main.lua\"\n";
+        assert!(parse_patch_file(bad, "qm.toml", Path::new(".")).is_err());
+    }
 }
 
 #[cfg(test)]
@@ -3333,7 +3439,8 @@ id = \"a:two\"
 
 
 
-/// Extract preceding `# comment` headers above each `[[patches]]` block in a TOML string.
+/// Extract preceding `# comment` headers above each patch header (`[[patches]]`, or a short
+/// `[[pattern]]`, `[[regex]]`, `[[module]]`, `[[copy]]`) in a TOML string, in file order.
 pub fn extract_patch_comments(content: &str) -> Vec<Option<String>> {
     let mut results = Vec::new();
     let mut pending_comments: Vec<String> = Vec::new();
@@ -3355,7 +3462,7 @@ pub fn extract_patch_comments(content: &str) -> Vec<Option<String>> {
             if !clean.is_empty() {
                 pending_comments.push(clean.to_string());
             }
-        } else if trimmed == "[[patches]]" {
+        } else if matches!(trimmed, "[[patches]]" | "[[pattern]]" | "[[regex]]" | "[[module]]" | "[[copy]]") {
             let chosen = pending_comments.first().cloned();
             results.push(chosen);
             pending_comments.clear();

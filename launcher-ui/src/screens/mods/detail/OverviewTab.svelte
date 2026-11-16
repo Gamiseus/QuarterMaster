@@ -3,6 +3,8 @@
   import AssetFiles from "./AssetFiles.svelte";
   import AutoUpdateField from "./AutoUpdateField.svelte";
   import ModColourField from "./ModColourField.svelte";
+  import InstalledVersions from "./InstalledVersions.svelte";
+  import ModFiles from "./ModFiles.svelte";
   import type { ModDetail } from "../../../lib/bindings";
   import { guardLinks, isHttpsUrl } from "../../../lib/external";
   import { renderMarkdown } from "../../../lib/markdown";
@@ -16,6 +18,8 @@
 
   const assetsOnly = $derived(detail.summary.kind === "assets");
   const faction = $derived(detail.summary.faction);
+  /** Several real copies: each is listed and can be removed. */
+  const manyVersions = $derived(detail.summary.installed_versions.length > 1 && !detail.summary.is_workspace_linked);
 
   const GITHUB_REPO = /^[\w.-]+\/[\w.-]+$/;
 
@@ -48,9 +52,14 @@
         : []),
       ...(assetsOnly
         ? [{ label: "Type", value: "Assets only. The game loads its files from the assets folder; it has no update source." }]
-        : [{ label: "Installed versions", value: detail.summary.installed_versions.join(", ") || detail.summary.version }]),
+        : manyVersions
+          ? []
+          : [{ label: "Installed version", value: detail.summary.installed_versions.join(", ") || detail.summary.version }]),
     ]}
   />
+  {#if manyVersions}
+    <InstalledVersions summary={detail.summary} />
+  {/if}
   {#if !detail.summary.is_workspace_linked && !assetsOnly}
     <AutoUpdateField modId={detail.summary.id} />
   {/if}
@@ -84,6 +93,12 @@
     </details>
   {/if}
   </div>
+  {#if !assetsOnly}
+    <!-- Under the facts when the panel is wide, after the readme when it is narrow. -->
+    <div class="files">
+      <ModFiles modId={detail.summary.id} modName={detail.summary.name} version={detail.summary.version} />
+    </div>
+  {/if}
 </div>
 
 <style>
@@ -94,7 +109,8 @@
   }
 
   .facts,
-  .read {
+  .read,
+  .files {
     display: flex;
     flex-direction: column;
     gap: var(--qm-space-3);
@@ -107,11 +123,22 @@
     .overview {
       display: grid;
       grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
-      gap: var(--qm-space-6);
+      /* A readme longer than the left column gives its extra height to the last row. */
+      grid-template-rows: auto 1fr;
+      gap: var(--qm-space-4) var(--qm-space-6);
       align-items: start;
     }
 
+    .files {
+      grid-column: 1;
+      grid-row: 2;
+      padding-top: var(--qm-space-4);
+      border-top: 1px solid var(--qm-border);
+    }
+
     .read {
+      grid-column: 2;
+      grid-row: 1 / span 2;
       padding-left: var(--qm-space-6);
       border-left: 1px solid var(--qm-border);
     }

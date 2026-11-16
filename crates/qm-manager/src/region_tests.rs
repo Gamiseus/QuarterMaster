@@ -8,6 +8,7 @@ use std::path::PathBuf;
 
 fn pattern(mod_id: &str, id: &str, anchor: &str, position: InsertPosition, payload: &str) -> Patch {
     Patch::Pattern(PatternPatch {
+        group: None,
         pattern: anchor.to_string(),
         position,
         target: Target::Single("main.lua".to_string()),
@@ -35,6 +36,7 @@ fn pattern(mod_id: &str, id: &str, anchor: &str, position: InsertPosition, paylo
 
 fn regex(mod_id: &str, id: &str, re: &str, payload: &str) -> Patch {
     Patch::Regex(RegexPatch {
+        group: None,
         target: Target::Single("main.lua".to_string()),
         pattern: re.to_string(),
         position: InsertPosition::At,
