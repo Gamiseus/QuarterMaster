@@ -2520,7 +2520,7 @@ pub fn short_form_diagnostic(mod_dir: &Path, qm_features: &[String]) -> Option<M
         return None;
     }
     Some(ManifestDiagnostic::warning(format!(
-        "qm.toml writes patches in the short form ({}). Add \"short_patches\" to \"qm_features\" in mod.json: without it, a QuarterMaster older than 1.9.1 loads the mod with those patches left out.",
+        "qm.toml writes patches in the short form ({}). Add \"short_patches\" to \"qm_features\" in mod.json: without it, a QuarterMaster older than 2.0.0 loads the mod with those patches left out.",
         used.join(", ")
     )))
 }
@@ -2709,7 +2709,7 @@ payload = '''
 print("[__NAME__] loaded")
 '''
 
-# From QuarterMaster 1.9.1 the two header lines can be one, [[pattern]], when mod.json lists
+# From QuarterMaster 2.0.0 the two header lines can be one, [[pattern]], when mod.json lists
 # "short_patches" under "qm_features". The wiki has both forms side by side.
 #
 # To see the game's code: turn on Debug mode in the launcher (Settings, Launch), start the
