@@ -1,0 +1,29 @@
+{
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "publisher": "Gamiseus",
+    "shortDescription": "Mod manager and launcher for Mud and Blood",
+    "longDescription": "QuarterMaster installs, orders and updates mods for Mud and Blood, and starts the game with them.",
+    "homepage": "https://gamiseus.github.io/",
+    "resources": {
+      "../../target/release/qm_winmm.dll": "qm_winmm.dll",
+      "../../target/release/qm.exe": "qm.exe",
+      "installer/portable.txt": "portable.txt"
+    },
+    "windows": {
+      "webviewInstallMode": { "type": "downloadBootstrapper" },
+      "nsis": {
+        "installMode": "perMachine",
+        "template": "installer/installer.nsi",
+        "installerHooks": "installer/hooks.nsh",
+        "installerIcon": "icons/icon.ico",
+        "sidebarImage": "installer/sidebar.bmp",
+        "headerImage": "installer/header.bmp",
+        "languages": ["English"],
+        "customLanguageFiles": { "English": "installer/English.nsh" },
+        "displayLanguageSelector": false
+      }
+    }
+  }
+}

@@ -1,0 +1,99 @@
+/* Extra themes. Each one sets the surfaces, borders and text; the status colours, the mod colours
+   and the colour vision modes stay the ones of its colour scheme (dark or light) in tokens.css
+   and cvd.css. That holds because no dark theme has a surface lighter than the Field dark popover
+   and no light theme one darker than the Field light raised surface, so every tone keeps its
+   contrast (tests/unit/tokens.test.ts checks each theme). */
+
+/* Graphite: neutral dark greys. */
+html[data-theme="graphite"] {
+  color-scheme: dark;
+  --qm-canvas: #121214;
+  --qm-panel: #19191c;
+  --qm-raised: #212124;
+  --qm-popover: #28282c;
+  --qm-border: #323237;
+  --qm-border-strong: #7c7c85;
+  --qm-text: #ededf0;
+  --qm-text-muted: #a9a9b2;
+  --qm-accent-contrast: #121214;
+}
+
+/* Black: true black with dark greys, for OLED screens and dark rooms. */
+html[data-theme="black"] {
+  color-scheme: dark;
+  --qm-canvas: #000000;
+  --qm-panel: #0b0b0c;
+  --qm-raised: #151517;
+  --qm-popover: #1d1d20;
+  --qm-border: #2a2a2e;
+  --qm-border-strong: #74747d;
+  --qm-text: #f0f0f2;
+  --qm-text-muted: #a3a3ac;
+  --qm-accent-contrast: #000000;
+}
+
+/* Midnight: dark navy. */
+html[data-theme="midnight"] {
+  color-scheme: dark;
+  --qm-canvas: #0b1019;
+  --qm-panel: #111825;
+  --qm-raised: #182130;
+  --qm-popover: #1f2a3b;
+  --qm-border: #28364b;
+  --qm-border-strong: #6683aa;
+  --qm-text: #e6ebf3;
+  --qm-text-muted: #a0b1c8;
+  --qm-accent-contrast: #0b1019;
+}
+
+/* Paper: neutral light greys and white. */
+html[data-theme="paper"] {
+  color-scheme: light;
+  --qm-canvas: #ececec;
+  --qm-panel: #f7f7f7;
+  --qm-raised: #e6e6e6;
+  --qm-popover: #ffffff;
+  --qm-border: #cdcdcd;
+  --qm-border-strong: #767676;
+  --qm-text: #1a1a1a;
+  --qm-text-muted: #545454;
+}
+
+/* Desert: warm sand. */
+html[data-theme="desert"] {
+  color-scheme: light;
+  --qm-canvas: #f0eadd;
+  --qm-panel: #f8f4ea;
+  --qm-raised: #ece5d6;
+  --qm-popover: #fffdf8;
+  --qm-border: #d6ccb6;
+  --qm-border-strong: #84765a;
+  --qm-text: #1f1b12;
+  --qm-text-muted: #5c5444;
+}
+
+/* High contrast keeps each theme's own tint in its borders and muted text. */
+html[data-theme="graphite"][data-contrast="high"],
+html[data-theme="black"][data-contrast="high"] {
+  --qm-text-muted: #d6d6dc;
+  --qm-border: #77777f;
+  --qm-border-strong: #a4a4ad;
+}
+
+html[data-theme="midnight"][data-contrast="high"] {
+  --qm-text-muted: #d2dcea;
+  --qm-border: #6c85a8;
+  --qm-border-strong: #98b0d0;
+}
+
+html[data-theme="paper"][data-contrast="high"] {
+  --qm-text-muted: #2c2c2c;
+  --qm-border: #858585;
+  --qm-border-strong: #4d4d4d;
+}
+
+html[data-theme="desert"][data-contrast="high"] {
+  --qm-text-muted: #322c20;
+  --qm-border: #8d7f63;
+  --qm-border-strong: #574c36;
+}

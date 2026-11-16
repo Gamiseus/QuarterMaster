@@ -1,0 +1,1289 @@
+use std::env;
+use std::path::{Path, PathBuf};
+use std::process::ExitCode;
+use std::sync::Arc;
+
+use qm_core::patch::table::PatchTable;
+use qm_manager::{
+    decode_profile_code, lint_mod_directory, package_mod_release, register_windows_protocols,
+    resolve_load_order, scaffold_new_mod, simulate_and_analyze_patches_with, SimulationOptions,
+    MOD_STARTERS,
+    ConflictResolutionSuggestion, DetectedConflict, LaunchMethod, QuarterMasterPaths,
+};
+use qm_schema::{compare_saves, generate_mod_json_schema, generate_qm_toml_schema};
+use qm_service::testing::NullSink;
+use qm_service::{GameStage, LaunchRequest, QmError, Service, Win32Probe};
+
+fn print_help() {
+    let templates: Vec<String> = MOD_STARTERS
+        .iter()
+        .map(|s| format!("          {:<10} {}", s.id, s.summary))
+        .collect();
+    println!(
+        r#"qm {version}: the QuarterMaster command line, for making and checking Mud and Blood mods.
+It works on the same mods, profiles and saves as the QuarterMaster launcher.
+
+USAGE
+  qm <command> [options]        qm --help        qm --version
+
+MAKING A MOD
+  new <id> "<name>" [--template <t>] [--author <name>] [--dir <folder>]
+        Create a mod folder named after <name> in the current folder (or --dir).
+        <id> is the mod's permanent id: lowercase letters, digits, _ and -.
+        Templates (default: patch):
+{templates}
+  lint <mod_dir>
+        Check one mod before you release it: mod.json, every patch run against the game's
+        own files (a pattern that matches nothing is an error), faction.toml, and a list
+        of what the code can do (run programs, use the network, ...).
+  faction check <mod_dir> [--json]
+        Check a faction mod's faction.toml and files, and list what it changes.
+  pack <mod_dir> [--out <folder>]
+        Build the release zip (<ModFolder>.zip) and print its SHA-256 entry.
+  schema [--out <folder>]
+        Write the editor schemas mod.schema.json, qm.schema.json and faction.schema.json
+        (default folder: schemas).
+
+TESTING MODS TOGETHER
+  validate [--mod-dir <folder>] [--json]
+        Work out the load order and run every enabled mod's patches together, without the
+        game. Reports patches that fail and conflicts between mods, with suggested fixes.
+        --mod-dir checks a folder of mods instead of the active profile.
+  test-patches [--target <file.lua>] [--mod-dir <folder>]
+        List, for each game file, the patches that ran on it, in order, with their result.
+        --target shows one file only.
+  watch [--relaunch]
+        Keep watching the workspace mods folder and run validate each time a file is
+        saved. --relaunch also starts the game again. Stop with Ctrl+C.
+  launch [--profile <id>] [--vanilla] [--steam | --direct]
+        Start the game with a profile (default: the active one). --vanilla starts it
+        without mods. Waits until the game closes.
+
+LIBRARY, PROFILES AND SAVES
+  status                               Game path and version, installed mods, profiles, recent crashes.
+  import <zip-or-folder> [--unmanaged] Copy a mod (or a pack of several) into the library.
+                                       --unmanaged accepts a folder with no mod files in it.
+  sync-workspace [<folder>]            Copy every mod of the workspace mods folder into the library.
+  verify-library                       Check that no installed mod's files were changed.
+  profile list | activate <id> | clone <src> <new_id> [<name>] | diff <a> <b>
+  profile export-code <id>             Print a share code (QM1-...) for a profile.
+  profile import-code <code> [<new_id>]  Make a profile from a share code.
+  save list | inspect [<id>] | backup <id> [<label>] | restore <id> <backup_id> | compare <a> <b>
+
+OTHER
+  ui                                   Open the QuarterMaster launcher.
+  register-protocols                   Let Windows open qm:// links and .qmpack files with QuarterMaster
+                                       (for this user account only).
+
+The modding wiki explains every file a mod can have: https://gamiseus.github.io/wiki/
+"#,
+        version = qm_core::QM_VERSION,
+        templates = templates.join("\n"),
+    );
+}
+
+fn main() -> ExitCode {
+    let args: Vec<String> = env::args().skip(1).collect();
+    if args.is_empty() || args[0] == "--help" || args[0] == "-h" || args[0] == "help" {
+        print_help();
+        return ExitCode::SUCCESS;
+    }
+    if args[0] == "--version" || args[0] == "-V" || args[0] == "version" {
+        println!("qm {}", qm_core::QM_VERSION);
+        return ExitCode::SUCCESS;
+    }
+
+    // Handle `qm://` or `nxm://` URL protocol invocation or `--url` / `--import-pack` flags
+    if args[0].starts_with("qm://") || args[0].starts_with("nxm://") {
+        return handle_url_scheme(&args[0]);
+    }
+    if args[0] == "--url" {
+        if let Some(u) = args.get(1) {
+            return handle_url_scheme(u);
+        }
+    }
+    if args[0] == "--import-pack" {
+        if let Some(pack_path) = args.get(1) {
+            let paths = QuarterMasterPaths::resolve(None);
+            match paths.import_qmpack_file(Path::new(pack_path)) {
+                Ok(preview) => {
+                    let id = paths.free_profile_id(&preview.manifest.name);
+                    if let Err(e) = paths.apply_modpack_as_profile(&preview.manifest, &id) {
+                        eprintln!("Failed to import .qmpack: {e}");
+                        return ExitCode::FAILURE;
+                    }
+                    println!("Imported .qmpack '{}' as profile '{}'", pack_path, id);
+                    return ExitCode::SUCCESS;
+                }
+                Err(e) => {
+                    eprintln!("Failed to import .qmpack: {e}");
+                    return ExitCode::FAILURE;
+                }
+            }
+        }
+    }
+
+    let paths = QuarterMasterPaths::resolve(None);
+    let settings = paths.load_settings();
+
+    // Seed an empty library from the workspace mods folder, once per folder.
+    if let Some(ref ws_mods) = settings.workspace_mods_dir {
+        let _ = paths.seed_library_from_workspace(ws_mods);
+    }
+
+    let cmd = args[0].as_str();
+    let rest = &args[1..];
+
+    let result = match cmd {
+        "status" => cmd_status(&paths),
+        "ui" | "gui" => cmd_ui(rest),
+        "launch" => cmd_launch(&paths, rest),
+        "validate" => cmd_validate(&paths, rest),
+        "test-patches" => cmd_test_patches(&paths, rest),
+        "import" => cmd_import(&paths, rest),
+        "sync-workspace" => cmd_sync_workspace(&paths, rest),
+        "verify-library" => cmd_verify_library(&paths),
+        "profile" => cmd_profile(&paths, rest),
+        "save" => cmd_save(&paths, rest),
+        "lint" => cmd_lint(&paths, rest),
+        "pack" => cmd_pack(rest),
+        "new" => cmd_new(rest),
+        "watch" => cmd_watch(&paths, rest),
+        "register-protocols" => cmd_register_protocols(),
+        "schema" => cmd_schema(rest),
+        "faction" => cmd_faction(rest),
+        other => Err(format!(
+            "Unknown command '{other}'. Run `qm --help` for usage."
+        )),
+    };
+
+    match result {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => {
+            eprintln!("[ERROR] {e}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn handle_url_scheme(url: &str) -> ExitCode {
+    println!("[QM URL Handler] Received URL: {url}");
+    let paths = QuarterMasterPaths::resolve(None);
+    if let Some(code_rest) = url.strip_prefix("qm://import-profile?code=") {
+        match decode_profile_code(code_rest) {
+            Ok(pack) => {
+                // A link on a web page can open this handler: nothing is made until the
+                // person at the keyboard says so.
+                println!("{}", profile_link_summary(&pack));
+                print!("Add this profile? [y/N] ");
+                let _ = std::io::Write::flush(&mut std::io::stdout());
+                let mut answer = String::new();
+                let read = std::io::stdin().read_line(&mut answer);
+                if read.is_err() || !is_yes(&answer) {
+                    println!("Nothing was added.");
+                    return ExitCode::SUCCESS;
+                }
+                let id = paths.free_profile_id(&pack.name);
+                match paths.apply_modpack_as_profile(&pack, &id) {
+                    Ok(p) => {
+                        println!("Imported profile '{}' (id: {})", p.name, p.id);
+                        return ExitCode::SUCCESS;
+                    }
+                    Err(e) => {
+                        eprintln!("Failed to apply profile code: {e}");
+                        return ExitCode::FAILURE;
+                    }
+                }
+            }
+            Err(e) => {
+                eprintln!("Invalid profile code in URL: {e}");
+                return ExitCode::FAILURE;
+            }
+        }
+    }
+    if let Some(install_url) = url.strip_prefix("qm://install?url=") {
+        // A link on a web page can open this handler, so the address is never used as a
+        // file path: a local or network path here would install whatever it names (and
+        // looking at a network path alone hands out the Windows login).
+        if !install_url.starts_with("https://") {
+            eprintln!("Only https:// addresses can be installed from a link. Use `qm import <path>` for a file on this computer.");
+            return ExitCode::FAILURE;
+        }
+        // Nothing is downloaded from a link: the launcher installs mods, after its own checks.
+        println!("This link asks to install a mod from: {}", shown(install_url, 200));
+        println!("Nothing was downloaded. Open QuarterMaster and install the mod from its Browse tab.");
+        return ExitCode::SUCCESS;
+    }
+    println!("This link is not one QuarterMaster knows. Nothing was done.");
+    ExitCode::SUCCESS
+}
+
+/// Only a clear yes counts; anything else, also no input at all, is a no.
+fn is_yes(answer: &str) -> bool {
+    matches!(answer.trim().to_ascii_lowercase().as_str(), "y" | "yes")
+}
+
+/// `s` on one line with control characters dropped, at most `max` characters: text from a
+/// link is shown in the console as it is otherwise.
+fn shown(s: &str, max: usize) -> String {
+    let clean: String = s.chars().filter(|c| !c.is_control()).collect();
+    let mut out: String = clean.chars().take(max).collect();
+    if clean.chars().count() > max {
+        out.push_str("...");
+    }
+    out
+}
+
+/// What a profile link would add, for the question before it is added.
+fn profile_link_summary(pack: &qm_manager::devtools::ModpackManifest) -> String {
+    let mut out = format!(
+        "A link wants to add the profile \"{}\" with {} mod(s):",
+        shown(&pack.name, 64),
+        pack.mods.len()
+    );
+    for m in pack.mods.iter().take(20) {
+        out.push_str(&format!("\n  - {} {}", shown(&m.name, 48), shown(&m.version, 16)));
+    }
+    if pack.mods.len() > 20 {
+        out.push_str(&format!("\n  ... and {} more", pack.mods.len() - 20));
+    }
+    out.push_str("\nIt only makes the profile. No mod is downloaded or installed.");
+    out
+}
+
+fn cmd_ui(args: &[String]) -> Result<(), String> {
+    let exe_dir = env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|d| d.to_path_buf()))
+        .unwrap_or_else(|| PathBuf::from("."));
+    let launcher_exe = exe_dir.join("qm-launcher.exe");
+    let status = std::process::Command::new(&launcher_exe)
+        .args(args)
+        .status()
+        .map_err(|e| format!("Failed to start {}: {e}", launcher_exe.display()))?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err("qm-launcher exited with non-zero status".to_string())
+    }
+}
+
+fn cmd_status(paths: &QuarterMasterPaths) -> Result<(), String> {
+    let settings = paths.load_settings();
+    println!("========================================================");
+    println!("QuarterMaster {} status", qm_core::QM_VERSION);
+    println!("========================================================");
+    println!(
+        "Data Root      : {} (Portable: {})",
+        paths.root_dir.display(),
+        paths.is_portable
+    );
+    println!(
+        "Game Executable: {}",
+        settings
+            .game_exe_path
+            .as_ref()
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|| "Not found".to_string())
+    );
+    if let Some(ref exe) = settings.game_exe_path {
+        if let Ok(info) = paths.ensure_vanilla_cache(exe) {
+            println!(
+                "Game Version   : {} (SHA-256: {}..., {} vanilla Lua files cached)",
+                info.game_version,
+                &info.exe_sha256[..12],
+                info.lua_file_count
+            );
+        }
+    }
+    println!(
+        "Save Directory : {}",
+        settings
+            .save_dir_path
+            .as_ref()
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|| "Not found".to_string())
+    );
+
+    let mods = paths.list_installed_mods();
+    println!("\nInstalled Mods in Library ({}):", mods.len());
+    for m in &mods {
+        println!(
+            "  - {:<20} v{:<8} [Priority {:>3}] ({} patches, category: {})",
+            m.manifest.id,
+            m.manifest.version,
+            m.manifest.load_priority,
+            m.patch_count,
+            m.manifest.category.as_deref().unwrap_or("Other")
+        );
+    }
+
+    let profiles = paths.list_profiles();
+    println!("\nMod Profiles ({}):", profiles.len());
+    for p in &profiles {
+        let active_marker = if p.id == settings.active_profile_id {
+            "* ACTIVE"
+        } else {
+            " "
+        };
+        println!(
+            "  {} {:<16} — {} ({} mods enabled, save slot: '{}')",
+            active_marker,
+            p.id,
+            p.name,
+            p.enabled_mods.len(),
+            p.linked_save_profile_id
+        );
+    }
+
+    let crashes = paths.list_crash_reports();
+    println!("\nRecorded Crash Reports: {}", crashes.len());
+    for c in crashes.iter().take(3) {
+        println!(
+            "  - [{}] {} | Suspected Mod: {:?}",
+            c.id, c.error_message, c.suspected_mod_id
+        );
+    }
+    Ok(())
+}
+
+fn cmd_launch(paths: &QuarterMasterPaths, args: &[String]) -> Result<(), String> {
+    let settings = paths.load_settings();
+    let mut profile_id = settings.active_profile_id.clone();
+    let mut method_override = None;
+
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--profile" | "-p" => {
+                i += 1;
+                if let Some(val) = args.get(i) {
+                    profile_id = val.clone();
+                }
+            }
+            "--vanilla" | "-v" => method_override = Some(LaunchMethod::Vanilla),
+            "--steam" => method_override = Some(LaunchMethod::SteamUrl),
+            "--direct" => method_override = Some(LaunchMethod::DirectExe),
+            _ => {}
+        }
+        i += 1;
+    }
+
+    let svc = new_service(paths);
+    start_launch(&svc, &profile_id, method_override)?;
+    wait_for_game(&svc)
+}
+
+fn new_service(paths: &QuarterMasterPaths) -> Service {
+    Service::new(paths.clone(), Arc::new(NullSink), Arc::new(Win32Probe))
+}
+
+/// Recovers any interrupted game-folder transaction, then launches through the service.
+fn start_launch(
+    svc: &Service,
+    profile_id: &str,
+    method: Option<LaunchMethod>,
+) -> Result<(), String> {
+    // Never recover under a live game; game_status also attaches to a running game.
+    if svc.game_status().is_busy() {
+        return Err(fmt_err(&QmError::game_running()));
+    }
+    match svc.recover() {
+        Ok(Some(msg)) => println!("{msg}"),
+        Ok(None) => {}
+        Err(e) => return Err(fmt_err(&e)),
+    }
+    svc.game_launch(LaunchRequest {
+        profile_id: profile_id.to_string(),
+        method,
+        without_mods: false,
+    })
+    .map(|_| ())
+    .map_err(|e| fmt_err(&e))
+}
+
+fn fmt_err(e: &QmError) -> String {
+    match &e.details {
+        Some(d) if !d.is_empty() => format!("{} ({d})", e.message),
+        _ => e.message.clone(),
+    }
+}
+
+fn describe_stage(stage: &GameStage) -> String {
+    match stage {
+        GameStage::Idle => "Game closed; game folder is clean.".to_string(),
+        GameStage::Deploying => "Preparing the game folder...".to_string(),
+        GameStage::WaitingForSteam => "Waiting for Steam to start the game...".to_string(),
+        GameStage::Running { pid } => format!("Mud and Blood is running (PID: {pid})."),
+        GameStage::CleaningUp => "Game exited; cleaning up the game folder...".to_string(),
+        GameStage::Failed { .. } => String::new(),
+    }
+}
+
+/// Polls the game status every 500 ms, printing each stage change once, until Idle or Failed.
+fn wait_for_game(svc: &Service) -> Result<(), String> {
+    let mut last: Option<GameStage> = None;
+    loop {
+        let st = svc.game_status();
+        if last.as_ref() != Some(&st.stage) {
+            // Failed is reported once by the caller as the error.
+            if !matches!(st.stage, GameStage::Failed { .. }) {
+                println!("{}", describe_stage(&st.stage));
+            }
+            last = Some(st.stage.clone());
+        }
+        match st.stage {
+            GameStage::Idle => return Ok(()),
+            GameStage::Failed { reason } => return Err(reason),
+            _ => std::thread::sleep(std::time::Duration::from_millis(500)),
+        }
+    }
+}
+
+/// Simulates `table`, compiling patched files with the game's `lua51.dll` when it is found.
+fn simulate_with_compile_check(
+    table: &PatchTable,
+    vanilla: &std::collections::HashMap<String, String>,
+    game_exe: Option<&Path>,
+) -> qm_manager::SimulationReport {
+    let lua = game_exe
+        .and_then(Path::parent)
+        .and_then(qm_core::compile::LuaCompiler::find)
+        .and_then(|p| qm_core::compile::LuaCompiler::load(&p).map_err(|e| eprintln!("{e}")).ok());
+    simulate_and_analyze_patches_with(table, vanilla, SimulationOptions { compiler: lua.as_ref(), launch: None })
+}
+
+fn cmd_validate(paths: &QuarterMasterPaths, args: &[String]) -> Result<(), String> {
+    let settings = paths.load_settings();
+    let mut mod_dir_override: Option<PathBuf> = None;
+    let mut json_output = false;
+
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--mod-dir" => {
+                i += 1;
+                if let Some(p) = args.get(i) {
+                    mod_dir_override = Some(PathBuf::from(p));
+                }
+            }
+            "--json" => json_output = true,
+            _ => {}
+        }
+        i += 1;
+    }
+
+    let (game_ver, vanilla_files) =
+        paths.load_vanilla_lua_files(settings.game_exe_path.as_deref())?;
+
+    let target_mod_dir = if let Some(d) = mod_dir_override {
+        d
+    } else if let Some(ref ws) = settings.workspace_mods_dir {
+        ws.clone()
+    } else {
+        paths
+            .profiles_dir
+            .join(&settings.active_profile_id)
+            .join("Mods")
+    };
+
+    let installed = paths.list_installed_mods();
+    let manifests: Vec<_> = installed.into_iter().map(|m| m.manifest).collect();
+    let load_order = resolve_load_order(
+        &manifests,
+        &Default::default(),
+        &Default::default(),
+        Some(&game_ver),
+    );
+
+    let table = PatchTable::load_strict(&target_mod_dir).map_err(|e| {
+        format!(
+            "Failed to load patches from {}: {e:#}",
+            target_mod_dir.display()
+        )
+    })?;
+    let sim = simulate_with_compile_check(&table, &vanilla_files, settings.game_exe_path.as_deref());
+
+    if json_output {
+        let combined = serde_json::json!({
+            "game_version": game_ver,
+            "load_order": load_order,
+            "load_warnings": table.plan_report.warnings,
+            "simulation": sim,
+        });
+        println!("{}", serde_json::to_string_pretty(&combined).unwrap());
+        return Ok(());
+    }
+
+    println!("========================================================");
+    println!(
+        "QuarterMaster Offline Validation & Conflict Report (Game v{})",
+        game_ver
+    );
+    println!("Mod Directory: {}", target_mod_dir.display());
+    println!("========================================================");
+    println!("\nResolved Topological Load Order:");
+    for entry in &load_order.ordered_mods {
+        println!(
+            "  #{:<2} [Priority {:>3}] {:<20} v{:<8} | {}",
+            entry.order_index,
+            entry.effective_priority,
+            entry.mod_id,
+            entry.version,
+            entry.reasons.join("; ")
+        );
+    }
+
+    // Notes from reading the mods, such as a second copy of a mod id that was skipped.
+    if !table.plan_report.warnings.is_empty() {
+        println!("\nLoad Warnings:");
+        for w in &table.plan_report.warnings {
+            println!("  - {w}");
+        }
+    }
+
+    if !load_order.diagnostics.is_empty() {
+        println!("\nDependency & Compatibility Diagnostics:");
+        for d in &load_order.diagnostics {
+            println!("  [{:?}] {}: {}", d.severity, d.mod_id, d.message);
+        }
+    }
+
+    println!(
+        "\nOffline Patch Simulation Summary: {}/{} patches applied cleanly across {} files ({} broken anchors)",
+        sim.applied_patches,
+        sim.total_patches,
+        sim.files_touched.len(),
+        sim.broken_anchors
+    );
+
+    for f in &sim.files_touched {
+        println!(
+            "  - {:<24} ({:>5} -> {:>5} lines) | Mods: {}",
+            f.target_file,
+            f.original_line_count,
+            f.patched_line_count,
+            f.mods_touching.join(", ")
+        );
+    }
+
+    print!("{}", conflicts_text(&sim.conflicts));
+
+    Ok(())
+}
+
+/// The conflicts section of `test-patches`. Info notes (severity "info": `multi_match`, the
+/// semantic notes) are not conflicts: they are listed apart, and with only notes the run still
+/// reports no errors.
+fn conflicts_text(all: &[DetectedConflict]) -> String {
+    use std::fmt::Write as _;
+    let mut out = String::new();
+    let (notes, conflicts): (Vec<&DetectedConflict>, Vec<&DetectedConflict>) =
+        all.iter().partition(|c| c.severity == "info");
+    if !conflicts.is_empty() {
+        let _ = writeln!(
+            out,
+            "\nDetected Conflicts & 3-Tier Resolutions ({}):",
+            conflicts.len()
+        );
+        for c in &conflicts {
+            let _ = writeln!(
+                out,
+                "  [{}] {} — {}",
+                c.severity.to_uppercase(),
+                c.target_file,
+                c.description
+            );
+            for sug in &c.suggestions {
+                let line = match sug {
+                    ConflictResolutionSuggestion::SwapModOrder { explanation, .. } => {
+                        format!("[Tier 1 Auto-Order Fix] {explanation}")
+                    }
+                    ConflictResolutionSuggestion::GenerateGluePatch { explanation, .. } => {
+                        format!("[Tier 2 Compatibility Patch, checked before it is applied] {explanation}")
+                    }
+                    ConflictResolutionSuggestion::SelectWinner { explanation, .. } => {
+                        format!("[Tier 3 Winner Picker] {explanation}")
+                    }
+                    ConflictResolutionSuggestion::ApplyAs { explanation, .. } => {
+                        format!("[Separate Edits, in the launcher] {explanation}")
+                    }
+                    ConflictResolutionSuggestion::SkipHunk { explanation, .. } => {
+                        format!("[Keep One Change, in the launcher] {explanation}")
+                    }
+                };
+                let _ = writeln!(out, "    -> {line}");
+            }
+        }
+    } else {
+        let _ = writeln!(out, "\nZero broken anchors or errors detected.");
+    }
+    if !notes.is_empty() {
+        let _ = writeln!(out, "\nNotes ({}):", notes.len());
+        for c in &notes {
+            let _ = writeln!(out, "  [INFO] {} — {}", c.target_file, c.description);
+        }
+    }
+    out
+}
+
+fn cmd_test_patches(paths: &QuarterMasterPaths, args: &[String]) -> Result<(), String> {
+    let settings = paths.load_settings();
+    let mut target_filter: Option<String> = None;
+    let mut mod_dir_override: Option<PathBuf> = None;
+
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--target" | "-t" => {
+                i += 1;
+                target_filter = args.get(i).cloned();
+            }
+            "--mod-dir" => {
+                i += 1;
+                mod_dir_override = args.get(i).map(PathBuf::from);
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+
+    let (_game_ver, vanilla_files) =
+        paths.load_vanilla_lua_files(settings.game_exe_path.as_deref())?;
+    let target_mod_dir = mod_dir_override
+        .or(settings.workspace_mods_dir)
+        .unwrap_or_else(|| {
+            paths
+                .profiles_dir
+                .join(&settings.active_profile_id)
+                .join("Mods")
+        });
+
+    let table = PatchTable::load_strict(&target_mod_dir).map_err(|e| format!("{e:#}"))?;
+    let sim = simulate_with_compile_check(&table, &vanilla_files, settings.game_exe_path.as_deref());
+
+    for f in &sim.files_touched {
+        if let Some(ref tf) = target_filter {
+            if &f.target_file != tf && !f.target_file.ends_with(tf) {
+                continue;
+            }
+        }
+        println!(
+            "=== {} (Mods: {}) ===",
+            f.target_file,
+            f.mods_touching.join(", ")
+        );
+        for rec in &f.records {
+            let lines: Vec<String> = rec
+                .regions
+                .iter()
+                .map(|r| {
+                    if r.start_line == r.end_line {
+                        r.start_line.to_string()
+                    } else {
+                        format!("{}-{}", r.start_line, r.end_line)
+                    }
+                })
+                .collect();
+            println!(
+                "  [{:?}] priority {:>3} | {:<18} | {:<32} matched {}, lines {}",
+                rec.status,
+                rec.priority,
+                rec.mod_id,
+                rec.patch_name,
+                rec.matched_count,
+                if lines.is_empty() { "none".to_string() } else { lines.join(", ") }
+            );
+        }
+    }
+    Ok(())
+}
+
+fn cmd_import(paths: &QuarterMasterPaths, args: &[String]) -> Result<(), String> {
+    let source = args
+        .first()
+        .ok_or_else(|| "Usage: qm import <path-to-zip-or-folder> [--unmanaged]".to_string())?;
+    let allow_unmanaged = args.iter().any(|a| a == "--unmanaged");
+    let summary = paths.import_mod_from_path(Path::new(source), None, allow_unmanaged)?;
+    println!(
+        "Successfully imported {} mod(s) (Multi-mod pack: {}):",
+        summary.imported_mods.len(),
+        summary.was_multi_mod_pack
+    );
+    for m in &summary.imported_mods {
+        println!(
+            "  - {} ({}) v{} -> {}",
+            m.manifest.name,
+            m.manifest.id,
+            m.manifest.version,
+            m.install_path.display()
+        );
+    }
+    Ok(())
+}
+
+fn cmd_sync_workspace(paths: &QuarterMasterPaths, args: &[String]) -> Result<(), String> {
+    let settings = paths.load_settings();
+    let dir = args
+        .first()
+        .map(PathBuf::from)
+        .or(settings.workspace_mods_dir)
+        .ok_or_else(|| "Workspace mods directory not specified or detected.".to_string())?;
+    let synced = paths.sync_workspace_mods(&dir)?;
+    println!(
+        "Synced {} mod(s) from {} into library:",
+        synced.len(),
+        dir.display()
+    );
+    for m in synced {
+        println!(
+            "  - {} ({}) v{}",
+            m.manifest.name, m.manifest.id, m.manifest.version
+        );
+    }
+    Ok(())
+}
+
+fn cmd_verify_library(paths: &QuarterMasterPaths) -> Result<(), String> {
+    let results = paths.verify_library();
+    println!(
+        "Verifying SHA-256 integrity of {} library mod(s):",
+        results.len()
+    );
+    for (id, ver, res) in results {
+        if res.is_pristine {
+            println!("  ok {:<20} v{:<8} unchanged", id, ver);
+        } else {
+            println!(
+                "  !! {:<20} v{:<8} changed: {:?}, missing: {:?}, added: {:?}",
+                id, ver, res.modified, res.missing, res.untracked
+            );
+        }
+    }
+    Ok(())
+}
+
+fn cmd_profile(paths: &QuarterMasterPaths, args: &[String]) -> Result<(), String> {
+    let sub = args.first().map(|s| s.as_str()).unwrap_or("list");
+    match sub {
+        "list" => {
+            let settings = paths.load_settings();
+            for p in paths.list_profiles() {
+                let mark = if p.id == settings.active_profile_id {
+                    "*"
+                } else {
+                    " "
+                };
+                println!(
+                    "{} {:<16} | {:<28} | Mods: {:?} | Save: {}",
+                    mark, p.id, p.name, p.enabled_mods, p.linked_save_profile_id
+                );
+            }
+            Ok(())
+        }
+        "activate" => {
+            let id = args
+                .get(1)
+                .ok_or_else(|| "Usage: qm profile activate <profile_id>".to_string())?;
+            let plan = paths.activate_profile(id)?;
+            println!(
+                "Activated profile '{}' ({} mods linked into game Mods junction).",
+                plan.profile_id,
+                plan.enabled_mods.len()
+            );
+            Ok(())
+        }
+        "clone" => {
+            let src = args.get(1).ok_or("Missing source profile ID")?;
+            let new_id = args.get(2).ok_or("Missing new profile ID")?;
+            let new_name = args.get(3).map(|s| s.as_str()).unwrap_or(new_id);
+            let p = paths.clone_profile(src, new_id, new_name)?;
+            println!("Cloned profile '{}' -> '{}' ({})", src, p.id, p.name);
+            Ok(())
+        }
+        "diff" => {
+            let a = args.get(1).ok_or("Missing profile A ID")?;
+            let b = args.get(2).ok_or("Missing profile B ID")?;
+            let diff = paths.diff_profiles(a, b)?;
+            println!("{}", serde_json::to_string_pretty(&diff).unwrap());
+            Ok(())
+        }
+        "export-code" => {
+            let id = args
+                .get(1)
+                .ok_or("Usage: qm profile export-code <profile_id>")?;
+            let code = paths.export_profile_code(id)?;
+            println!("{code}");
+            Ok(())
+        }
+        "import-code" => {
+            let code = args
+                .get(1)
+                .ok_or("Usage: qm profile import-code <QM1-...> <new_id>")?;
+            let new_id = args.get(2).map(|s| s.as_str()).unwrap_or("imported");
+            let manifest = decode_profile_code(code)?;
+            let p = paths.apply_modpack_as_profile(&manifest, new_id)?;
+            println!(
+                "Imported profile '{}' (id: {}) with {} mods.",
+                p.name,
+                p.id,
+                p.enabled_mods.len()
+            );
+            Ok(())
+        }
+        other => Err(format!("Unknown profile subcommand '{other}'")),
+    }
+}
+
+fn cmd_save(paths: &QuarterMasterPaths, args: &[String]) -> Result<(), String> {
+    let sub = args.first().map(|s| s.as_str()).unwrap_or("list");
+    match sub {
+        "list" => {
+            let settings = paths.load_settings();
+            for sp in paths.list_save_profiles() {
+                let mark = if sp.id == settings.active_save_profile_id {
+                    "*"
+                } else {
+                    " "
+                };
+                println!(
+                    "{} {:<16} | {:<32} | Vanilla Clean: {:<5} | Backups: {}",
+                    mark,
+                    sp.id,
+                    sp.name,
+                    sp.is_vanilla_clean,
+                    sp.backups.len()
+                );
+            }
+            Ok(())
+        }
+        "inspect" => {
+            let settings = paths.load_settings();
+            let id = args
+                .get(1)
+                .map(|s| s.as_str())
+                .unwrap_or(&settings.active_save_profile_id);
+            let summary = paths.inspect_save_profile(id)?;
+            println!("========================================================");
+            println!("Save Slot Inspection: '{}' ({})", id, summary.file_name);
+            println!("========================================================");
+            println!(
+                "Area of Operations : {} (Day {})",
+                summary.area_of_operations, summary.day
+            );
+            println!("German Commander   : {}", summary.german_commander);
+            println!(
+                "Campaign Progress  : Rank {} | XP {} | TP {} (Total Spent: {}) | Command {}",
+                summary.rank,
+                summary.experience,
+                summary.tactical_points,
+                summary.total_tp_spent,
+                summary.command_points
+            );
+            println!(
+                "Campaign Combat    : {} Kills | {} Casualties | Win Streak: {} | Missions: {}",
+                summary.campaign_kills,
+                summary.campaign_casualties,
+                summary.win_streak,
+                summary.missions_completed
+            );
+            println!(
+                "Classic Progress   : Rank {} | Max Wave {} | Total Kills {} | Casualties {}",
+                summary.classic_rank,
+                summary.classic_max_wave,
+                summary.classic_total_kills,
+                summary.classic_total_casualties
+            );
+            println!(
+                "Deployed Squad ({} soldiers):",
+                summary.deployed_squad.len()
+            );
+            for s in &summary.deployed_squad {
+                println!(
+                    "  - {:<16} (Age {}, Rank {}, Lvl {}) | Weapon: {:<12} | Kills: {:>3} | HP: {:.0}/{:.0} | Skill: {}",
+                    s.name, s.age, s.rank, s.level, s.weapon_tag, s.kills, s.health, s.max_health, s.skill
+                );
+            }
+            if !summary.unknown_mod_keys.is_empty() {
+                println!("Mod Option Keys in Save: {:?}", summary.unknown_mod_keys);
+            }
+            Ok(())
+        }
+        "backup" => {
+            let id = args
+                .get(1)
+                .ok_or("Usage: qm save backup <save_id> [label]")?;
+            let label = args
+                .get(2)
+                .map(|s| s.as_str())
+                .unwrap_or("Manual CLI Backup");
+            let entry = paths.create_save_backup(id, label)?;
+            println!(
+                "Created backup '{}' for save slot '{}' ({} bytes)",
+                entry.id, id, entry.size_bytes
+            );
+            Ok(())
+        }
+        "restore" => {
+            let id = args
+                .get(1)
+                .ok_or("Usage: qm save restore <save_id> <backup_id>")?;
+            let bak_id = args
+                .get(2)
+                .ok_or("Usage: qm save restore <save_id> <backup_id>")?;
+            paths.restore_save_backup(id, bak_id)?;
+            println!("Restored backup '{}' into save slot '{}'.", bak_id, id);
+            Ok(())
+        }
+        "compare" => {
+            let a = args
+                .get(1)
+                .ok_or("Usage: qm save compare <save_id_a> <save_id_b>")?;
+            let b = args
+                .get(2)
+                .ok_or("Usage: qm save compare <save_id_a> <save_id_b>")?;
+            let sa = paths.inspect_save_profile(a)?;
+            let sb = paths.inspect_save_profile(b)?;
+            let cmp = compare_saves(&sa, &sb);
+            println!("{}", serde_json::to_string_pretty(&cmp).unwrap());
+            Ok(())
+        }
+        other => Err(format!("Unknown save subcommand '{other}'")),
+    }
+}
+
+fn cmd_lint(paths: &QuarterMasterPaths, args: &[String]) -> Result<(), String> {
+    let dir = args.first().ok_or("Usage: qm lint <mod_dir>")?;
+    let settings = paths.load_settings();
+    let (_gv, vanilla_files) = paths.load_vanilla_lua_files(settings.game_exe_path.as_deref())?;
+    let report = lint_mod_directory(Path::new(dir), &vanilla_files)?;
+
+    println!(
+        "{} ({}): {}",
+        report.mod_name,
+        report.mod_id,
+        if report.passed { "PASSED" } else { "FAILED" }
+    );
+    // A module or a copy with no pattern matches nothing by design, so there is no "of N".
+    println!(
+        "Patches in the mod: {}. Applied to the game's files: {}. Patterns that matched nothing: {}.",
+        report.patch_count,
+        report.matched_patches,
+        report.zero_match_patches.len()
+    );
+    for d in &report.diagnostics {
+        println!("  [{:?}] {}", d.severity, d.message);
+    }
+    if !report.security_report.capabilities.is_empty() {
+        println!("What the mod's code can do (shown to players in the launcher):");
+        for f in &report.security_report.findings {
+            println!(
+                "  - [{}] {} ({}:{}) -> `{}`",
+                f.severity.to_uppercase(),
+                f.capability.label(),
+                f.file,
+                f.line,
+                f.snippet
+            );
+        }
+    } else {
+        println!("Security scan: plain Lua. It runs no programs, loads no native code, and uses no network or raw files.");
+    }
+
+    if !report.passed {
+        return Err("Mod failed lint checks.".to_string());
+    }
+    Ok(())
+}
+
+fn cmd_pack(args: &[String]) -> Result<(), String> {
+    let mod_dir = args
+        .first()
+        .ok_or("Usage: qm pack <mod_dir> [--out <dir>]")?;
+    let mut out_dir = PathBuf::from(".");
+    let mut i = 1;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--out" | "-o" => {
+                i += 1;
+                out_dir = PathBuf::from(args.get(i).ok_or("--out needs a folder")?);
+            }
+            other => return Err(format!("Unknown option '{other}'. Usage: qm pack <mod_dir> [--out <folder>]")),
+        }
+        i += 1;
+    }
+    let (zip_path, entry) = package_mod_release(Path::new(mod_dir), &out_dir)?;
+    println!("Packaged release archive: {}", zip_path.display());
+    println!("{}", serde_json::to_string_pretty(&entry).unwrap());
+    Ok(())
+}
+
+fn cmd_new(args: &[String]) -> Result<(), String> {
+    let usage = "Usage: qm new <id> \"<name>\" [--template <t>] [--author <name>] [--dir <folder>]  (qm --help lists the templates)";
+    let mod_id = args.first().filter(|a| !a.starts_with("--")).ok_or(usage)?;
+    let named = args.get(1).filter(|a| !a.starts_with("--"));
+    let mod_name = named.map(|s| s.as_str()).unwrap_or(mod_id);
+    let mut template = "patch";
+    let mut author = "Unknown";
+    let mut parent_dir = PathBuf::from(".");
+
+    let mut i = if named.is_some() { 2 } else { 1 };
+    while i < args.len() {
+        match args[i].as_str() {
+            "--template" | "-t" => {
+                i += 1;
+                if let Some(t) = args.get(i) {
+                    template = t.as_str();
+                }
+            }
+            "--author" | "-a" => {
+                i += 1;
+                if let Some(a) = args.get(i) {
+                    author = a.as_str();
+                }
+            }
+            "--dir" | "-d" => {
+                i += 1;
+                if let Some(d) = args.get(i) {
+                    parent_dir = PathBuf::from(d);
+                }
+            }
+            other => return Err(format!("Unknown option '{other}'. {usage}")),
+        }
+        i += 1;
+    }
+
+    let created = scaffold_new_mod(&parent_dir, mod_id, mod_name, author, template)?;
+    println!("Created '{}' from the '{}' template in {}", mod_name, template, created.display());
+    println!("Next: cd into it and run `qm lint .`  (its README.md lists the other steps)");
+    Ok(())
+}
+
+fn cmd_schema(args: &[String]) -> Result<(), String> {
+    let out_dir = args
+        .iter()
+        .position(|a| a == "--out")
+        .and_then(|i| args.get(i + 1))
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("schemas"));
+    std::fs::create_dir_all(&out_dir).map_err(|e| e.to_string())?;
+
+    let mod_schema = serde_json::to_string_pretty(&generate_mod_json_schema()).unwrap();
+    let qm_schema = serde_json::to_string_pretty(&generate_qm_toml_schema()).unwrap();
+
+    std::fs::write(out_dir.join("mod.schema.json"), mod_schema).map_err(|e| e.to_string())?;
+    std::fs::write(out_dir.join("qm.schema.json"), qm_schema).map_err(|e| e.to_string())?;
+    std::fs::write(
+        out_dir.join("faction.schema.json"),
+        qm_schema::faction::FACTION_JSON_SCHEMA,
+    )
+    .map_err(|e| e.to_string())?;
+    println!(
+        "Wrote mod.schema.json, qm.schema.json and faction.schema.json to {}",
+        out_dir.display()
+    );
+    Ok(())
+}
+
+fn cmd_faction(args: &[String]) -> Result<(), String> {
+    let usage = "Usage: qm faction check <mod_dir> [--json]";
+    if args.first().map(|s| s.as_str()) != Some("check") {
+        return Err(usage.to_string());
+    }
+    let dir = args
+        .iter()
+        .skip(1)
+        .find(|a| !a.starts_with("--"))
+        .ok_or(usage)?;
+    let json = args.iter().any(|a| a == "--json");
+    let dir = Path::new(dir);
+    if !qm_schema::faction::has_faction_file(dir) {
+        return Err(format!("No faction.toml in {}", dir.display()));
+    }
+    let report = qm_schema::faction::load_faction(dir);
+
+    if json {
+        let diags: Vec<_> = report
+            .diagnostics
+            .iter()
+            .map(|d| {
+                serde_json::json!({
+                    "severity": format!("{:?}", d.severity).to_lowercase(),
+                    "message": d.message,
+                })
+            })
+            .collect();
+        let out = serde_json::json!({
+            "ok": !report.has_errors(),
+            "diagnostics": diags,
+            "faction": report.faction,
+        });
+        println!("{}", serde_json::to_string_pretty(&out).unwrap());
+    } else {
+        for d in &report.diagnostics {
+            println!("  [{:?}] {}", d.severity, d.message);
+        }
+        match &report.faction {
+            Some(f) => {
+                println!();
+                println!("{} ({}) replaces the {}.", f.name, f.id, f.replaces.label());
+                for (tag, frames) in f.frames.iter().filter(|(_, fr)| !fr.is_empty()) {
+                    println!("  unit art for '{tag}': {} frames", frames.len());
+                }
+                let reskins = f.weapons.iter().filter(|w| w.mode == "reskin").count();
+                let new = f.weapons.len() - reskins;
+                if !f.weapons.is_empty() {
+                    println!("  weapons: {reskins} reskinned, {new} new");
+                }
+                if !f.spawn_swap.is_empty() {
+                    let swaps: Vec<String> =
+                        f.spawn_swap.iter().map(|(a, b)| format!("{a} -> {b}")).collect();
+                    println!("  swapped weapons: {}", swaps.join(", "));
+                }
+                if !f.classes.is_empty() {
+                    let names: Vec<&str> = f.classes.keys().map(|s| s.as_str()).collect();
+                    println!("  classes: {}", names.join(", "));
+                }
+                let voice_files: usize = f.voices.iter().map(|v| v.exact.len()).sum();
+                if voice_files > 0 {
+                    println!("  voice files: {voice_files}");
+                }
+                if !f.vehicles.is_empty() {
+                    let names: Vec<String> = f
+                        .vehicles
+                        .iter()
+                        .map(|v| match &v.name {
+                            Some(n) => format!("{} as {n}", v.tag),
+                            None => v.tag.clone(),
+                        })
+                        .collect();
+                    println!("  vehicles: {}", names.join(", "));
+                }
+                if !f.text.is_empty() {
+                    println!("  game strings: {}", f.text.len());
+                }
+                println!("\nPASSED");
+            }
+            None => println!(
+                "\nFAILED: fix the errors above; QuarterMaster won't load this faction until then."
+            ),
+        }
+    }
+    if report.has_errors() {
+        Err("faction check failed".to_string())
+    } else {
+        Ok(())
+    }
+}
+
+fn cmd_register_protocols() -> Result<(), String> {
+    let registered = register_windows_protocols()?;
+    println!("Registered Windows URL & File Associations in HKCU\\Software\\Classes:");
+    for r in registered {
+        println!("  {r}");
+    }
+    Ok(())
+}
+
+fn cmd_watch(paths: &QuarterMasterPaths, args: &[String]) -> Result<(), String> {
+    let once = args.iter().any(|a| a == "--once");
+    let relaunch = args.iter().any(|a| a == "--relaunch");
+    println!("[QM Watch] Monitoring workspace mods directory for changes...");
+    let mut last_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
+
+    if once {
+        let res = paths.poll_dev_watch_changes(last_ms.saturating_sub(1000));
+        println!("{}", serde_json::to_string_pretty(&res).unwrap_or_default());
+        return Ok(());
+    }
+
+    let relaunch_svc = relaunch.then(|| new_service(paths));
+    loop {
+        std::thread::sleep(std::time::Duration::from_secs(2));
+        let res = paths.poll_dev_watch_changes(last_ms);
+        if let Some(now_ms) = res["now_epoch_ms"].as_u64() {
+            last_ms = now_ms;
+        }
+        if res["changed"].as_bool() == Some(true) {
+            println!("[QM Watch] Change detected: {:?}", res["changed_files"]);
+            let _ = cmd_validate(paths, &[]);
+            if relaunch {
+                let settings = paths.load_settings();
+                if let Some(svc) = relaunch_svc.as_ref() {
+                    if let Err(e) = start_launch(svc, &settings.active_profile_id, None) {
+                        eprintln!("[QM Watch] Relaunch failed: {e}");
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A profile link is acted on only after a clear yes, and what it shows of the link's
+    /// own text has no control characters.
+    #[test]
+    fn a_profile_link_needs_a_clear_yes() {
+        for yes in ["y", "Y", " yes \r\n", "YES"] {
+            assert!(is_yes(yes), "{yes:?}");
+        }
+        for no in ["", "\n", "n", "no", "yep", "y es", "1"] {
+            assert!(!is_yes(no), "{no:?}");
+        }
+        assert_eq!(shown("Pack\u{1b}[2J\r\nName", 64), "Pack[2JName");
+        assert_eq!(shown("abcdef", 3), "abc...");
+    }
+
+    fn conflict(severity: &str, suggestions: Vec<ConflictResolutionSuggestion>) -> DetectedConflict {
+        DetectedConflict {
+            id: format!("{severity}-1"),
+            severity: severity.into(),
+            kind: "k".into(),
+            target_file: "main.lua".into(),
+            mod_a_id: "a".into(),
+            mod_b_id: None,
+            patch_a_id: "a:p".into(),
+            patch_b_id: None,
+            description: format!("a {severity} finding"),
+            suggestions,
+            consumer: None,
+            sites_lost: None,
+            same_line: None,
+        }
+    }
+
+    #[test]
+    fn info_notes_are_listed_apart_and_keep_the_no_errors_line() {
+        let text = conflicts_text(&[conflict("info", Vec::new()), conflict("info", Vec::new())]);
+        assert!(text.contains("Zero broken anchors or errors detected"), "{text}");
+        assert!(text.contains("Notes (2):"), "{text}");
+        assert!(!text.contains("Detected Conflicts"), "{text}");
+
+        let text = conflicts_text(&[conflict("warning", Vec::new()), conflict("info", Vec::new())]);
+        assert!(text.contains("Detected Conflicts & 3-Tier Resolutions (1):"), "{text}");
+        assert!(text.contains("[WARNING] main.lua — a warning finding"), "{text}");
+        assert!(text.contains("Notes (1):\n  [INFO] main.lua — a info finding"), "{text}");
+        assert!(!text.contains("Zero broken anchors"), "{text}");
+    }
+
+    #[test]
+    fn separate_edits_is_offered_in_the_launcher() {
+        let apply_as = ConflictResolutionSuggestion::ApplyAs {
+            patch_id: "a:p".into(),
+            mod_id: "a".into(),
+            explanation: "Run it as separate edits.".into(),
+        };
+        let text = conflicts_text(&[conflict("warning", vec![apply_as])]);
+        assert!(
+            text.contains("-> [Separate Edits, in the launcher] Run it as separate edits."),
+            "{text}"
+        );
+        assert!(!text.contains("not available yet"), "{text}");
+    }
+}

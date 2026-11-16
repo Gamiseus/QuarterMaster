@@ -1,0 +1,1116 @@
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::fs;
+use std::io::Read;
+use std::path::{Path, PathBuf};
+use zip::ZipArchive;
+
+use qm_schema::sha256_hex;
+
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[derive(Default)]
+pub enum LaunchMethod {
+    SteamUrl,
+    #[default]
+    DirectExe,
+    Vanilla,
+}
+
+
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LauncherSettings {
+    pub game_exe_path: Option<PathBuf>,
+    pub save_dir_path: Option<PathBuf>,
+    pub workspace_mods_dir: Option<PathBuf>,
+    #[serde(default = "default_theme")]
+    /// "system" | "dark" | "light"; older files may hold legacy values, which the UI treats as system.
+    pub theme: String,
+    #[serde(default)]
+    pub default_launch_method: LaunchMethod,
+    #[serde(default)]
+    pub opt_in_prereleases: bool,
+    #[serde(default = "default_true")]
+    pub auto_backup_saves: bool,
+    #[serde(default = "default_max_backups")]
+    pub max_save_backups: usize,
+    /// No longer read: the console opens only in debug mode (`debug_mode`). Kept so older
+    /// settings files and launchers still load.
+    #[serde(default)]
+    pub disable_console_on_launch: bool,
+    /// Start the game in the loader's debug mode: console window, full dumps, dump commands.
+    #[serde(default)]
+    pub debug_mode: bool,
+    /// Unlock the game's own developer commands (AI overlay, dev blast).
+    #[serde(default)]
+    pub dev_commands: bool,
+    #[serde(default)]
+    pub first_run_completed: bool,
+    #[serde(default = "default_profile_id")]
+    pub active_profile_id: String,
+    #[serde(default = "default_save_profile_id")]
+    pub active_save_profile_id: String,
+    #[serde(default)]
+    pub portable_mode: bool,
+    /// Retired (plan 2c Task 11): read from older files so the legacy app still compiles, never
+    /// written back, so the next save drops it.
+    #[serde(default, skip_serializing)]
+    pub github_token: Option<String>,
+    /// Per-mod opt-in auto-update flags (`mod_id -> bool`).
+    #[serde(default)]
+    pub auto_update_mods: HashMap<String, bool>,
+    /// Last known vanilla `mnb.exe` SHA-256 fingerprint to detect game updates across launches.
+    #[serde(default)]
+    pub last_known_exe_sha256: Option<String>,
+    /// Check for mod updates at startup and every few hours while the launcher is open.
+    #[serde(default = "default_true")]
+    pub auto_check_updates: bool,
+    /// Install available mod updates without asking (per-mod `auto_update_mods` entries win).
+    #[serde(default)]
+    pub auto_install_updates: bool,
+    /// A mod update keeps the version it updates from installed as well (profiles other than
+    /// the active one stay on it). Off: the new version takes the old one's place.
+    #[serde(default)]
+    pub keep_old_mod_versions: bool,
+    /// "standard" | "deutan" | "protan" | "tritan" | "mono".
+    #[serde(default = "default_color_vision")]
+    pub color_vision: String,
+    #[serde(default)]
+    pub high_contrast: bool,
+    /// UI text size, 1.0 to 1.75 in 0.125 steps.
+    #[serde(default = "default_text_scale")]
+    pub text_scale: f32,
+    /// One-time launch settings migration done up to this version (0: never ran).
+    #[serde(default)]
+    pub launch_model_version: u32,
+    /// Mod id -> the colour (1 to 8) the user picked for it in the patch views.
+    #[serde(default)]
+    pub mod_colors: HashMap<String, u8>,
+    /// The game window settings written into the launcher's own "Game window settings" mod.
+    #[serde(default)]
+    pub window: WindowSettings,
+    /// Which set of mods and profiles is in use. Read when the launcher starts.
+    #[serde(default)]
+    pub mods_source: ModsSource,
+    /// The active profile of the set that is not in use (`active_profile_id` in the file is
+    /// always the library's; `load_settings` swaps the two in workspace mode).
+    #[serde(default = "default_profile_id")]
+    pub other_active_profile_id: String,
+}
+
+/// Where the mods come from: the launcher's library, or links to the workspace mods folder
+/// with their own profiles.
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ModsSource {
+    #[default]
+    Library,
+    Workspace,
+}
+
+/// Overrides for the game's `conf.lua` window values. `None`: the game's own value.
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct WindowSettings {
+    #[serde(default)]
+    pub vsync: Option<bool>,
+    #[serde(default)]
+    pub resizable: Option<bool>,
+    #[serde(default)]
+    pub width: Option<u32>,
+    #[serde(default)]
+    pub height: Option<u32>,
+    #[serde(default)]
+    pub borderless: Option<bool>,
+    /// 1-based monitor number.
+    #[serde(default)]
+    pub display: Option<u32>,
+    #[serde(default)]
+    pub fullscreen: Option<bool>,
+    /// "desktop" | "exclusive".
+    #[serde(default)]
+    pub fullscreen_type: Option<String>,
+}
+
+impl WindowSettings {
+    pub fn is_empty(&self) -> bool {
+        *self == Self::default()
+    }
+
+    /// The Lua appended to `conf.lua`: the game's own `love.conf` runs first, then the
+    /// overrides.
+    pub fn conf_lua(&self) -> String {
+        let mut out = String::from(
+            "-- Written by QuarterMaster (Settings, Game window). Edits here are overwritten.\n\
+             local qm_game_conf = love.conf\n\
+             function love.conf(t)\n    if qm_game_conf then qm_game_conf(t) end\n",
+        );
+        let mut set = |key: &str, value: String| {
+            out.push_str(&format!("    t.window.{key} = {value}\n"));
+        };
+        if let Some(v) = self.width {
+            set("width", v.to_string());
+            set("minwidth", format!("math.min(t.window.minwidth or {v}, {v})"));
+        }
+        if let Some(v) = self.height {
+            set("height", v.to_string());
+            set("minheight", format!("math.min(t.window.minheight or {v}, {v})"));
+        }
+        if let Some(v) = self.fullscreen {
+            set("fullscreen", v.to_string());
+        }
+        if let Some(v) = &self.fullscreen_type {
+            set("fullscreentype", format!("{v:?}"));
+        }
+        if let Some(v) = self.borderless {
+            set("borderless", v.to_string());
+        }
+        if let Some(v) = self.resizable {
+            set("resizable", v.to_string());
+        }
+        if let Some(v) = self.vsync {
+            set("vsync", if v { "1" } else { "0" }.to_string());
+        }
+        if let Some(v) = self.display {
+            set("display", v.to_string());
+        }
+        out.push_str("end\n");
+        out
+    }
+}
+
+fn default_color_vision() -> String {
+    "standard".to_string()
+}
+
+fn default_text_scale() -> f32 {
+    1.0
+}
+
+fn default_theme() -> String {
+    "system".to_string()
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn default_max_backups() -> usize {
+    15
+}
+
+fn default_profile_id() -> String {
+    "default".to_string()
+}
+
+fn default_save_profile_id() -> String {
+    "default".to_string()
+}
+
+impl Default for LauncherSettings {
+    fn default() -> Self {
+        Self {
+            game_exe_path: detect_game_installation(),
+            save_dir_path: detect_save_directory(),
+            // Never guessed: a modder's workspace is set by hand.
+            workspace_mods_dir: None,
+            theme: default_theme(),
+            default_launch_method: LaunchMethod::DirectExe,
+            opt_in_prereleases: false,
+            auto_backup_saves: true,
+            max_save_backups: 15,
+            disable_console_on_launch: false,
+            debug_mode: false,
+            dev_commands: false,
+            first_run_completed: false,
+            active_profile_id: default_profile_id(),
+            active_save_profile_id: default_save_profile_id(),
+            portable_mode: false,
+            github_token: None,
+            auto_update_mods: HashMap::new(),
+            last_known_exe_sha256: None,
+            auto_check_updates: true,
+            auto_install_updates: false,
+            keep_old_mod_versions: false,
+            color_vision: default_color_vision(),
+            high_contrast: false,
+            text_scale: default_text_scale(),
+            launch_model_version: 0,
+            mod_colors: HashMap::new(),
+            window: WindowSettings::default(),
+            mods_source: ModsSource::Library,
+            other_active_profile_id: default_profile_id(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct QuarterMasterPaths {
+    pub root_dir: PathBuf,
+    pub library_dir: PathBuf,
+    pub profiles_dir: PathBuf,
+    pub saves_dir: PathBuf,
+    pub vanilla_cache_dir: PathBuf,
+    pub cache_dir: PathBuf,
+    pub logs_dir: PathBuf,
+    pub backups_dir: PathBuf,
+    pub settings_file: PathBuf,
+    pub journal_file: PathBuf,
+    pub is_portable: bool,
+    /// Workspace mode: `library_dir` holds links to the workspace mods folder and
+    /// `profiles_dir` the workspace's own profiles. Set when the paths are resolved.
+    #[serde(default)]
+    pub workspace_mode: bool,
+    /// Profile notices found by a read that could not report them (shared by clones).
+    #[serde(skip)]
+    pub(crate) profile_notices: std::sync::Arc<std::sync::Mutex<PendingNotices>>,
+}
+
+/// Notices waiting for the service to show them; each text is queued once per process.
+#[derive(Debug, Default)]
+pub(crate) struct PendingNotices {
+    pub(crate) pending: Vec<String>,
+    pub(crate) seen: std::collections::HashSet<String>,
+}
+
+impl QuarterMasterPaths {
+    pub fn resolve(custom_root: Option<&Path>) -> Self {
+        let (root_dir, is_portable) = if let Some(r) = custom_root {
+            (r.to_path_buf(), true)
+        } else if let Ok(custom_env_dir) = std::env::var("QM_DATA_DIR").map(PathBuf::from) {
+            (custom_env_dir, true)
+        } else if std::env::var("QM_PORTABLE").map(|v| v == "1").unwrap_or(false) {
+            let exe_dir = std::env::current_exe()
+                .ok()
+                .and_then(|p| p.parent().map(|d| d.to_path_buf()))
+                .unwrap_or_else(|| PathBuf::from("."));
+            (exe_dir.join("qm-data"), true)
+        } else if let Some(exe_dir) = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|d| d.to_path_buf()))
+        {
+            if exe_dir.join("portable.txt").is_file() || exe_dir.join(".portable").is_file() {
+                (exe_dir.join("qm-data"), true)
+            } else {
+                let appdata = dirs::data_dir()
+                    .unwrap_or_else(|| PathBuf::from("."))
+                    .join("QuarterMaster");
+                (appdata, false)
+            }
+        } else {
+            let appdata = dirs::data_dir()
+                .unwrap_or_else(|| PathBuf::from("."))
+                .join("QuarterMaster");
+            (appdata, false)
+        };
+
+        // Workspace mode keeps its mods and profiles apart from the library's.
+        let workspace_mode = fs::read_to_string(root_dir.join("settings.json"))
+            .ok()
+            .and_then(|raw| serde_json::from_str::<LauncherSettings>(&raw).ok())
+            .is_some_and(|s| {
+                s.mods_source == ModsSource::Workspace && s.workspace_mods_dir.is_some()
+            });
+        let mods_root = if workspace_mode {
+            root_dir.join("workspace")
+        } else {
+            root_dir.clone()
+        };
+        let paths = Self {
+            library_dir: mods_root.join("library"),
+            profiles_dir: mods_root.join("profiles"),
+            workspace_mode,
+            saves_dir: root_dir.join("saves"),
+            vanilla_cache_dir: root_dir.join("vanilla-cache"),
+            cache_dir: root_dir.join("cache"),
+            logs_dir: root_dir.join("logs"),
+            backups_dir: root_dir.join("backups"),
+            settings_file: root_dir.join("settings.json"),
+            journal_file: root_dir.join("state-journal.json"),
+            root_dir,
+            is_portable,
+            profile_notices: Default::default(),
+        };
+
+        paths.ensure_directories();
+        paths
+    }
+
+    pub fn ensure_directories(&self) {
+        for dir in [
+            &self.root_dir,
+            &self.library_dir,
+            &self.profiles_dir,
+            &self.saves_dir,
+            &self.vanilla_cache_dir,
+            &self.cache_dir,
+            &self.logs_dir,
+            &self.backups_dir,
+        ] {
+            let _ = fs::create_dir_all(dir);
+        }
+    }
+
+    /// The settings. A missing file is made with the defaults. A file that cannot be read as
+    /// settings is kept as `settings.json.unreadable` before the defaults replace it, so the
+    /// paths and choices in it are not lost.
+    pub fn load_settings(&self) -> LauncherSettings {
+        if let Ok(raw) = fs::read_to_string(&self.settings_file) {
+            if let Ok(mut s) = serde_json::from_str::<LauncherSettings>(&raw) {
+                if s.game_exe_path.is_none() {
+                    s.game_exe_path = detect_game_installation();
+                }
+                if s.save_dir_path.is_none() {
+                    s.save_dir_path = detect_save_directory();
+                }
+                if self.workspace_mode {
+                    std::mem::swap(&mut s.active_profile_id, &mut s.other_active_profile_id);
+                }
+                return s;
+            }
+            if !raw.trim().is_empty() {
+                let mut kept = self.settings_file.as_os_str().to_os_string();
+                kept.push(".unreadable");
+                let _ = fs::write(std::path::PathBuf::from(kept), &raw);
+            }
+        }
+        let s = LauncherSettings::default();
+        let _ = self.save_settings(&s);
+        s
+    }
+
+    /// Writes `settings.json` atomically: a unique temp file next to it, then a rename over it.
+    pub fn save_settings(&self, settings: &LauncherSettings) -> Result<(), String> {
+        static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        // The file always holds the library's active profile in `active_profile_id`.
+        let mut on_disk = settings.clone();
+        if self.workspace_mode {
+            std::mem::swap(&mut on_disk.active_profile_id, &mut on_disk.other_active_profile_id);
+        }
+        let json = serde_json::to_string_pretty(&on_disk)
+            .map_err(|e| format!("Failed to serialize settings.json: {e}"))?;
+        let fail = |e: std::io::Error| format!("Failed to write {}: {e}", self.settings_file.display());
+        let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let mut tmp_name = self.settings_file.file_name().unwrap_or_default().to_os_string();
+        tmp_name.push(format!(".{}-{seq}.tmp", std::process::id()));
+        let tmp = self.settings_file.with_file_name(tmp_name);
+        // Flush the temp file to disk before the rename, so a crash cannot leave an empty settings.json.
+        let written = fs::File::create(&tmp).and_then(|mut f| {
+            use std::io::Write;
+            f.write_all(json.as_bytes())?;
+            f.sync_all()
+        });
+        if let Err(e) = written.and_then(|()| fs::rename(&tmp, &self.settings_file)) {
+            let _ = fs::remove_file(&tmp);
+            return Err(fail(e));
+        }
+        Ok(())
+    }
+
+    /// Auto-detects all system paths (Steam game installation, save directory, mod library storage).
+    pub fn auto_detect_all_paths(&self) -> DetectedPaths {
+        let game_exe = detect_game_installation();
+        let save_dir = detect_save_directory();
+        let is_steam = game_exe
+            .as_ref()
+            .map(|p| p.to_string_lossy().to_lowercase().contains("steamapps"))
+            .unwrap_or(false);
+        // Only a version the vanilla cache recorded; never a guess.
+        let game_version = game_exe.as_ref().and_then(|_p| {
+            let meta_file = self.vanilla_cache_dir.join(".vanilla-meta.json");
+            let raw = fs::read_to_string(&meta_file).ok()?;
+            let val = serde_json::from_str::<serde_json::Value>(&raw).ok()?;
+            val.get("info")
+                .and_then(|i| i.get("game_version"))
+                .and_then(|v| v.as_str())
+                .map(str::to_string)
+        });
+
+        DetectedPaths {
+            game_exe_path: game_exe,
+            save_dir_path: save_dir,
+            workspace_mods_dir: None,
+            library_dir_path: self.library_dir.clone(),
+            is_steam,
+            game_version,
+        }
+    }
+}
+
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DetectedPaths {
+    pub game_exe_path: Option<PathBuf>,
+    pub save_dir_path: Option<PathBuf>,
+    pub workspace_mods_dir: Option<PathBuf>,
+    pub library_dir_path: PathBuf,
+    pub is_steam: bool,
+    pub game_version: Option<String>,
+}
+
+/// Reads a `REG_SZ` or `REG_EXPAND_SZ` value straight from the registry, unexpanded (what
+/// `reg query` prints). `key` starts with `HKCU\` or `HKLM\`. Read in-process on purpose: a
+/// spawned `reg.exe` is orphaned, suspended forever, when its parent exits during the spawn.
+#[cfg(windows)]
+pub(crate) fn read_registry_string(key: &str, value_name: &str) -> Option<String> {
+    use windows::core::PCWSTR;
+    use windows::Win32::Foundation::{ERROR_MORE_DATA, ERROR_SUCCESS};
+    use windows::Win32::System::Registry::{
+        RegGetValueW, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, RRF_NOEXPAND, RRF_RT_REG_EXPAND_SZ,
+        RRF_RT_REG_SZ,
+    };
+    let (hive, subkey) = if let Some(rest) = key.strip_prefix(r"HKCU\") {
+        (HKEY_CURRENT_USER, rest)
+    } else {
+        let rest = key.strip_prefix(r"HKLM\")?;
+        (HKEY_LOCAL_MACHINE, rest)
+    };
+    let wide = |s: &str| s.encode_utf16().chain(Some(0)).collect::<Vec<u16>>();
+    let (subkey, value_name) = (wide(subkey), wide(value_name));
+    let flags = RRF_RT_REG_SZ | RRF_RT_REG_EXPAND_SZ | RRF_NOEXPAND;
+    let mut buf = vec![0u16; 260];
+    // The value can grow between calls; retry a few times with the size the registry reports.
+    for _ in 0..4 {
+        let mut bytes = (buf.len() * 2) as u32;
+        // SAFETY: both names are NUL-terminated and outlive the call; `bytes` is the buffer's size.
+        let status = unsafe {
+            RegGetValueW(
+                hive,
+                PCWSTR(subkey.as_ptr()),
+                PCWSTR(value_name.as_ptr()),
+                flags,
+                None,
+                Some(buf.as_mut_ptr().cast()),
+                Some(&mut bytes),
+            )
+        };
+        if status == ERROR_MORE_DATA {
+            buf.resize(bytes as usize / 2 + 1, 0);
+            continue;
+        }
+        if status != ERROR_SUCCESS {
+            return None;
+        }
+        let data = &buf[..(bytes as usize / 2).min(buf.len())];
+        let end = data.iter().position(|c| *c == 0).unwrap_or(data.len());
+        return Some(String::from_utf16_lossy(&data[..end]));
+    }
+    None
+}
+
+/// Auto-detects the Steam client executable (`Steam.exe`).
+pub fn detect_steam_exe() -> Option<PathBuf> {
+    #[cfg(windows)]
+    {
+        for (hive, value_name) in [
+            (r"HKCU\Software\Valve\Steam", "SteamExe"),
+            (r"HKLM\SOFTWARE\WOW6432Node\Valve\Steam", "SteamExe"),
+            (r"HKLM\SOFTWARE\Valve\Steam", "SteamExe"),
+        ] {
+            if let Some(data) = read_registry_string(hive, value_name) {
+                let path = PathBuf::from(data.trim().replace('/', "\\"));
+                if path.is_file() {
+                    return Some(path);
+                }
+            }
+        }
+    }
+
+    for drive in ['C', 'D', 'E', 'F'] {
+        for sub in [
+            r"Program Files (x86)\Steam\steam.exe",
+            r"Program Files\Steam\steam.exe",
+            r"Steam\steam.exe",
+        ] {
+            let p = PathBuf::from(format!(r"{}:\{}", drive, sub));
+            if p.is_file() {
+                return Some(p);
+            }
+        }
+    }
+    None
+}
+
+/// Checks if Steam is currently running.
+pub fn is_steam_running() -> bool {
+    crate::winproc::find_process("steam.exe").is_some()
+}
+
+/// Auto-detects the Steam game installation of Mud and Blood (`mnb.exe`, Steam AppID 1391530).
+pub fn detect_steam_game_installation() -> Option<PathBuf> {
+    let mut steam_roots = Vec::new();
+
+    // 1. Query Windows Registry for SteamPath (HKCU and HKLM)
+    #[cfg(windows)]
+    {
+        for (hive, value_name) in [
+            (r"HKCU\Software\Valve\Steam", "SteamPath"),
+            (r"HKLM\SOFTWARE\WOW6432Node\Valve\Steam", "InstallPath"),
+            (r"HKLM\SOFTWARE\Valve\Steam", "InstallPath"),
+        ] {
+            if let Some(data) = read_registry_string(hive, value_name) {
+                let path = PathBuf::from(data.trim());
+                if path.is_dir() && !steam_roots.contains(&path) {
+                    steam_roots.push(path);
+                }
+            }
+        }
+    }
+
+    // 2. Add common default Steam root folders across common drive letters
+    for drive in ['C', 'D', 'E', 'F', 'G'] {
+        for sub in [
+            r"Program Files (x86)\Steam",
+            r"Program Files\Steam",
+            r"Steam",
+            r"SteamLibrary",
+            r"WindowsGames\SteamLibrary",
+            r"Games\SteamLibrary",
+            r"Games\Steam",
+        ] {
+            let p = PathBuf::from(format!(r"{}:\{}", drive, sub));
+            if p.is_dir() && !steam_roots.contains(&p) {
+                steam_roots.push(p);
+            }
+        }
+    }
+
+    // 3. For each steam root, parse steamapps/libraryfolders.vdf and gather all library paths
+    let mut library_paths = Vec::new();
+    for root in &steam_roots {
+        if !library_paths.contains(root) {
+            library_paths.push(root.clone());
+        }
+        let vdf = root.join("steamapps").join("libraryfolders.vdf");
+        if let Ok(vdf_text) = fs::read_to_string(&vdf) {
+            let path_re = regex_lite::Regex::new(r#""path"\s+"([^"]+)""#).unwrap();
+            for cap in path_re.captures_iter(&vdf_text) {
+                let lib_path = PathBuf::from(cap[1].replace("\\\\", "\\"));
+                if lib_path.is_dir() && !library_paths.contains(&lib_path) {
+                    library_paths.push(lib_path);
+                }
+            }
+        }
+    }
+
+    // 4. In each library path, check for appmanifest_1391530.acf and common install names
+    for lib in &library_paths {
+        let manifest = lib.join("steamapps").join("appmanifest_1391530.acf");
+        if let Ok(manifest_text) = fs::read_to_string(&manifest) {
+            let dir_re = regex_lite::Regex::new(r#""installdir"\s+"([^"]+)""#).unwrap();
+            if let Some(cap) = dir_re.captures(&manifest_text) {
+                let exe = lib
+                    .join("steamapps")
+                    .join("common")
+                    .join(&cap[1])
+                    .join("mnb.exe");
+                if exe.is_file() {
+                    return Some(exe);
+                }
+            }
+        }
+
+        // Direct candidate names under steamapps/common/
+        for folder_name in ["MudandBlood", "Mud and Blood", "mudandblood", "mud and blood"] {
+            let exe = lib
+                .join("steamapps")
+                .join("common")
+                .join(folder_name)
+                .join("mnb.exe");
+            if exe.is_file() {
+                return Some(exe);
+            }
+        }
+    }
+
+    None
+}
+
+/// Auto-detects `mnb.exe` prioritizing real Steam installation, standard game paths, and falling back to workspace.
+pub fn detect_game_installation() -> Option<PathBuf> {
+    // 1. Check Steam installation (primary source)
+    if let Some(steam_exe) = detect_steam_game_installation() {
+        return Some(steam_exe);
+    }
+
+    // 2. Check standard non-Steam installation directories
+    for drive in ['C', 'D', 'E', 'F'] {
+        for folder in [
+            r"Games\MudandBlood",
+            r"Games\Mud and Blood",
+            r"GOG Games\Mud and Blood",
+            r"MudandBlood",
+            r"Mud and Blood",
+        ] {
+            let candidate = PathBuf::from(format!(r"{}:\{}\mnb.exe", drive, folder));
+            if candidate.is_file() {
+                return Some(candidate);
+            }
+        }
+    }
+
+    // 3. Fallback: only if no installed game was found on system, check exe/cwd
+    if let Ok(exe) = std::env::current_exe() {
+        for ancestor in exe.ancestors().take(5) {
+            let p1 = ancestor.join("game").join("mnb.exe");
+            if p1.is_file() {
+                return Some(p1);
+            }
+            let p2 = ancestor.join("mnb.exe");
+            if p2.is_file() {
+                return Some(p2);
+            }
+        }
+    }
+    if let Ok(cwd) = std::env::current_dir() {
+        let p1 = cwd.join("game").join("mnb.exe");
+        if p1.is_file() {
+            return Some(p1);
+        }
+        let p2 = cwd.join("mnb.exe");
+        if p2.is_file() {
+            return Some(p2);
+        }
+    }
+
+    None
+}
+
+/// Auto-detects the LÖVE save directory for Mud and Blood (`%APPDATA%\mnb\`); only an existing folder.
+pub fn detect_save_directory() -> Option<PathBuf> {
+    let appdata = dirs::data_dir()?;
+    [appdata.join("mnb"), appdata.join("LOVE").join("mnb")]
+        .into_iter()
+        .find(|p| p.is_dir())
+}
+
+/// Auto-detects the `MnB-Mods` development repository if present in the workspace.
+pub fn detect_workspace_mods_dir() -> Option<PathBuf> {
+    if let Ok(env_ws) = std::env::var("QM_WORKSPACE_DIR") {
+        let p = PathBuf::from(env_ws);
+        if p.is_dir() {
+            return Some(p);
+        }
+    }
+    let mut candidates = Vec::new();
+    if let Ok(cwd) = std::env::current_dir() {
+        candidates.push(cwd.join("MnB-Mods"));
+        if let Some(parent) = cwd.parent() {
+            candidates.push(parent.join("MnB-Mods"));
+        }
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        for ancestor in exe.ancestors().take(5) {
+            candidates.push(ancestor.join("MnB-Mods"));
+        }
+    }
+    candidates.into_iter().find(|p| p.is_dir())
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VanillaGameInfo {
+    pub exe_path: PathBuf,
+    pub exe_sha256: String,
+    pub game_version: String,
+    pub steam_app_id: Option<String>,
+    pub cache_dir: PathBuf,
+    pub lua_file_count: usize,
+}
+
+/// In a vanilla cache folder once every Lua file of the game was written to it.
+const VANILLA_CACHE_DONE: &str = ".complete";
+
+impl QuarterMasterPaths {
+    /// Extracts and caches all vanilla `.lua` files from `mnb.exe` (or `decompile/` fallback)
+    /// into `vanilla-cache/<version>-<hash8>/`, and detects the exact game version (e.g. `0.5.3b`).
+    pub fn ensure_vanilla_cache(&self, game_exe: &Path) -> Result<VanillaGameInfo, String> {
+        if !game_exe.is_file() {
+            return Err(format!("Game executable not found at {}", game_exe.display()));
+        }
+
+        let meta = fs::metadata(game_exe)
+            .map_err(|e| format!("Failed to stat {}: {e}", game_exe.display()))?;
+        let exe_size = meta.len();
+        let exe_mtime = meta
+            .modified()
+            .ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+
+        let meta_file = self.vanilla_cache_dir.join(".vanilla-meta.json");
+        if let Ok(raw) = fs::read_to_string(&meta_file) {
+            #[derive(serde::Deserialize)]
+            struct CachedMeta {
+                exe_path: String,
+                exe_size: u64,
+                exe_mtime: u64,
+                info: VanillaGameInfo,
+            }
+            if let Ok(cached) = serde_json::from_str::<CachedMeta>(&raw) {
+                if cached.exe_path == game_exe.to_string_lossy()
+                    && cached.exe_size == exe_size
+                    && cached.exe_mtime == exe_mtime
+                    && cached.info.cache_dir.join("main.lua").is_file()
+                    && cached.info.cache_dir.join(VANILLA_CACHE_DONE).is_file()
+                {
+                    return Ok(cached.info);
+                }
+            }
+        }
+
+        let exe_bytes = fs::read(game_exe)
+            .map_err(|e| format!("Failed to read {}: {e}", game_exe.display()))?;
+        let exe_sha256 = sha256_hex(&exe_bytes);
+        let hash8 = &exe_sha256[..8];
+
+        let steam_app_id = game_exe
+            .parent()
+            .and_then(|d| fs::read_to_string(d.join("steam_appid.txt")).ok())
+            .map(|s| s.trim().to_string());
+
+        let cache_dir = self.vanilla_cache_dir.join(format!("mnb-{hash8}"));
+        let main_lua_cached = cache_dir.join("main.lua");
+
+        // The marker is written last: a cache without it was cut short and is made again.
+        let done_marker = cache_dir.join(VANILLA_CACHE_DONE);
+        let mut lua_file_count = 0usize;
+        if !main_lua_cached.is_file() || !done_marker.is_file() {
+            fs::create_dir_all(&cache_dir)
+                .map_err(|e| format!("Failed to create vanilla cache dir: {e}"))?;
+
+            let file = fs::File::open(game_exe)
+                .map_err(|e| format!("Failed to open {}: {e}", game_exe.display()))?;
+            if let Ok(mut archive) = ZipArchive::new(file) {
+                for i in 0..archive.len() {
+                    let Ok(mut entry) = archive.by_index(i) else {
+                        continue;
+                    };
+                    if entry.is_dir() || !entry.name().ends_with(".lua") {
+                        continue;
+                    }
+                    let Some(rel) = entry.enclosed_name() else {
+                        continue;
+                    };
+                    let dest = cache_dir.join(rel);
+                    if let Some(p) = dest.parent() {
+                        let _ = fs::create_dir_all(p);
+                    }
+                    let mut buf = Vec::new();
+                    if entry.read_to_end(&mut buf).is_ok() && fs::write(&dest, &buf).is_ok() {
+                        lua_file_count += 1;
+                    }
+                }
+                if main_lua_cached.is_file() {
+                    let _ = fs::write(&done_marker, b"");
+                }
+            }
+        } else {
+            for entry in walkdir::WalkDir::new(&cache_dir)
+                .into_iter()
+                .filter_map(|e| e.ok())
+            {
+                if entry.path().is_file()
+                    && entry.path().extension().and_then(|x| x.to_str()) == Some("lua")
+                {
+                    lua_file_count += 1;
+                }
+            }
+        }
+
+        let game_version = fs::read_to_string(&main_lua_cached)
+            .ok()
+            .and_then(|s| extract_game_version_from_main_lua(&s))
+            .unwrap_or_else(|| "0.5.3b".to_string());
+
+        let info = VanillaGameInfo {
+            exe_path: game_exe.to_path_buf(),
+            exe_sha256,
+            game_version,
+            steam_app_id,
+            cache_dir,
+            lua_file_count,
+        };
+
+        let _ = fs::create_dir_all(&self.vanilla_cache_dir);
+        let _ = fs::write(
+            &meta_file,
+            serde_json::to_string(&serde_json::json!({
+                "exe_path": game_exe.to_string_lossy(),
+                "exe_size": exe_size,
+                "exe_mtime": exe_mtime,
+                "info": info
+            }))
+            .unwrap_or_default(),
+        );
+
+        Ok(info)
+    }
+
+    /// Loads all vanilla `.lua` files into a map (`relative_path -> content`) for fast in-memory simulation.
+    pub fn load_vanilla_lua_files(
+        &self,
+        game_exe: Option<&Path>,
+    ) -> Result<(String, HashMap<String, String>), String> {
+        if let Some(exe) = game_exe {
+            if exe.is_file() {
+                let info = self.ensure_vanilla_cache(exe)?;
+                let files = read_lua_tree(&info.cache_dir);
+                return Ok((info.game_version, files));
+            }
+        }
+
+        // Fallback to workspace `decompile/` directory if present
+        if let Ok(cwd) = std::env::current_dir() {
+            for candidate in [cwd.join("decompile"), cwd.parent().map(|p| p.join("decompile")).unwrap_or_default()] {
+                if candidate.join("main.lua").is_file() {
+                    let files = read_lua_tree(&candidate);
+                    let ver = files
+                        .get("main.lua")
+                        .and_then(|s| extract_game_version_from_main_lua(s))
+                        .unwrap_or_else(|| "0.5.3b".to_string());
+                    return Ok((ver, files));
+                }
+            }
+        }
+
+        Err("Could not locate vanilla game files (mnb.exe or decompile/)".to_string())
+    }
+}
+
+fn read_lua_tree(root: &Path) -> HashMap<String, String> {
+    let mut map = HashMap::new();
+    for entry in walkdir::WalkDir::new(root)
+        .into_iter()
+        .filter_map(|e| e.ok())
+    {
+        let p = entry.path();
+        if p.is_file() && p.extension().and_then(|x| x.to_str()) == Some("lua") {
+            let rel = p
+                .strip_prefix(root)
+                .unwrap_or(p)
+                .to_string_lossy()
+                .replace('\\', "/");
+            if let Ok(content) = fs::read_to_string(p) {
+                map.insert(rel, content);
+            }
+        }
+    }
+    map
+}
+
+pub fn extract_game_version_from_main_lua(main_lua: &str) -> Option<String> {
+    let re = regex_lite::Regex::new(r#"\bversion\s*=\s*"([0-9]+\.[0-9]+(?:\.[0-9]+)?[a-zA-Z]?)""#)
+        .ok()?;
+    re.captures(main_lua).map(|c| c[1].to_string())
+}
+
+/// Crash-resilient transaction journal (`state-journal.json`) for atomic profile & save swaps.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct StateJournal {
+    pub active_profile_id: Option<String>,
+    pub active_save_profile_id: Option<String>,
+    pub pending_transaction: Option<PendingTransaction>,
+    pub last_completed_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PendingTransaction {
+    pub id: String,
+    pub kind: String, // "profile_swap" | "save_swap" | "deploy" | "restore_clean" | "dll_repair"
+    pub started_at: String,
+    pub from_id: Option<String>,
+    pub to_id: String,
+    pub backup_path: Option<PathBuf>,
+}
+
+impl StateJournal {
+    pub fn load(path: &Path) -> Self {
+        fs::read_to_string(path)
+            .ok()
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_default()
+    }
+
+    pub fn save(&self, path: &Path) -> Result<(), String> {
+        let json = serde_json::to_string_pretty(self)
+            .map_err(|e| format!("Failed to serialize state-journal.json: {e}"))?;
+        fs::write(path, json).map_err(|e| format!("Failed to write {}: {e}", path.display()))
+    }
+
+    pub fn begin_transaction(
+        &mut self,
+        journal_path: &Path,
+        kind: &str,
+        from_id: Option<String>,
+        to_id: &str,
+        backup_path: Option<PathBuf>,
+    ) -> Result<(), String> {
+        let now = jiff::Zoned::now().to_string();
+        self.pending_transaction = Some(PendingTransaction {
+            id: format!("tx-{}-{}", kind, jiff::Timestamp::now().as_millisecond()),
+            kind: kind.to_string(),
+            started_at: now,
+            from_id,
+            to_id: to_id.to_string(),
+            backup_path,
+        });
+        self.save(journal_path)
+    }
+
+    /// Drops the pending transaction without applying it: the step failed and left the
+    /// previous state active.
+    pub fn abort_transaction(&mut self, journal_path: &Path) -> Result<(), String> {
+        self.pending_transaction = None;
+        self.save(journal_path)
+    }
+
+    pub fn commit_transaction(&mut self, journal_path: &Path) -> Result<(), String> {
+        if let Some(tx) = self.pending_transaction.take() {
+            if tx.kind == "profile_swap" {
+                self.active_profile_id = Some(tx.to_id);
+            } else if tx.kind == "save_swap" {
+                self.active_save_profile_id = Some(tx.to_id);
+            }
+        }
+        self.last_completed_at = Some(jiff::Zoned::now().to_string());
+        self.save(journal_path)
+    }
+}
+
+impl QuarterMasterPaths {
+    /// Detects whether `mnb.exe` has changed since the last known SHA-256 fingerprint (Section 16 & 17).
+    /// Returns `Some((previous_sha256, current_sha256))` if a game update occurred.
+    pub fn check_game_update_occurred(&self) -> Option<(String, String)> {
+        let mut settings = self.load_settings();
+        let exe = settings.game_exe_path.as_ref()?;
+        let info = self.ensure_vanilla_cache(exe).ok()?;
+        let current_sha = info.exe_sha256;
+
+        match settings.last_known_exe_sha256.clone() {
+            None => {
+                settings.last_known_exe_sha256 = Some(current_sha);
+                let _ = self.save_settings(&settings);
+                None
+            }
+            Some(prev_sha) if prev_sha != current_sha => Some((prev_sha, current_sha)),
+            _ => None,
+        }
+    }
+
+    /// Acknowledges a detected game update and updates `last_known_exe_sha256` after re-validating patches.
+    pub fn acknowledge_game_update(&self) -> Result<String, String> {
+        let mut settings = self.load_settings();
+        let exe = settings
+            .game_exe_path
+            .clone()
+            .ok_or_else(|| "Game executable path not configured".to_string())?;
+        let info = self.ensure_vanilla_cache(&exe)?;
+        settings.last_known_exe_sha256 = Some(info.exe_sha256.clone());
+        self.save_settings(&settings)?;
+        Ok(info.exe_sha256)
+    }
+
+    /// Decompiles and extracts all assets (Lua, sprites, sounds, fonts, shaders) from the game executable into the target directory.
+    pub fn extract_all_vanilla_assets(&self, game_exe: &Path, target_dir: &Path) -> Result<usize, String> {
+        let file = fs::File::open(game_exe)
+            .map_err(|e| format!("Failed to open {}: {e}", game_exe.display()))?;
+        let mut archive = ZipArchive::new(file)
+            .map_err(|e| format!("Failed to read zip archive from {}: {e}", game_exe.display()))?;
+        let _ = fs::create_dir_all(target_dir);
+
+        let mut count = 0usize;
+        for i in 0..archive.len() {
+            let Ok(mut entry) = archive.by_index(i) else { continue };
+            if entry.is_dir() { continue };
+            let Some(rel) = entry.enclosed_name() else { continue };
+            let dest = target_dir.join(rel);
+            if let Some(p) = dest.parent() {
+                let _ = fs::create_dir_all(p);
+            }
+            let mut buf = Vec::new();
+            if entry.read_to_end(&mut buf).is_ok() && fs::write(&dest, &buf).is_ok() {
+                count += 1;
+            }
+        }
+        Ok(count)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A settings file that cannot be read is kept beside the new one, not thrown away.
+    #[test]
+    fn unreadable_settings_are_kept_before_the_defaults_replace_them() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let paths = QuarterMasterPaths::resolve(Some(temp.path()));
+        paths.ensure_directories();
+        fs::write(&paths.settings_file, "{ \"active_profile_id\": \"mine\", ").unwrap();
+        let s = paths.load_settings();
+        assert_eq!(s.active_profile_id, default_profile_id());
+        let mut kept = paths.settings_file.as_os_str().to_os_string();
+        kept.push(".unreadable");
+        let kept = fs::read_to_string(std::path::PathBuf::from(kept)).unwrap();
+        assert!(kept.contains("mine"), "{kept}");
+        // The new file reads; nothing more is kept on the next load.
+        assert_eq!(paths.load_settings().active_profile_id, default_profile_id());
+    }
+
+    #[test]
+    #[ignore = "pre-existing failure: requires a Steam Mud and Blood install on the machine"]
+    fn test_steam_game_detection_prioritizes_real_steam_copy() {
+        let detected = detect_steam_game_installation();
+        println!("Detected Steam Game: {:?}", detected);
+        assert!(detected.is_some(), "Steam Mud and Blood installation should be detected on this machine");
+        if let Some(ref path) = detected {
+            assert!(path.is_file(), "Detected game exe must exist");
+            let path_str = path.to_string_lossy().to_lowercase();
+            assert!(
+                path_str.contains("mudandblood") || path_str.contains("mud and blood"),
+                "Path should be for Mud and Blood"
+            );
+            assert!(path_str.ends_with("mnb.exe"), "Path must end with mnb.exe");
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn read_registry_string_reads_values_unexpanded() {
+        let name = read_registry_string(
+            r"HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion",
+            "ProductName",
+        );
+        assert!(name.is_some_and(|n| n.starts_with("Windows")));
+        // A REG_EXPAND_SZ comes back as stored, like `reg query` prints it.
+        let pf = read_registry_string(
+            r"HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion",
+            "ProgramFilesPath",
+        );
+        assert_eq!(pf.as_deref(), Some("%ProgramFiles%"));
+        assert_eq!(read_registry_string(r"HKCU\Software\QmNoSuchKey", "SteamPath"), None);
+        assert_eq!(read_registry_string(r"HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion", "QmNoSuchValue"), None);
+        assert_eq!(read_registry_string(r"HKCR\.txt", ""), None);
+    }
+
+    #[test]
+    fn test_detect_game_installation_resolves_valid_exe() {
+        let detected = detect_game_installation();
+        if let Some(ref path) = detected {
+            assert!(path.is_file());
+            assert!(path.to_string_lossy().ends_with("mnb.exe"));
+        }
+    }
+
+    #[test]
+    fn test_auto_detect_all_paths_returns_consistent_structure() {
+        let temp = tempfile::tempdir().unwrap();
+        let paths = QuarterMasterPaths::resolve(Some(temp.path()));
+        let detected = paths.auto_detect_all_paths();
+        assert_eq!(detected.library_dir_path, paths.library_dir);
+    }
+}

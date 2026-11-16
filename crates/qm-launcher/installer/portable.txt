@@ -1,0 +1,4 @@
+QuarterMaster keeps its data (mods, profiles, save slots, backups and settings) in the
+qm-data folder beside this file.
+
+Delete this file to keep the data in %APPDATA%\QuarterMaster instead.

@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Modding wiki
+    url: https://gamiseus.github.io/wiki/
+    about: How to make a mod, and how the launcher treats mods.
+  - name: Mod list
+    url: https://gamiseus.github.io/mods/
+    about: Each mod's page links to its author's repository, where problems with that mod belong.

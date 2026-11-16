@@ -1,7 +1,34 @@
 [workspace]
 resolver = "2"
 members = [
+    "crates/qm-schema",
     "crates/qm-core",
+    "crates/qm-manager",
+    "crates/qm-service",
+    "crates/qm-launcher",
+    "crates/qm-cli",
+    "crates/qm-app",
     "crates/qm-win",
-    "crates/minimal-minhook-reference"
+    "crates/minimal-minhook-reference",
+    "tools/qm-site-builder"
 ]
+
+[workspace.dependencies]
+specta = { version = "=2.0.0-rc.22", features = ["derive", "serde_json"] }
+jiff = { version = "0.2.35", default-features = false, features = ["std", "tz-system", "tzdb-bundle-platform"] }
+zip = { version = "6.0.0" }
+
+[profile.release]
+opt-level = "s"
+lto = true
+strip = true
+codegen-units = 1
+
+# Third-party dependencies (including those of the injected DLL) are optimized for size;
+# workspace crates keep the profile default above.
+[profile.release.package."*"]
+opt-level = "z"
+
+# The injected DLL crate itself runs in the game process; optimize it for speed.
+[profile.release.package.qm-win]
+opt-level = 3

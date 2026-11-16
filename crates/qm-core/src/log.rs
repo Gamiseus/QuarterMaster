@@ -1,3 +1,13 @@
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::panic,
+        clippy::indexing_slicing
+    )
+)]
+
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -12,8 +22,9 @@ static LOGGER: OnceLock<QMLogger> = OnceLock::new();
 
 struct QMLogger {
     use_console: bool,
-    latest_file: RwLock<File>,
-    err_file: RwLock<File>,
+    // None when the file could not be opened: the logger then writes to the console only.
+    latest_file: Option<RwLock<File>>,
+    err_file: Option<RwLock<File>>,
     log_dir: PathBuf,
     latest_path: String,
 }
@@ -38,14 +49,14 @@ impl Log for QMLogger {
         }
 
         // 1. Write to latest.log
-        if let Ok(mut file) = self.latest_file.write() {
+        if let Some(Ok(mut file)) = self.latest_file.as_ref().map(RwLock::write) {
             let _ = file.write_all(line.as_bytes());
             let _ = file.flush();
         }
 
         // 2. If Error level, also write to err.log
         if record.level() == Level::Error {
-            if let Ok(mut err_file) = self.err_file.write() {
+            if let Some(Ok(mut err_file)) = self.err_file.as_ref().map(RwLock::write) {
                 let _ = err_file.write_all(line.as_bytes());
                 let _ = err_file.flush();
             }
@@ -53,15 +64,17 @@ impl Log for QMLogger {
     }
 
     fn flush(&self) {
-        if let Ok(mut file) = self.latest_file.write() {
+        if let Some(Ok(mut file)) = self.latest_file.as_ref().map(RwLock::write) {
             let _ = file.flush();
         }
-        if let Ok(mut err_file) = self.err_file.write() {
+        if let Some(Ok(mut err_file)) = self.err_file.as_ref().map(RwLock::write) {
             let _ = err_file.flush();
         }
     }
 }
 
+/// Starts the logger. A log file that cannot be opened is reported through the console and
+/// skipped; this never panics (it runs in DllMain).
 pub fn init(log_dir: &Path) -> Result<(), SetLoggerError> {
     if !log_dir.is_dir() {
         let _ = fs::create_dir_all(log_dir);
@@ -84,29 +97,40 @@ pub fn init(log_dir: &Path) -> Result<(), SetLoggerError> {
         let _ = fs::rename(&err_path, &prev_err_path);
     }
 
-    let latest_file = OpenOptions::new()
-        .create(true)
-        .write(true)
-        .truncate(true)
-        .open(&latest_path)
-        .unwrap_or_else(|e| panic!("Failed to create latest.log at {latest_path:?}: {e}"));
-
-    let err_file = OpenOptions::new()
-        .create(true)
-        .write(true)
-        .truncate(true)
-        .open(&err_path)
-        .unwrap_or_else(|e| panic!("Failed to create err.log at {err_path:?}: {e}"));
+    let mut open_errors = Vec::new();
+    let mut open = |path: &Path, label: &str| {
+        let opened = OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(true)
+            .open(path);
+        match opened {
+            Ok(file) => Some(file),
+            Err(e) => {
+                open_errors.push(format!("Failed to create {label} at {path:?}: {e}"));
+                None
+            }
+        }
+    };
+    let latest_file = open(&latest_path, "latest.log");
+    let err_file = open(&err_path, "err.log");
 
     let logger = QMLogger {
         use_console: true,
-        latest_file: RwLock::new(latest_file),
-        err_file: RwLock::new(err_file),
+        latest_file: latest_file.map(RwLock::new),
+        err_file: err_file.map(RwLock::new),
         log_dir: log_dir.to_path_buf(),
-        latest_path: String::from(dunce::canonicalize(&latest_path).unwrap_or(latest_path).to_str().unwrap()),
+        latest_path: dunce::canonicalize(&latest_path)
+            .unwrap_or(latest_path)
+            .to_string_lossy()
+            .into_owned(),
     };
 
-    log::set_logger(LOGGER.get_or_init(|| logger)).map(|_| log::set_max_level(LevelFilter::Info))
+    log::set_logger(LOGGER.get_or_init(|| logger)).map(|_| log::set_max_level(LevelFilter::Info))?;
+    for e in open_errors {
+        error!("{e}");
+    }
+    Ok(())
 }
 
 pub fn get_log_path() -> Option<String> {
@@ -157,7 +181,7 @@ fn prune_crashes(crashes_dir: &Path, max_count: usize) {
     let mut crash_files: Vec<(PathBuf, std::time::SystemTime)> = Vec::new();
     for entry in entries.flatten() {
         let path = entry.path();
-        if path.is_file() && path.extension().map_or(false, |ext| ext == "log" || ext == "txt") {
+        if path.is_file() && path.extension().is_some_and(|ext| ext == "log" || ext == "txt") {
             let mtime = entry.metadata().and_then(|m| m.modified()).unwrap_or(std::time::SystemTime::UNIX_EPOCH);
             crash_files.push((path, mtime));
         }
@@ -185,6 +209,18 @@ pub fn record_clean_shutdown() {
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    #[test]
+    fn init_without_log_files_falls_back_to_the_console() {
+        // The log dir sits under a regular file, so neither log file can be created.
+        let dir = tempdir().unwrap();
+        let blocker = dir.path().join("not_a_dir");
+        fs::write(&blocker, "").unwrap();
+        assert!(init(&blocker.join("log")).is_ok());
+        assert!(get_log_path().is_some_and(|p| p.ends_with("latest.log")));
+        error!("logged with no log files");
+        record_crash("no crash file either");
+    }
 
     #[test]
     fn test_prune_crashes_caps_at_ten() {

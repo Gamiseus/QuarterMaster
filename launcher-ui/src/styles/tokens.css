@@ -1,0 +1,124 @@
+/* QuarterMaster design tokens. Colors: Field Command palette (ui/styles.css), tuned for WCAG contrast
+   (tests/unit/tokens.test.ts checks every text and boundary pair in both themes). */
+:root {
+  color-scheme: light dark;
+
+  /* Surfaces (new names); the old --qm-bg/-surface/-surface-raised remain as aliases. */
+  --qm-canvas: light-dark(#e9ece6, #111612);
+  --qm-panel: light-dark(#f4f6f2, #181f19);
+  --qm-raised: light-dark(#e2e6de, #212a22);
+  --qm-popover: light-dark(#ffffff, #263027);
+  --qm-bg: var(--qm-canvas);
+  --qm-surface: var(--qm-panel);
+  --qm-surface-raised: var(--qm-raised);
+  --qm-border: light-dark(#c5cdc0, #2d3a2f);
+  /* Control boundaries (checkbox box, text field, select trigger, switch track): >= 3:1 on every surface. */
+  --qm-border-strong: light-dark(#74856a, #637f67);
+  --qm-text: light-dark(#171d17, #e7ece6);
+  --qm-text-muted: light-dark(#4f5c50, #a2afa3);
+  --qm-accent: light-dark(#9a6f0b, #d4a742);
+  --qm-accent-contrast: light-dark(#ffffff, #111612);
+  /* Accent used as text (links, selected items, active nav, accent badges). */
+  --qm-accent-text: light-dark(#725208, #d4a742);
+  /* Status tones; they stay at least 20 apart (CIEDE2000) so no two read alike. */
+  --qm-ok: light-dark(#06652d, #0bc35b);
+  --qm-warn: light-dark(#814706, #f5a106);
+  --qm-danger: light-dark(#a50b22, #fb8c8f);
+  --qm-info: light-dark(#1258a1, #80b3fd);
+  --qm-enabled: light-dark(#2e5c38, #438650);
+  --qm-focus-ring: 0 0 0 2px var(--qm-accent);
+
+  /* Mod colours in the patch views (Okabe-Ito based): at least 3:1 on every surface and apart in
+     every colour vision mode (tests/unit/tokens.test.ts). Mod names always go with them. */
+  --qm-attr-1: light-dark(#9a6100, #e69f00);
+  --qm-attr-2: light-dark(#1f6fa3, #56b4e9);
+  --qm-attr-3: light-dark(#007a59, #009e73);
+  --qm-attr-4: light-dark(#8a8000, #f0e442);
+  --qm-attr-5: light-dark(#1d4f9a, #3d8fd6);
+  --qm-attr-6: light-dark(#7a2806, #e8743b);
+  --qm-attr-7: light-dark(#a3467b, #cc79a7);
+  --qm-attr-8: light-dark(#454a45, #b9bfb9);
+  /* One diff line; scales with the text size. */
+  --qm-diff-row-h: calc(var(--qm-text-12) * 1.75);
+
+  /* Separator row colors (same in both themes). */
+  --qm-sep-1: #d4a742;
+  --qm-sep-2: #6b7a45;
+  --qm-sep-3: #b5562e;
+  --qm-sep-4: #5b7a8c;
+  --qm-sep-5: #c9b98f;
+  --qm-sep-6: #6e8070;
+
+  --qm-space-1: 4px;
+  --qm-space-2: 8px;
+  --qm-space-3: 12px;
+  --qm-space-4: 16px;
+  --qm-space-5: 24px;
+  --qm-space-6: 32px;
+
+  --qm-radius-sm: 4px;
+  --qm-radius-md: 8px;
+  --qm-radius-lg: 12px;
+
+  --qm-row-h: 34px;
+  --qm-icon-size: 16px;
+  --qm-titlebar-h: 44px;
+  --qm-sidebar-w: 52px;
+  --qm-sidebar-w-open: 184px;
+  --qm-detail-w: 360px;
+  --qm-dialog-lg: 760px;
+  --qm-log-h: 320px;
+  /* Readable line length for text-heavy content (about 75 characters at 14 px). */
+  --qm-measure: 680px;
+  /* Lists stop growing here; extra window width goes to the content beside them. */
+  --qm-list-max: 760px;
+  --qm-detail-min: 420px;
+  /* KeyValueList label column. */
+  --qm-kv-key-w: 160px;
+
+  /* Spacing roles: related items, groups of items, sections (sections also get a divider). */
+  --qm-gap-item: var(--qm-space-2);
+  --qm-gap-group: var(--qm-space-4);
+  --qm-gap-section: var(--qm-space-5);
+
+  /* Scrollbars. */
+  --qm-scrollbar-thumb: var(--qm-border-strong);
+
+  /* Control sizes. */
+  --qm-control-box: 18px;
+  --qm-switch-w: 36px;
+  --qm-switch-h: 20px;
+  --qm-switch-thumb: 14px;
+  --qm-kbd-min: 20px;
+
+  --qm-font-sans: "Segoe UI Variable", "Segoe UI", sans-serif;
+  --qm-font-stencil: "Stardos Stencil", var(--qm-font-sans);
+  --qm-font-mono: "Cascadia Code", Consolas, monospace;
+
+  --qm-text-11: 11px;
+  --qm-text-12: 12px;
+  --qm-text-13: 13px;
+  --qm-text-14: 14px;
+  --qm-text-16: 16px;
+  --qm-text-20: 20px;
+  --qm-text-28: 28px;
+
+  /* Stacking order: dialog < popover (menus, selects) < toast < tooltip. */
+  --qm-z-panel: 20;
+  --qm-z-overlay: 40;
+  --qm-z-dialog: 41;
+  --qm-z-popover: 50;
+  --qm-z-toast: 70;
+  --qm-z-tooltip: 80;
+
+  --qm-dur-fast: 120ms;
+  --qm-ease: cubic-bezier(.2,0,0,1);
+}
+
+html[data-theme="light"] {
+  color-scheme: light;
+}
+
+html[data-theme="dark"] {
+  color-scheme: dark;
+}
