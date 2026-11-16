@@ -105,9 +105,9 @@ pub fn set_machine_path(dir: &std::path::Path, add: bool) -> Result<bool, String
         if kind != REG_SZ && kind != REG_EXPAND_SZ {
             return Err("The machine PATH is not text.".to_string());
         }
-        let units: Vec<u16> = buf[..len.min(buf.len())]
-            .chunks_exact(2)
-            .map(|c| u16::from_le_bytes([c[0], c[1]]))
+        let data = &buf[..len.min(buf.len())];
+        let units: Vec<u16> = (0..data.len() / 2)
+            .map(|i| u16::from_le_bytes([data[2 * i], data[2 * i + 1]]))
             .collect();
         let end = units.iter().position(|c| *c == 0).unwrap_or(units.len());
         let current = String::from_utf16(&units[..end])

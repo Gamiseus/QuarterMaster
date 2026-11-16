@@ -69,6 +69,8 @@
           <span class="name">{r.patch_name || r.patch_id}</span>
           <span class="sub">
             <span class="mod qm-muted">{modNames[r.mod_id] ?? r.mod_id}</span>
+            <!-- The group its author filed it under, when it has one. -->
+            {#if r.group}<span class="group qm-muted" data-testid="chip-group">{r.group}</span>{/if}
             <Badge tone={badgeOf(r).tone}>{badgeOf(r).label}</Badge>
           </span>
         </span>
@@ -119,6 +121,11 @@
     align-items: center;
     gap: var(--qm-space-2);
     font-size: var(--qm-text-12);
+  }
+
+  .group::before {
+    margin-right: var(--qm-space-2);
+    content: "/";
   }
 
   .chip.selected {

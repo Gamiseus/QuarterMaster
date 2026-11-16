@@ -10,3 +10,4 @@ pub mod commands;
 pub mod logging;
 pub mod navigation;
 pub mod sink;
+pub mod window_state;

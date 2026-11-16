@@ -249,6 +249,8 @@ pub struct AttributedCodeLine {
 }
 
 #[cfg_attr(feature = "specta", derive(specta::Type))]
+// One variant carries a whole patch; suggestions are few and short-lived, so boxing it buys nothing.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "tier", rename_all = "snake_case")]
 pub enum ConflictResolutionSuggestion {
@@ -531,8 +533,8 @@ pub fn simulate_and_analyze_patches_with(
                 if trace.lines.get(idx).is_some_and(|o| o.edit().is_some()) {
                     let start = idx.saturating_sub(4);
                     let end = (idx + 4).min(lines.len().saturating_sub(1));
-                    for k in start..=end {
-                        include_line[k] = true;
+                    for shown in include_line.iter_mut().take(end + 1).skip(start) {
+                        *shown = true;
                     }
                 }
             }

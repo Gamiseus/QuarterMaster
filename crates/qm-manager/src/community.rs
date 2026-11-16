@@ -815,7 +815,8 @@ fn audit_remote_archive_safety(zip_path: &Path) -> Result<Value, String> {
         let normalized = name.replace('\\', "/");
 
         // 1. Zip-slip & reserved names check
-        if normalized.contains("..") || normalized.starts_with('/') || normalized.contains(':') {
+        // A `..` folder climbs out of the mod; two dots inside a name (`a..b.txt`) do not.
+        if normalized.split('/').any(|seg| seg == "..") || normalized.starts_with('/') || normalized.contains(':') {
             return Err(format!("Rejected archive containing malicious path traversal: '{name}'"));
         }
         for segment in normalized.split('/') {
@@ -825,10 +826,11 @@ fn audit_remote_archive_safety(zip_path: &Path) -> Result<Value, String> {
             }
         }
 
-        if normalized.ends_with("qm.toml") {
+        let base = normalized.rsplit('/').next().unwrap_or_default();
+        if base == "qm.toml" {
             has_qm_toml = true;
         }
-        if normalized.ends_with("mod.json") {
+        if base == "mod.json" {
             has_mod_json = true;
         }
 
@@ -1090,6 +1092,24 @@ mod tests {
         let res = audit_remote_archive_safety(&zip_path);
         assert!(res.is_err());
         assert!(res.unwrap_err().contains("path traversal"));
+    }
+
+    #[test]
+    fn audit_accepts_two_dots_inside_a_file_name() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let zip_path = temp_dir.path().join("fine.zip");
+        {
+            let file = fs::File::create(&zip_path).unwrap();
+            let mut zip = zip::ZipWriter::new(file);
+            let options: zip::write::FileOptions<()> = zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Stored);
+            use std::io::Write;
+            zip.start_file("Mod/qm.toml", options).unwrap();
+            zip.write_all(b"[manifest]\nversion = \"1.0.0\"\n").unwrap();
+            zip.start_file("Mod/notes/v1..v2.txt", options).unwrap();
+            zip.write_all(b"notes").unwrap();
+            zip.finish().unwrap();
+        }
+        assert!(audit_remote_archive_safety(&zip_path).is_ok());
     }
 
     #[test]

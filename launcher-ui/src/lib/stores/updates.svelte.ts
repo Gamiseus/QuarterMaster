@@ -127,7 +127,9 @@ class UpdatesStore {
     const fresh = this.eligible.filter((u) => !this.#announced.has(key(u)));
     if (fresh.length === 0) return;
     for (const u of fresh) this.#announced.add(key(u));
-    const auto = fresh.filter((u) => s.auto_update_mods[u.mod_id] ?? s.auto_install_updates);
+    // A mod that names no update source is matched to the mod list by its id alone: such an update
+    // is offered, and installed without asking only when the user chose that for this mod.
+    const auto = fresh.filter((u) => s.auto_update_mods[u.mod_id] ?? (s.auto_install_updates && u.update_key.trim() !== ""));
     const idle = !game.isBusy && !this.installing && !jobs.list.some((j) => LIBRARY_JOBS.has(j.kind));
     const now = idle ? auto : [];
     const ask = fresh.filter((u) => !now.includes(u));

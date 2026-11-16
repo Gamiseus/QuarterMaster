@@ -11,7 +11,7 @@
 compile_error!("Build release with `cargo tauri build` (custom-protocol), not plain cargo build.");
 
 use qm_launcher_lib::commands::{run_startup, Startup};
-use qm_launcher_lib::{bindings, logging, navigation, sink::TauriSink};
+use qm_launcher_lib::{bindings, logging, navigation, sink::TauriSink, window_state};
 use qm_manager::QuarterMasterPaths;
 use qm_service::{EventSink, ProcessProbe, QmEvent, Service, Win32Probe};
 use std::sync::Arc;
@@ -102,10 +102,33 @@ fn main() {
                 .build(),
         )
         .plugin(navigation::plugin())
-        .plugin(tauri_plugin_window_state::Builder::default().build())
         .invoke_handler(builder.invoke_handler())
         .setup(move |app| {
             builder.mount_events(app);
+            // The window is made here, not from the config, so its browser data and its place
+            // on screen can live in QuarterMaster's own data folder.
+            let data_root = paths.root_dir.clone();
+            let config = app
+                .config()
+                .app
+                .windows
+                .first()
+                .cloned()
+                .ok_or("tauri.conf.json has no window")?;
+            let mut window =
+                tauri::WebviewWindowBuilder::from_config(app.handle(), &config)?.visible(false);
+            if paths.is_portable {
+                window = window.data_directory(data_root.join("webview"));
+            }
+            let window = window.build()?;
+            window_state::restore(&window, &data_root);
+            window.show()?;
+            let closing = window.clone();
+            window.on_window_event(move |event| {
+                if let tauri::WindowEvent::CloseRequested { .. } = event {
+                    window_state::capture(&closing, &data_root);
+                }
+            });
             let sink = Arc::new(TauriSink(app.handle().clone()));
             let svc = Service::new(paths, sink, Arc::new(Win32Probe));
             app.manage(svc.clone());

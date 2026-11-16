@@ -556,6 +556,7 @@ impl QuarterMasterPaths {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn import_extracted_root(
         &self,
         root: &Path,

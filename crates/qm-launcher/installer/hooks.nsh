@@ -43,6 +43,7 @@
   ${If} $UpdateMode <> 1
     Delete "$INSTDIR\qm-launcher.old.exe"
     Delete "$INSTDIR\qm_winmm.old.dll"
+    Delete "$INSTDIR\qm.old.exe"
     RMDir "$INSTDIR"
   ${EndIf}
 !macroend

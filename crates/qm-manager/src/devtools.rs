@@ -1736,6 +1736,10 @@ const STAGED_EXE: &str = "qm-launcher-new.exe";
 const STAGED_DLL: &str = "qm_winmm-new.dll";
 const LOADER_DLL: &str = "qm_winmm.dll";
 const OLD_LOADER_DLL: &str = "qm_winmm.old.dll";
+/// The command-line tool: replaced with the launcher when a release has one and one is installed.
+const CLI_EXE: &str = "qm.exe";
+const STAGED_CLI: &str = "qm-new.exe";
+const OLD_CLI: &str = "qm.old.exe";
 
 impl QuarterMasterPaths {
     /// Discovers built-in and installed mod templates (e.g., `GCore/templates/`, `GMenu/templates/`).
@@ -1984,6 +1988,7 @@ impl QuarterMasterPaths {
     /// Stages a QuarterMaster release for the next swap: `qm-launcher.exe` and the loader
     /// `qm_winmm.dll` are taken out of `zip` (at its top level or inside one folder) into
     /// `cache/updates/`. Both must be there and be Windows programs, or nothing is staged.
+    /// `qm.exe`, the command-line tool, is staged as well when the zip has it.
     pub fn stage_launcher_update_from_zip(&self, zip: &Path) -> Result<(), String> {
         const MAX_PART_BYTES: u64 = 256 * 1024 * 1024;
         let staging_dir = self.cache_dir.join("updates");
@@ -1991,14 +1996,17 @@ impl QuarterMasterPaths {
         let staged_exe = staging_dir.join(STAGED_EXE);
         let staged_dll = staging_dir.join(STAGED_DLL);
         // An earlier download must never be swapped in with half of this one.
+        let staged_cli = staging_dir.join(STAGED_CLI);
         let _ = fs::remove_file(&staged_exe);
         let _ = fs::remove_file(&staged_dll);
+        let _ = fs::remove_file(&staged_cli);
 
         let file = fs::File::open(zip).map_err(|e| format!("Failed to open the download: {e}"))?;
         let mut archive = zip::ZipArchive::new(file)
             .map_err(|e| format!("The download is not a zip archive: {e}"))?;
         let mut exe: Option<Vec<u8>> = None;
         let mut dll: Option<Vec<u8>> = None;
+        let mut cli: Option<Vec<u8>> = None;
         for i in 0..archive.len() {
             let mut entry = archive
                 .by_index(i)
@@ -2016,6 +2024,7 @@ impl QuarterMasterPaths {
             let slot = match base.as_str() {
                 "qm-launcher.exe" => &mut exe,
                 "qm_winmm.dll" => &mut dll,
+                "qm.exe" => &mut cli,
                 _ => continue,
             };
             if slot.is_some() {
@@ -2037,10 +2046,14 @@ impl QuarterMasterPaths {
                 "The download does not contain qm-launcher.exe and qm_winmm.dll.".to_string(),
             );
         };
-        // The loader first: the swap only runs when the launcher file is there.
+        // The launcher last: the swap only runs when the launcher file is there.
+        if let Some(cli) = cli {
+            fs::write(&staged_cli, cli).map_err(|e| format!("Failed to write staged update: {e}"))?;
+        }
         fs::write(&staged_dll, dll).map_err(|e| format!("Failed to write staged update: {e}"))?;
         fs::write(&staged_exe, exe).map_err(|e| {
             let _ = fs::remove_file(&staged_dll);
+            let _ = fs::remove_file(&staged_cli);
             format!("Failed to write staged update: {e}")
         })?;
         Ok(())
@@ -2071,7 +2084,12 @@ impl QuarterMasterPaths {
         #[cfg(windows)]
         {
             let script_path = self.cache_dir.join("swap-launcher.bat");
-            let bat_content = swap_script(&current_exe, &staged_file, &old_exe, &loader_dll, &staged_dll, &old_dll, true);
+            let cli = CliSwap {
+                exe: exe_dir.join(CLI_EXE),
+                staged: self.cache_dir.join("updates").join(STAGED_CLI),
+                old: exe_dir.join(OLD_CLI),
+            };
+            let bat_content = swap_script(&current_exe, &staged_file, &old_exe, &loader_dll, &staged_dll, &old_dll, &cli, true);
             fs::write(&script_path, bat_content)
                 .map_err(|e| format!("Failed to write swap script: {e}"))?;
 
@@ -2113,7 +2131,12 @@ impl QuarterMasterPaths {
         #[cfg(windows)]
         {
             let script_path = self.cache_dir.join("rollback-launcher.bat");
-            let bat_content = rollback_script(&current_exe, &old_exe, &loader_dll, &old_dll, true);
+            let cli = CliSwap {
+                exe: exe_dir.join(CLI_EXE),
+                staged: self.cache_dir.join("updates").join(STAGED_CLI),
+                old: exe_dir.join(OLD_CLI),
+            };
+            let bat_content = rollback_script(&current_exe, &old_exe, &loader_dll, &old_dll, &cli, true);
             fs::write(&script_path, bat_content)
                 .map_err(|e| format!("Failed to write rollback script: {e}"))?;
 
@@ -2258,9 +2281,19 @@ impl QuarterMasterPaths {
 /// What starts the launcher again at the end of a swap script (left out by tests).
 const RELAUNCH_LINE: &str = r#"if exist %LAUNCHER_EXE% start "" %LAUNCHER_EXE%"#;
 
+/// Where the command-line tool is, where its staged replacement waits and where the one it
+/// replaces is kept.
+#[cfg(windows)]
+struct CliSwap {
+    exe: PathBuf,
+    staged: PathBuf,
+    old: PathBuf,
+}
+
 /// The script that swaps a staged launcher (and its loader, when one is staged) into place
 /// once the running launcher has exited.
 #[cfg(windows)]
+#[allow(clippy::too_many_arguments)]
 fn swap_script(
     launcher: &Path,
     staged: &Path,
@@ -2268,6 +2301,7 @@ fn swap_script(
     loader: &Path,
     staged_loader: &Path,
     old_loader: &Path,
+    cli: &CliSwap,
     relaunch: bool,
 ) -> String {
     format!(
@@ -2278,6 +2312,9 @@ set OLD_EXE="{old_exe}"
 set LOADER_DLL="{loader_dll}"
 set STAGED_DLL="{staged_dll}"
 set OLD_DLL="{old_dll}"
+set CLI_EXE="{cli_exe}"
+set STAGED_CLI="{staged_cli}"
+set OLD_CLI="{old_cli}"
 set TRIES=0
 
 rem Wait (at most {max_tries} s) until the launcher exe is no longer locked by the exiting process.
@@ -2298,6 +2335,17 @@ rem The new file did not arrive: the old launcher goes back, so one is always th
 if not exist %LAUNCHER_EXE% if exist %OLD_EXE% move /Y %OLD_EXE% %LAUNCHER_EXE%
 rem The loader goes with the launcher it was built with, and only when that one arrived.
 if exist %STAGED_EXE% goto give_up
+rem The command-line tool too, when the release has one and one is installed here.
+if not exist %STAGED_CLI% goto loader
+if not exist %CLI_EXE% goto drop_cli
+if exist %OLD_CLI% del /F /Q %OLD_CLI%
+move /Y %CLI_EXE% %OLD_CLI%
+move /Y %STAGED_CLI% %CLI_EXE%
+if not exist %CLI_EXE% if exist %OLD_CLI% move /Y %OLD_CLI% %CLI_EXE%
+goto loader
+:drop_cli
+del /F /Q %STAGED_CLI%
+:loader
 if not exist %STAGED_DLL% goto give_up
 if exist %OLD_DLL% del /F /Q %OLD_DLL%
 if exist %LOADER_DLL% move /Y %LOADER_DLL% %OLD_DLL%
@@ -2316,19 +2364,24 @@ rem On timeout the update is skipped and the current launcher is started again.
         loader_dll = bat_path(loader),
         staged_dll = bat_path(staged_loader),
         old_dll = bat_path(old_loader),
+        cli_exe = bat_path(&cli.exe),
+        staged_cli = bat_path(&cli.staged),
+        old_cli = bat_path(&cli.old),
         relaunch = if relaunch { RELAUNCH_LINE } else { "" },
     )
 }
 
 /// The script that puts the previous launcher and loader back.
 #[cfg(windows)]
-fn rollback_script(launcher: &Path, old: &Path, loader: &Path, old_loader: &Path, relaunch: bool) -> String {
+fn rollback_script(launcher: &Path, old: &Path, loader: &Path, old_loader: &Path, cli: &CliSwap, relaunch: bool) -> String {
     format!(
         r#"@echo off
 set LAUNCHER_EXE="{launcher_exe}"
 set OLD_EXE="{old_exe}"
 set LOADER_DLL="{loader_dll}"
 set OLD_DLL="{old_dll}"
+set CLI_EXE="{cli_exe}"
+set OLD_CLI="{old_cli}"
 set TRIES=0
 
 rem Wait (at most {max_tries} s) until the launcher exe is no longer locked by the exiting process.
@@ -2345,6 +2398,7 @@ if not exist %OLD_EXE% goto give_up
 move /Y %OLD_EXE% %LAUNCHER_EXE%
 rem The loader that came with that launcher goes back with it.
 if not exist %OLD_EXE% if exist %OLD_DLL% move /Y %OLD_DLL% %LOADER_DLL%
+if not exist %OLD_EXE% if exist %OLD_CLI% move /Y %OLD_CLI% %CLI_EXE%
 
 :give_up
 rem On timeout the rollback is skipped and the current launcher is started again.
@@ -2356,6 +2410,8 @@ rem On timeout the rollback is skipped and the current launcher is started again
         old_exe = bat_path(old),
         loader_dll = bat_path(loader),
         old_dll = bat_path(old_loader),
+        cli_exe = bat_path(&cli.exe),
+        old_cli = bat_path(&cli.old),
         relaunch = if relaunch { RELAUNCH_LINE } else { "" },
     )
 }
@@ -2446,6 +2502,29 @@ pub struct ModLintReport {
 }
 
 /// Comprehensive Mod Linter (`qm lint`):
+/// A warning when `qm.toml` writes patches in the short form (`[[pattern]]`, `[[regex]]`,
+/// `[[copy]]`, `[[module]]`) and `mod.json` does not list `short_patches`: a QuarterMaster from
+/// before the short form would load the mod with those patches left out.
+pub fn short_form_diagnostic(mod_dir: &Path, qm_features: &[String]) -> Option<ManifestDiagnostic> {
+    if qm_features.iter().any(|f| f == "short_patches") {
+        return None;
+    }
+    let text = fs::read_to_string(mod_dir.join("qm.toml")).ok()?;
+    let doc = text.parse::<toml::Value>().ok()?;
+    let used: Vec<String> = ["pattern", "regex", "copy", "module"]
+        .iter()
+        .filter(|key| doc.get(**key).is_some_and(|v| v.is_array()))
+        .map(|key| format!("[[{key}]]"))
+        .collect();
+    if used.is_empty() {
+        return None;
+    }
+    Some(ManifestDiagnostic::warning(format!(
+        "qm.toml writes patches in the short form ({}). Add \"short_patches\" to \"qm_features\" in mod.json: without it, a QuarterMaster older than 1.9.1 loads the mod with those patches left out.",
+        used.join(", ")
+    )))
+}
+
 /// 1. Validates `mod.json` schema & version ranges
 /// 2. Parses `qm.toml` and verifies all `[[patches.module]]` / `[[patches.copy]]` source files exist
 /// 3. Dry-runs every patch against `vanilla_files` to verify 0 broken anchors
@@ -2456,6 +2535,7 @@ pub fn lint_mod_directory(
 ) -> Result<ModLintReport, String> {
     let installed = inspect_mod_directory(mod_dir, false)?;
     let mut diagnostics = installed.manifest.validate();
+    diagnostics.extend(short_form_diagnostic(mod_dir, &installed.manifest.qm_features));
 
     // Load patches via a temporary parent structure or directly parse `qm.toml`
     let temp = tempfile::Builder::new()
@@ -3474,6 +3554,22 @@ pub fn save_mod_file(mod_dir: &Path, file_path: &str, content: &str) -> Result<P
 mod tests {
     use super::*;
 
+    #[test]
+    fn lint_warns_when_the_short_form_is_used_without_its_feature_name() {
+        let tmp = tempfile::tempdir().unwrap();
+        let short = "[manifest]\nversion = \"1.0.0\"\n\n[[pattern]]\ntarget = \"main.lua\"\npattern = \"x\"\nposition = \"after\"\npayload = \"y\"\n\n[[copy]]\ntarget = \"main.lua\"\nposition = \"append\"\npayload = \"z\"\n";
+        fs::write(tmp.path().join("qm.toml"), short).unwrap();
+        let d = short_form_diagnostic(tmp.path(), &[]).unwrap();
+        assert!(d.message.contains("[[pattern]], [[copy]]"), "{}", d.message);
+        assert!(d.message.contains("short_patches"));
+        // Listed: nothing to say.
+        assert!(short_form_diagnostic(tmp.path(), &["short_patches".to_string()]).is_none());
+        // The long form needs no feature.
+        let long = "[manifest]\nversion = \"1.0.0\"\n\n[[patches]]\n[patches.pattern]\ntarget = \"main.lua\"\npattern = \"x\"\nposition = \"after\"\npayload = \"y\"\n";
+        fs::write(tmp.path().join("qm.toml"), long).unwrap();
+        assert!(short_form_diagnostic(tmp.path(), &[]).is_none());
+    }
+
     /// A folder with a launcher, its loader and (when given) a staged pair, as an update finds it.
     #[cfg(windows)]
     struct SwapDir {
@@ -3484,6 +3580,7 @@ mod tests {
         loader: PathBuf,
         staged_loader: PathBuf,
         old_loader: PathBuf,
+        cli: CliSwap,
         script: PathBuf,
     }
 
@@ -3501,6 +3598,11 @@ mod tests {
                 loader: dir.join(LOADER_DLL),
                 staged_loader: dir.join("cache").join(STAGED_DLL),
                 old_loader: dir.join(OLD_LOADER_DLL),
+                cli: CliSwap {
+                    exe: dir.join(CLI_EXE),
+                    staged: dir.join("cache").join(STAGED_CLI),
+                    old: dir.join(OLD_CLI),
+                },
                 script: dir.join("cache").join("swap.bat"),
                 _tmp: tmp,
             };
@@ -3527,12 +3629,13 @@ mod tests {
                 &self.loader,
                 &self.staged_loader,
                 &self.old_loader,
+                &self.cli,
                 false,
             ));
         }
 
         fn rollback(&self) {
-            self.run(rollback_script(&self.launcher, &self.old, &self.loader, &self.old_loader, false));
+            self.run(rollback_script(&self.launcher, &self.old, &self.loader, &self.old_loader, &self.cli, false));
         }
 
         fn text(p: &Path) -> Option<String> {
@@ -3566,6 +3669,40 @@ mod tests {
         assert_eq!(SwapDir::text(&d.launcher).as_deref(), Some("launcher 2"));
         assert_eq!(SwapDir::text(&d.loader).as_deref(), Some("loader 2"));
         assert!(!d.old.exists() && !d.old_loader.exists());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn the_command_line_tool_is_swapped_only_where_one_is_installed() {
+        // Installed: replaced with the launcher, the old one kept, and put back on a rollback.
+        let d = SwapDir::new();
+        fs::write(&d.cli.exe, "qm 1").unwrap();
+        fs::write(&d.staged, "launcher 2").unwrap();
+        fs::write(&d.staged_loader, "loader 2").unwrap();
+        fs::write(&d.cli.staged, "qm 2").unwrap();
+        d.swap();
+        assert_eq!(SwapDir::text(&d.cli.exe).as_deref(), Some("qm 2"));
+        assert_eq!(SwapDir::text(&d.cli.old).as_deref(), Some("qm 1"));
+        assert_eq!(SwapDir::text(&d.loader).as_deref(), Some("loader 2"));
+        d.rollback();
+        assert_eq!(SwapDir::text(&d.cli.exe).as_deref(), Some("qm 1"));
+        assert!(!d.cli.old.exists());
+
+        // Not installed (the user left it out): none appears, and the staged copy is dropped.
+        let d = SwapDir::new();
+        fs::write(&d.staged, "launcher 2").unwrap();
+        fs::write(&d.staged_loader, "loader 2").unwrap();
+        fs::write(&d.cli.staged, "qm 2").unwrap();
+        d.swap();
+        assert!(!d.cli.exe.exists() && !d.cli.staged.exists() && !d.cli.old.exists());
+        assert_eq!(SwapDir::text(&d.loader).as_deref(), Some("loader 2"));
+
+        // Staged without a launcher: nothing moves.
+        let d = SwapDir::new();
+        fs::write(&d.cli.exe, "qm 1").unwrap();
+        fs::write(&d.cli.staged, "qm 2").unwrap();
+        d.swap();
+        assert_eq!(SwapDir::text(&d.cli.exe).as_deref(), Some("qm 1"));
     }
 
     #[cfg(windows)]

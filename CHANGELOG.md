@@ -8,6 +8,15 @@ Versions are `Major.Minor.Patch`.
 - added feature name `short_patches`
 - a patch can have a `group`; the launcher lists a mod's patches under their groups on its Patches tab
 - launcher: the first-run setup, the import and move offers and Report a problem no longer close on a click outside them or on Escape
+- a QuarterMaster update also replaces `qm.exe` where it is installed
+- launcher: the window's place and the launcher's browser data are kept in `qm-data` for an installed or portable copy, not in AppData
+- launcher: a mod with no update source is offered an update found by its id in the mod list, and never installs it without asking unless you chose that for the mod
+- `qm lint` warns when `qm.toml` uses the short patch form and `mod.json` does not list `short_patches`
+- launcher: a patch's group shows on its chip in the Patches view
+- security scan: a file a mod's Lua names (`dofile("extra.dat")`) is scanned whatever its extension, and so are the sources of short-form `[[module]]` and `[[copy]]` patches
+- fixed: a downloaded mod with two dots inside a file name (`v1..v2.txt`) was refused as unsafe
+- fixed: a `.zip` mod took its options from any `config.toml` or `qm.toml` inside it, not only the one at the mod's root
+- fixed: a sound or image the game reloads through a faction's replacement lost what the loader knew about it, so a later replacement or size rule could miss it
 
 ## 1.9.0
 

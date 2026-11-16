@@ -356,7 +356,17 @@ if orig_newSource then
       local ov_fd = __qm_load_ov_fd(ov)
       if ov and ov_fd then
         local ok, s = pcall(orig_newSource, ov_fd, b or ov.mode or "static", ...)
-        if ok and s then return s end
+        if ok and s then
+          -- Known by the game path it stands in for, like the file it replaces.
+          __qm_obj_info[s] = {
+            kind = "audio",
+            path = norm:lower(),
+            cat_stem = cat_stem,
+            stem = stem,
+            mode = b or ov.mode or "static",
+          }
+          return s
+        end
       end
       local src = orig_newSource(a, b, ...)
       if src then
@@ -387,6 +397,13 @@ if orig_newImage then
         if ok and img then
           -- The game loaded this path again: the replacement keeps the size it was shown at.
           if ov.shown_w then __qm_sprite_set(img, ov.shown_w, ov.shown_h) end
+          -- Known by the game path it stands in for, like the file it replaces.
+          __qm_obj_info[img] = {
+            kind = "image",
+            path = norm:lower(),
+            cat_stem = cat_stem,
+            stem = stem,
+          }
           return img
         end
       end
@@ -3030,6 +3047,27 @@ fn load_mod(
     })
 }
 
+/// The entry of a zip mod that is `file` at the mod's root. The root is the shallowest folder
+/// holding a `mod.json`, `qm.toml` or `config.toml`; a file of that name deeper in the zip
+/// (an example, another mod's copy) is not the mod's own.
+fn zip_root_entry(names: &[String], file: &str) -> Option<usize> {
+    let split = |name: &str| -> (usize, String) {
+        let name = name.replace('\\', "/");
+        let parts: Vec<&str> = name.split('/').filter(|p| !p.is_empty()).collect();
+        (parts.len(), parts.last().map(|p| p.to_string()).unwrap_or_default())
+    };
+    let root_depth = names
+        .iter()
+        .map(|n| split(n))
+        .filter(|(_, base)| matches!(base.as_str(), "mod.json" | "qm.toml" | "config.toml"))
+        .map(|(depth, _)| depth)
+        .min()?;
+    names.iter().position(|n| {
+        let (depth, base) = split(n);
+        depth == root_depth && base == file
+    })
+}
+
 fn load_mod_config(
     base_path: &Path,
     mod_id: &str,
@@ -3046,11 +3084,13 @@ fn load_mod_config(
     } else if base_path.extension().is_some_and(|e| e == "zip") {
         if let Ok(file) = std::fs::File::open(base_path) {
             if let Ok(mut zip) = zip::ZipArchive::new(file) {
+                let names: Vec<String> = zip.file_names().map(str::to_string).collect();
+                let config_name = zip_root_entry(&names, "config.toml");
+                let patch_name = zip_root_entry(&names, "qm.toml");
                 // Try config.toml first
                 for i in 0..zip.len() {
                     if let Ok(mut entry) = zip.by_index(i) {
-                        let name = entry.name().replace('\\', "/");
-                        if name.ends_with("config.toml") {
+                        if config_name.is_some_and(|c| names.get(c).is_some_and(|n| n == entry.name())) {
                             let mut buf = String::new();
                             if std::io::Read::read_to_string(&mut entry, &mut buf).is_ok() {
                                 if let Ok(cfg) = qm_schema::ModConfigSchema::from_toml_str(&buf) {
@@ -3067,8 +3107,7 @@ fn load_mod_config(
                 // Try qm.toml next
                 for i in 0..zip.len() {
                     if let Ok(mut entry) = zip.by_index(i) {
-                        let name = entry.name().replace('\\', "/");
-                        if name.ends_with("qm.toml") {
+                        if patch_name.is_some_and(|c| names.get(c).is_some_and(|n| n == entry.name())) {
                             let mut buf = String::new();
                             if std::io::Read::read_to_string(&mut entry, &mut buf).is_ok() {
                                 if let Ok(cfg) = qm_schema::ModConfigSchema::from_toml_str(&buf) {
@@ -3301,6 +3340,27 @@ fn parse_patch_file(content: &str, file_identifier: &str, mod_dir: &Path) -> Res
         anyhow::anyhow!("{}{hint}", e.to_string().trim_end())
             .context(format!("Failed to parse patch file {file_identifier}"))
     })
+}
+
+#[cfg(test)]
+mod zip_root_tests {
+    use super::zip_root_entry;
+
+    #[test]
+    fn a_zip_mods_config_is_the_one_at_its_root() {
+        let names = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        // A zip of a folder: the root is that folder, not the examples below it.
+        let n = names(&["Mod/examples/config.toml", "Mod/qm.toml", "Mod/config.toml", "Mod/docs/qm.toml"]);
+        assert_eq!(zip_root_entry(&n, "config.toml"), Some(2));
+        assert_eq!(zip_root_entry(&n, "qm.toml"), Some(1));
+        // A name that only ends the same is another file.
+        let n = names(&["myconfig.toml", "qm.toml"]);
+        assert_eq!(zip_root_entry(&n, "config.toml"), None);
+        // No config at the root: a deeper one is not taken.
+        let n = names(&["mod.json", "extras/config.toml"]);
+        assert_eq!(zip_root_entry(&n, "config.toml"), None);
+        assert_eq!(zip_root_entry(&names(&["readme.txt"]), "qm.toml"), None);
+    }
 }
 
 #[cfg(test)]

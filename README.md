@@ -26,6 +26,18 @@ The game packs its scripts and art inside `mnb.exe`, so changing them by hand me
 
 Windows only. QuarterMaster works by placing a small library, `winmm.dll`, next to `mnb.exe` when it launches the game. [VERIFICATION.md](VERIFICATION.md) explains what that library does and does not touch, and how to build or inspect it yourself.
 
+### "Windows protected your PC"
+
+The first time you run the installer, Windows may show a blue box that says **Windows protected your PC**. Click **More info**, then **Run anyway**.
+
+That box is SmartScreen. It appears for any program that is not signed with a paid code-signing certificate and that few people have downloaded yet; it does not mean something was found in the file. QuarterMaster is a free project and is not signed. If you would rather check than trust:
+
+- download only from this repository's [releases](https://github.com/Gamiseus/QuarterMaster/releases);
+- every release lists a `.sha256` file for its zip, and the source is here to read and build yourself ([Building from source](#building-from-source));
+- [VERIFICATION.md](VERIFICATION.md) says what the game library does and how to inspect it.
+
+An antivirus program may also question `winmm.dll`, because loading with a game is what it is for. VERIFICATION.md explains exactly what it does.
+
 ### Without the installer
 
 `QuarterMaster_<version>.zip` in the same release is the portable copy: unpack it into any folder you can write to and run `qm-launcher.exe`. Keep `qm_winmm.dll` and `portable.txt` beside it; `qm.exe` is the command-line tool.

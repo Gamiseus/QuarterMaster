@@ -89,10 +89,15 @@ impl SecurityScanReport {
 
             if let Ok(content) = std::fs::read_to_string(path) {
                 findings.extend(Self::scan_source(&rel, &content));
-                if ext == "toml" {
+                let sources = if ext == "toml" {
+                    patch_sources(&content)
+                } else {
+                    lua_named_files(&content)
+                };
+                {
                     // A source is looked up from the mod's folder, then from the file's own.
                     let here = rel.rsplit_once('/').map_or("", |(dir, _)| dir);
-                    for source in patch_sources(&content) {
+                    for source in sources {
                         let source = source.replace('\\', "/");
                         named.insert(source.clone());
                         if !here.is_empty() {
@@ -111,6 +116,10 @@ impl SecurityScanReport {
             }
             let path = mod_dir.join(&rel);
             if !path.is_file() {
+                continue;
+            }
+            // Text of a sensible size only: a large or binary file is no script.
+            if path.metadata().is_ok_and(|m| m.len() > 2 * 1024 * 1024) {
                 continue;
             }
             if let Ok(content) = std::fs::read_to_string(&path) {
@@ -348,29 +357,79 @@ pub fn sha256_hex(bytes: &[u8]) -> String {
     hex
 }
 
-/// The module and copy sources a patch file names (`[patches.module] source`,
-/// `[patches.copy] sources`). Empty when the text is no patch file.
+/// The module and copy sources a patch file names, in the long form (`[patches.module] source`,
+/// `[patches.copy] sources`) and the short one (`[[module]]`, `[[copy]]`). Empty when the text
+/// is no patch file.
 fn patch_sources(toml_text: &str) -> Vec<String> {
     let Ok(doc) = toml_text.parse::<toml::Value>() else {
         return Vec::new();
     };
     let mut out = Vec::new();
-    let patches = doc.get("patches").and_then(|p| p.as_array());
-    for patch in patches.into_iter().flatten() {
-        if let Some(s) = patch
-            .get("module")
-            .and_then(|m| m.get("source"))
-            .and_then(|s| s.as_str())
-        {
+    let module = |m: Option<&toml::Value>, out: &mut Vec<String>| {
+        if let Some(s) = m.and_then(|m| m.get("source")).and_then(|s| s.as_str()) {
             out.push(s.to_string());
         }
-        let sources = patch
-            .get("copy")
-            .and_then(|c| c.get("sources"))
-            .and_then(|s| s.as_array());
+    };
+    let copy = |c: Option<&toml::Value>, out: &mut Vec<String>| {
+        let sources = c.and_then(|c| c.get("sources")).and_then(|s| s.as_array());
         for s in sources.into_iter().flatten().filter_map(|s| s.as_str()) {
             out.push(s.to_string());
         }
+    };
+    let list = |key: &str| doc.get(key).and_then(|p| p.as_array()).into_iter().flatten();
+    for patch in list("patches") {
+        module(patch.get("module"), &mut out);
+        copy(patch.get("copy"), &mut out);
+    }
+    for patch in list("module") {
+        module(Some(patch), &mut out);
+    }
+    for patch in list("copy") {
+        copy(Some(patch), &mut out);
+    }
+    out
+}
+
+/// Extensions that are never code: a file named in Lua with one of these is not read as Lua.
+const NOT_CODE: [&str; 22] = [
+    "png", "jpg", "jpeg", "bmp", "gif", "tga", "webp", "dds", "ogg", "wav", "mp3", "flac", "ttf",
+    "otf", "fnt", "glsl", "json", "md", "csv", "zip", "ico", "svg",
+];
+
+/// File names written as string literals in Lua code (`dofile("extra.dat")`,
+/// `love.filesystem.load('parts/more.txt')`): a mod can load any file as code at run time, so a
+/// file of the mod that its Lua names is scanned too. Comments are read as well; a name that
+/// matches no file of the mod costs nothing.
+fn lua_named_files(lua_text: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let bytes = lua_text.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        let quote = bytes[i];
+        if quote != b'"' && quote != b'\'' {
+            i += 1;
+            continue;
+        }
+        let start = i + 1;
+        let mut end = start;
+        while end < bytes.len() && bytes[end] != quote && bytes[end] != b'\n' {
+            end += 1;
+        }
+        if end < bytes.len() && bytes[end] == quote {
+            let text = &lua_text[start..end];
+            let ext = text.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase());
+            let plain = !text.is_empty()
+                && text.len() <= 200
+                && text
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, '/' | '\\' | '.' | '_' | '-' | ' '));
+            if let Some(ext) = ext {
+                if plain && !ext.is_empty() && ext.len() <= 8 && !NOT_CODE.contains(&ext.as_str()) {
+                    out.push(text.replace('\\', "/").trim_start_matches("./").to_string());
+                }
+            }
+        }
+        i = end + 1;
     }
     out
 }
@@ -378,6 +437,32 @@ fn patch_sources(toml_text: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A file the mod's Lua names is scanned whatever its extension; images, sounds and files
+    /// nothing names are not.
+    #[test]
+    fn a_file_named_in_lua_is_scanned_as_code() {
+        let temp = tempfile::tempdir().unwrap();
+        let write = |rel: &str, text: &str| {
+            let p = temp.path().join(rel);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(p, text).unwrap();
+        };
+        write("main_mod.lua", "local f = love.filesystem.load('parts/more.dat')\ndofile(\"side.txt\")\nlocal img = 'art/logo.png'\n");
+        write("parts/more.dat", "os.execute('calc')\n");
+        write("side.txt", "io.popen('dir')\n");
+        write("art/logo.png", "os.execute('not code')\n");
+        write("unnamed.dat", "os.execute('nobody loads this')\n");
+        // The short form names its sources too.
+        write("qm.toml", "[manifest]\nversion = \"1.0.0\"\n\n[[module]]\nsource = \"short.bin\"\nname = \"s\"\n\n[[copy]]\ntarget = \"main.lua\"\nposition = \"append\"\nsources = [\"tail.bin\"]\n");
+        write("short.bin", "os.execute('a')\n");
+        write("tail.bin", "os.execute('b')\n");
+        let report = SecurityScanReport::scan_directory(temp.path());
+        let mut files: Vec<&str> = report.findings.iter().map(|f| f.file.as_str()).collect();
+        files.sort();
+        files.dedup();
+        assert_eq!(files, ["main_mod.lua", "parts/more.dat", "short.bin", "side.txt", "tail.bin"], "{:?}", report.findings);
+    }
 
     /// Lua under another extension is scanned when a patch file names it as a source.
     #[test]

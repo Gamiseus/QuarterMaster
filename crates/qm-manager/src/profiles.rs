@@ -1757,6 +1757,7 @@ impl QuarterMasterPaths {
     /// 4. Retargets `<game_dir>/Mods` junction -> `profiles/<profile_id>/Mods/`
     /// 5. Swaps `%APPDATA%\mnb\` save files and `saveModSettings.lua`
     /// 6. Commits `state-journal.json`
+    ///
     /// A profile with no slot ("New slot on first launch") gets an empty slot named after it.
     /// Returns the new slot's name when one was created.
     pub fn ensure_linked_slot(&self, profile_id: &str) -> Result<Option<String>, String> {

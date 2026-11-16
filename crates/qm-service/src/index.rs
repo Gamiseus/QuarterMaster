@@ -129,7 +129,15 @@ fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
     }
-    let tmp: PathBuf = path.with_extension("json.tmp");
-    std::fs::write(&tmp, bytes)?;
-    std::fs::rename(&tmp, path)
+    // The update check and the Browse list may store the index at the same moment: each
+    // writer has its own temp file, so neither renames the other's away.
+    static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let tmp: PathBuf = path.with_extension(format!("json.{}-{seq}.tmp", std::process::id()));
+    let stored = std::fs::write(&tmp, bytes).and_then(|()| std::fs::rename(&tmp, path));
+    if stored.is_err() {
+        // Best effort: a leftover temp file is only clutter.
+        drop(std::fs::remove_file(&tmp));
+    }
+    stored
 }
