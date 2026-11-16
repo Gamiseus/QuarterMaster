@@ -391,7 +391,7 @@ fn patch_sources(toml_text: &str) -> Vec<String> {
 }
 
 /// Extensions that are never code: a file named in Lua with one of these is not read as Lua.
-const NOT_CODE: [&str; 22] = [
+pub const NOT_CODE: [&str; 22] = [
     "png", "jpg", "jpeg", "bmp", "gif", "tga", "webp", "dds", "ogg", "wav", "mp3", "flac", "ttf",
     "otf", "fnt", "glsl", "json", "md", "csv", "zip", "ico", "svg",
 ];

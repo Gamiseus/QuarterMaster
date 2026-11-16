@@ -7,6 +7,7 @@ use qm_core::patch::table::PatchTable;
 use qm_manager::{
     decode_profile_code, lint_mod_directory, package_mod_release, register_windows_protocols,
     resolve_load_order, scaffold_new_mod, simulate_and_analyze_patches_with, SimulationOptions,
+    MOD_STARTERS,
     ConflictResolutionSuggestion, DetectedConflict, LaunchMethod, QuarterMasterPaths,
 };
 use qm_schema::{compare_saves, generate_mod_json_schema, generate_qm_toml_schema};
@@ -14,43 +15,70 @@ use qm_service::testing::NullSink;
 use qm_service::{GameStage, LaunchRequest, QmError, Service, Win32Probe};
 
 fn print_help() {
+    let templates: Vec<String> = MOD_STARTERS
+        .iter()
+        .map(|s| format!("          {:<10} {}", s.id, s.summary))
+        .collect();
     println!(
-        r#"QuarterMaster (QM) v{} — Tactical Mod Launcher & Patch Engine CLI
+        r#"qm {version}: the QuarterMaster command line, for making and checking Mud and Blood mods.
+It works on the same mods, profiles and saves as the QuarterMaster launcher.
 
-USAGE:
-  qm <COMMAND> [OPTIONS]
+USAGE
+  qm <command> [options]        qm --help        qm --version
 
-COMMANDS:
-  status                              Show game path, version, library, profiles, and save status
-  ui                                  Launch the QuarterMaster Desktop Mod Launcher GUI
-  launch [--profile <id>] [--vanilla] [--steam|--direct]
-                                      Activate profile and launch Mud and Blood
-  validate [--mod-dir <dir>] [--json] Resolve load order, run offline patch simulation & 3-tier conflict resolver
-  test-patches [--target <file.lua>] [--mod-dir <dir>]
-                                      Simulate patches offline and display attributed code lines
-  import <path> [--unmanaged]         Import a mod (.zip, folder, or multi-mod pack) into the pristine library
-  sync-workspace [<dir>]              Import/sync all mods from MnB-Mods workspace folder into library
-  verify-library                      Verify SHA-256 integrity of all mods in the pristine library
-  profile list                        List all mod profiles
-  profile activate <id>               Atomically activate a mod profile (junction swap + save slot swap)
-  profile clone <src> <new_id> <name> Clone an existing mod profile
-  profile diff <id_a> <id_b>          Compare two mod profiles (mods, priorities, settings)
-  profile export-code <id>            Export a shareable offline profile code (QM1-...)
-  profile import-code <code> <new_id> Import a shareable profile code (QM1-...)
-  save list                           List all save profiles and backups
-  save inspect [<id>]                 Inspect squad, rank, kills, and mod fingerprint of a save slot
-  save backup <id> [<label>]          Create a timestamped backup of a save slot
-  save restore <id> <backup_id>       Restore a save slot from a backup snapshot
-  save compare <id_a> <id_b>          Compare two save profiles side-by-side
-  lint <mod_dir>                      Lint mod.json, qm.toml, dry-run patches against vanilla, and scan security
-  pack <mod_dir> [--out <dir>]        Package a mod into a release .zip and output its SHA-256 index entry
-  new <id> <name> [--template <t>]    Scaffold a new mod (templates: empty, gmenu_config, gameplay_patch, faction_mod)
-  faction check <mod_dir> [--json]    Check a faction mod's faction.toml and files, and list what it changes
-  watch [--relaunch]                  Watch MnB-Mods/ for file changes, auto-sync, validate & hot-reload
-  register-protocols                  Register qm://, nxm://, and .qmpack associations in Windows Registry (HKCU)
-  schema [--out <dir>]                Write official JSON Schemas (mod.schema.json, qm.schema.json, faction.schema.json)
+MAKING A MOD
+  new <id> "<name>" [--template <t>] [--author <name>] [--dir <folder>]
+        Create a mod folder named after <name> in the current folder (or --dir).
+        <id> is the mod's permanent id: lowercase letters, digits, _ and -.
+        Templates (default: patch):
+{templates}
+  lint <mod_dir>
+        Check one mod before you release it: mod.json, every patch run against the game's
+        own files (a pattern that matches nothing is an error), faction.toml, and a list
+        of what the code can do (run programs, use the network, ...).
+  faction check <mod_dir> [--json]
+        Check a faction mod's faction.toml and files, and list what it changes.
+  pack <mod_dir> [--out <folder>]
+        Build the release zip (<ModFolder>.zip) and print its SHA-256 entry.
+  schema [--out <folder>]
+        Write the editor schemas mod.schema.json, qm.schema.json and faction.schema.json
+        (default folder: schemas).
+
+TESTING MODS TOGETHER
+  validate [--mod-dir <folder>] [--json]
+        Work out the load order and run every enabled mod's patches together, without the
+        game. Reports patches that fail and conflicts between mods, with suggested fixes.
+        --mod-dir checks a folder of mods instead of the active profile.
+  test-patches [--target <file.lua>] [--mod-dir <folder>]
+        List, for each game file, the patches that ran on it, in order, with their result.
+        --target shows one file only.
+  watch [--relaunch]
+        Keep watching the workspace mods folder and run validate each time a file is
+        saved. --relaunch also starts the game again. Stop with Ctrl+C.
+  launch [--profile <id>] [--vanilla] [--steam | --direct]
+        Start the game with a profile (default: the active one). --vanilla starts it
+        without mods. Waits until the game closes.
+
+LIBRARY, PROFILES AND SAVES
+  status                               Game path and version, installed mods, profiles, recent crashes.
+  import <zip-or-folder> [--unmanaged] Copy a mod (or a pack of several) into the library.
+                                       --unmanaged accepts a folder with no mod files in it.
+  sync-workspace [<folder>]            Copy every mod of the workspace mods folder into the library.
+  verify-library                       Check that no installed mod's files were changed.
+  profile list | activate <id> | clone <src> <new_id> [<name>] | diff <a> <b>
+  profile export-code <id>             Print a share code (QM1-...) for a profile.
+  profile import-code <code> [<new_id>]  Make a profile from a share code.
+  save list | inspect [<id>] | backup <id> [<label>] | restore <id> <backup_id> | compare <a> <b>
+
+OTHER
+  ui                                   Open the QuarterMaster launcher.
+  register-protocols                   Let Windows open qm:// links and .qmpack files with QuarterMaster
+                                       (for this user account only).
+
+The modding wiki explains every file a mod can have: https://gamiseus.github.io/wiki/
 "#,
-        qm_core::QM_VERSION
+        version = qm_core::QM_VERSION,
+        templates = templates.join("\n"),
     );
 }
 
@@ -58,6 +86,10 @@ fn main() -> ExitCode {
     let args: Vec<String> = env::args().skip(1).collect();
     if args.is_empty() || args[0] == "--help" || args[0] == "-h" || args[0] == "help" {
         print_help();
+        return ExitCode::SUCCESS;
+    }
+    if args[0] == "--version" || args[0] == "-V" || args[0] == "version" {
+        println!("qm {}", qm_core::QM_VERSION);
         return ExitCode::SUCCESS;
     }
 
@@ -177,10 +209,12 @@ fn handle_url_scheme(url: &str) -> ExitCode {
             eprintln!("Only https:// addresses can be installed from a link. Use `qm import <path>` for a file on this computer.");
             return ExitCode::FAILURE;
         }
-        println!("Queued remote install URL for QuarterMaster: {install_url}");
+        // Nothing is downloaded from a link: the launcher installs mods, after its own checks.
+        println!("This link asks to install a mod from: {}", shown(install_url, 200));
+        println!("Nothing was downloaded. Open QuarterMaster and install the mod from its Browse tab.");
         return ExitCode::SUCCESS;
     }
-    println!("URL recorded for QuarterMaster Launcher.");
+    println!("This link is not one QuarterMaster knows. Nothing was done.");
     ExitCode::SUCCESS
 }
 
@@ -237,7 +271,7 @@ fn cmd_ui(args: &[String]) -> Result<(), String> {
 fn cmd_status(paths: &QuarterMasterPaths) -> Result<(), String> {
     let settings = paths.load_settings();
     println!("========================================================");
-    println!("QuarterMaster Field Command — System Status");
+    println!("QuarterMaster {} status", qm_core::QM_VERSION);
     println!("========================================================");
     println!(
         "Data Root      : {} (Portable: {})",
@@ -582,7 +616,7 @@ fn conflicts_text(all: &[DetectedConflict]) -> String {
             }
         }
     } else {
-        let _ = writeln!(out, "\n✓ Zero broken anchors or errors detected!");
+        let _ = writeln!(out, "\nZero broken anchors or errors detected.");
     }
     if !notes.is_empty() {
         let _ = writeln!(out, "\nNotes ({}):", notes.len());
@@ -640,14 +674,25 @@ fn cmd_test_patches(paths: &QuarterMasterPaths, args: &[String]) -> Result<(), S
             f.mods_touching.join(", ")
         );
         for rec in &f.records {
+            let lines: Vec<String> = rec
+                .regions
+                .iter()
+                .map(|r| {
+                    if r.start_line == r.end_line {
+                        r.start_line.to_string()
+                    } else {
+                        format!("{}-{}", r.start_line, r.end_line)
+                    }
+                })
+                .collect();
             println!(
-                "  [{:?}] Prio {:>3} | {:<18} | {:<32} (matched: {}, regions: {:?})",
+                "  [{:?}] priority {:>3} | {:<18} | {:<32} matched {}, lines {}",
                 rec.status,
                 rec.priority,
                 rec.mod_id,
                 rec.patch_name,
                 rec.matched_count,
-                rec.regions
+                if lines.is_empty() { "none".to_string() } else { lines.join(", ") }
             );
         }
     }
@@ -707,10 +752,10 @@ fn cmd_verify_library(paths: &QuarterMasterPaths) -> Result<(), String> {
     );
     for (id, ver, res) in results {
         if res.is_pristine {
-            println!("  ✓ {:<20} v{:<8} — PRISTINE", id, ver);
+            println!("  ok {:<20} v{:<8} unchanged", id, ver);
         } else {
             println!(
-                "  ! {:<20} v{:<8} — MODIFIED: {:?}, MISSING: {:?}, UNTRACKED: {:?}",
+                "  !! {:<20} v{:<8} changed: {:?}, missing: {:?}, added: {:?}",
                 id, ver, res.modified, res.missing, res.untracked
             );
         }
@@ -913,25 +958,24 @@ fn cmd_lint(paths: &QuarterMasterPaths, args: &[String]) -> Result<(), String> {
     let (_gv, vanilla_files) = paths.load_vanilla_lua_files(settings.game_exe_path.as_deref())?;
     let report = lint_mod_directory(Path::new(dir), &vanilla_files)?;
 
-    println!("========================================================");
     println!(
-        "Mod Lint Report: {} ({}) — {}",
+        "{} ({}): {}",
         report.mod_name,
         report.mod_id,
         if report.passed { "PASSED" } else { "FAILED" }
     );
-    println!("========================================================");
+    // A module or a copy with no pattern matches nothing by design, so there is no "of N".
     println!(
-        "Patches Matched: {}/{} (Zero-match anchors: {})",
-        report.matched_patches,
+        "Patches in the mod: {}. Applied to the game's files: {}. Patterns that matched nothing: {}.",
         report.patch_count,
+        report.matched_patches,
         report.zero_match_patches.len()
     );
     for d in &report.diagnostics {
         println!("  [{:?}] {}", d.severity, d.message);
     }
     if !report.security_report.capabilities.is_empty() {
-        println!("Security Capabilities Detected:");
+        println!("What the mod's code can do (shown to players in the launcher):");
         for f in &report.security_report.findings {
             println!(
                 "  - [{}] {} ({}:{}) -> `{}`",
@@ -943,7 +987,7 @@ fn cmd_lint(paths: &QuarterMasterPaths, args: &[String]) -> Result<(), String> {
             );
         }
     } else {
-        println!("Security Scan: Pure sandboxed Lua (no OS/FFI/raw-IO capabilities)");
+        println!("Security scan: plain Lua. It runs no programs, loads no native code, and uses no network or raw files.");
     }
 
     if !report.passed {
@@ -957,8 +1001,16 @@ fn cmd_pack(args: &[String]) -> Result<(), String> {
         .first()
         .ok_or("Usage: qm pack <mod_dir> [--out <dir>]")?;
     let mut out_dir = PathBuf::from(".");
-    if args.len() >= 3 && args[1] == "--out" {
-        out_dir = PathBuf::from(&args[2]);
+    let mut i = 1;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--out" | "-o" => {
+                i += 1;
+                out_dir = PathBuf::from(args.get(i).ok_or("--out needs a folder")?);
+            }
+            other => return Err(format!("Unknown option '{other}'. Usage: qm pack <mod_dir> [--out <folder>]")),
+        }
+        i += 1;
     }
     let (zip_path, entry) = package_mod_release(Path::new(mod_dir), &out_dir)?;
     println!("Packaged release archive: {}", zip_path.display());
@@ -967,15 +1019,15 @@ fn cmd_pack(args: &[String]) -> Result<(), String> {
 }
 
 fn cmd_new(args: &[String]) -> Result<(), String> {
-    let mod_id = args.first().ok_or(
-        "Usage: qm new <mod_id> <mod_name> [--template <empty|gmenu_config|gameplay_patch>]",
-    )?;
-    let mod_name = args.get(1).map(|s| s.as_str()).unwrap_or(mod_id);
-    let mut template = "gmenu_config";
-    let mut author = "Community Modder";
+    let usage = "Usage: qm new <id> \"<name>\" [--template <t>] [--author <name>] [--dir <folder>]  (qm --help lists the templates)";
+    let mod_id = args.first().filter(|a| !a.starts_with("--")).ok_or(usage)?;
+    let named = args.get(1).filter(|a| !a.starts_with("--"));
+    let mod_name = named.map(|s| s.as_str()).unwrap_or(mod_id);
+    let mut template = "patch";
+    let mut author = "Unknown";
     let mut parent_dir = PathBuf::from(".");
 
-    let mut i = 2;
+    let mut i = if named.is_some() { 2 } else { 1 };
     while i < args.len() {
         match args[i].as_str() {
             "--template" | "-t" => {
@@ -996,18 +1048,14 @@ fn cmd_new(args: &[String]) -> Result<(), String> {
                     parent_dir = PathBuf::from(d);
                 }
             }
-            _ => {}
+            other => return Err(format!("Unknown option '{other}'. {usage}")),
         }
         i += 1;
     }
 
     let created = scaffold_new_mod(&parent_dir, mod_id, mod_name, author, template)?;
-    println!(
-        "Scaffolded new mod '{}' (template: '{}') at {}",
-        mod_name,
-        template,
-        created.display()
-    );
+    println!("Created '{}' from the '{}' template in {}", mod_name, template, created.display());
+    println!("Next: cd into it and run `qm lint .`  (its README.md lists the other steps)");
     Ok(())
 }
 
@@ -1017,7 +1065,7 @@ fn cmd_schema(args: &[String]) -> Result<(), String> {
         .position(|a| a == "--out")
         .and_then(|i| args.get(i + 1))
         .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("Quartermaster/schemas"));
+        .unwrap_or_else(|| PathBuf::from("schemas"));
     std::fs::create_dir_all(&out_dir).map_err(|e| e.to_string())?;
 
     let mod_schema = serde_json::to_string_pretty(&generate_mod_json_schema()).unwrap();
@@ -1132,7 +1180,7 @@ fn cmd_register_protocols() -> Result<(), String> {
     let registered = register_windows_protocols()?;
     println!("Registered Windows URL & File Associations in HKCU\\Software\\Classes:");
     for r in registered {
-        println!("  ✓ {r}");
+        println!("  {r}");
     }
     Ok(())
 }

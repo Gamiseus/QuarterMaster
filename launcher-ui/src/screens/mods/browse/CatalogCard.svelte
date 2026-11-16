@@ -32,7 +32,8 @@
   {/if}
   <dl class="meta">
     {#if !nexus}
-      <div><dt>Stars</dt><dd>{entry.stargazers_count}</dd></div>
+      <!-- The mod list has no star counts (it is not read from GitHub's API); a 0 would only mislead. -->
+      {#if entry.stargazers_count > 0}<div><dt>Stars</dt><dd>{entry.stargazers_count}</dd></div>{/if}
     {/if}
     <div><dt>Updated</dt><dd>{formatUpdated(entry.updated_at)}</dd></div>
     {#if !nexus}

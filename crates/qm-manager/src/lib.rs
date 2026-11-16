@@ -34,7 +34,7 @@ pub use conflict::{
 };
 pub use devtools::{
     decode_profile_code, encode_profile_code, lint_mod_directory, package_mod_release,
-    register_windows_protocols, scaffold_new_mod, ModLintReport, ModpackImportPreview,
+    register_windows_protocols, scaffold_new_mod, ModLintReport, ModStarter, MOD_STARTERS, ModpackImportPreview,
     ModpackManifest, ModpackModEntry,
 };
 pub use library::{

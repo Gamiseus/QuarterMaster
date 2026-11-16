@@ -2610,7 +2610,250 @@ pub fn lint_mod_directory(
     })
 }
 
-/// Scaffolds a new QuarterMaster mod directory from a template (`"empty" | "gmenu_config" | "gameplay_patch"`).
+/// A starting point `qm new` can write: its name, the older names it also answers to, and one
+/// line saying what it gives you.
+pub struct ModStarter {
+    pub id: &'static str,
+    pub aliases: &'static [&'static str],
+    pub summary: &'static str,
+}
+
+/// The templates `qm new` knows. Every one is checked against the game by `qm lint` in the
+/// tests, so a new mod starts from files that load.
+pub const MOD_STARTERS: &[ModStarter] = &[
+    ModStarter {
+        id: "empty",
+        aliases: &[],
+        summary: "mod.json and a qm.toml with no patches yet",
+    },
+    ModStarter {
+        id: "patch",
+        aliases: &["single_anchor_patch"],
+        summary: "one commented pattern patch on main.lua",
+    },
+    ModStarter {
+        id: "module",
+        aliases: &["multi_file_engine_hook", "gameplay_patch"],
+        summary: "your own Lua file, loaded with the game and called every frame",
+    },
+    ModStarter {
+        id: "settings",
+        aliases: &["gmenu_settings", "gmenu_config"],
+        summary: "a Lua file plus config.toml: two options and a keybind in the game's menus",
+    },
+    ModStarter {
+        id: "assets",
+        aliases: &[
+            "sprite_replacer",
+            "sound_replacer",
+            "custom_battle_music",
+            "asset_file_injection",
+        ],
+        summary: "an assets/ folder for replacement sounds, music, sprites and fonts; no code",
+    },
+    ModStarter {
+        id: "faction",
+        aliases: &["faction_mod"],
+        summary: "a commented faction.toml with every section, and its folders",
+    },
+];
+
+/// Templates from before the built-in menu, asset loading and factions. They hooked game
+/// functions by name and no longer match the game, so they are not written any more.
+const RETIRED_STARTERS: &[&str] = &[
+    "custom_hud_overlay",
+    "custom_particle_fx",
+    "custom_weapon",
+    "custom_soldier_class",
+    "custom_battle_condition",
+    "custom_reinforcement_card",
+    "custom_map_structure",
+];
+
+const SITE_SCHEMAS: &str = "https://gamiseus.github.io/schemas";
+
+const STARTER_QM_HEAD: &str = r#"#:schema https://gamiseus.github.io/schemas/qm.schema.json
+# __NAME__: changes to the game's code.
+# Every key is explained in the modding wiki: https://gamiseus.github.io/wiki/
+# Check this file against the game with:  qm lint .
+
+[manifest]
+version = "1.0.0"
+"#;
+
+const STARTER_EMPTY: &str = r#"
+# No patches yet. A patch finds a line of a game file and puts code before it, after it or in
+# its place. Take the # off the lines below for a first one:
+#
+# [[patches]]
+# [patches.pattern]
+# id = "__ID__:hello"
+# target = "main.lua"
+# pattern = 'require "includes/directives"'
+# position = "after"
+# payload = 'print("[__NAME__] loaded")'
+"#;
+
+const STARTER_PATCH: &str = r#"
+# A pattern patch. `target` is the game file, `pattern` the line to find (spaces at the start
+# and end are ignored; * matches any text), `position` is "before", "after" or "at" (replace),
+# and `payload` is the code to put there. Give every patch an `id` that starts with your mod id.
+[[patches]]
+[patches.pattern]
+id = "__ID__:hello"
+name = "Say hello"
+target = "main.lua"
+pattern = 'require "includes/directives"'
+position = "after"
+payload = '''
+print("[__NAME__] loaded")
+'''
+
+# From QuarterMaster 1.9.1 the two header lines can be one, [[pattern]], when mod.json lists
+# "short_patches" under "qm_features". The wiki has both forms side by side.
+#
+# To see the game's code: turn on Debug mode in the launcher (Settings, Launch), start the
+# game once and press Ctrl+Shift+D. Every Lua file is written to Mods/qm/game-dump.
+"#;
+
+const STARTER_MODULE: &str = r#"
+# 1. Register your Lua file under a name the game can require.
+[[patches]]
+[patches.module]
+id = "__ID__:module"
+source = "__FILE__.lua"
+name = "includes/__FILE__"
+before = "main.lua"
+
+# 2. Load it once the game's own files are loaded.
+[[patches]]
+[patches.pattern]
+id = "__ID__:require"
+name = "Load __NAME__"
+target = "main.lua"
+pattern = 'require "includes/directives"'
+position = "after"
+payload = '__GLOBAL__ = require "includes/__FILE__"'
+
+# 3. Call it every frame.
+[[patches]]
+[patches.pattern]
+id = "__ID__:update"
+name = "Run __NAME__ every frame"
+target = "main.lua"
+pattern = 'function love.update(dt)'
+position = "after"
+payload = '''
+if __GLOBAL__ and __GLOBAL__.update then __GLOBAL__.update(dt) end
+'''
+match_indent = true
+"#;
+
+const STARTER_MODULE_LUA: &str = r#"-- __NAME__: your own code. qm.toml registers this file, loads it and calls update every frame.
+local __GLOBAL__ = {}
+_G.__GLOBAL__ = __GLOBAL__      -- reachable from patches, keybinds and other mods
+
+local seconds = 0
+
+function __GLOBAL__.update(dt)
+  -- Runs every frame. `dt` is the time since the last frame, in seconds.
+  seconds = seconds + dt
+end
+
+print("[__NAME__] loaded")
+
+return __GLOBAL__
+"#;
+
+const STARTER_SETTINGS_LUA: &str = r#"-- __NAME__: reads the options from config.toml and answers its keybind.
+local __GLOBAL__ = {}
+_G.__GLOBAL__ = __GLOBAL__      -- reachable from patches, keybinds and other mods
+
+-- An option's current value. Options are stored per mod under QM.settings.
+local function option(name)
+  local mine = QM and QM.settings and QM.settings["__ID__"]
+  return mine and mine[name]
+end
+
+function __GLOBAL__.update(dt)
+  if not option("enabled") then return end
+  -- Your per-frame code. option("strength") is 1, 2 or 3.
+end
+
+-- Called by the keybind in config.toml (on_trigger).
+function __GLOBAL__.onAction()
+  print("[__NAME__] key pressed; strength is " .. tostring(option("strength")))
+end
+
+return __GLOBAL__
+"#;
+
+const STARTER_CONFIG: &str = r#"# __NAME__: options and keybinds, shown in the game under Mod Operations and Keybinds.
+# The modding wiki, Part 6, lists every key: https://gamiseus.github.io/wiki/
+
+name = "__NAME__"
+
+[[options]]
+id = "enabled"
+label = "Enable __NAME__"
+type = "checkbox"
+default = true
+description = "Turns __NAME__ on or off."
+
+[[options]]
+id = "strength"
+label = "Strength"
+type = "cycle"
+options = [1, 2, 3]
+labels = ["Low", "Medium", "High"]
+default = 2
+description = "An example of a setting with several values."
+
+[[keybinds]]
+id = "__KEY___action"
+name = "__NAME__ action"
+category = "__NAME__"
+tab = "__NAME__"
+default = "f6"
+description = "An example key. Players can rebind it on the Keybinds screen."
+on_trigger = "__GLOBAL__.onAction"
+"#;
+
+const STARTER_ASSETS_README: &str = r#"
+## How this mod works
+
+This mod has no code. Put a file in `assets/` under the same folder and name the game uses,
+and it replaces the game's file while the mod is on:
+
+- `assets/sounds/...` and `assets/music/...`: `.wav`, `.ogg` or `.mp3`
+- `assets/sprites/...` and `assets/ui/...`: `.png` or `.jpg`
+- `assets/fonts/...`: `.ttf` or `.otf`
+
+To find the names: turn on Debug mode in the launcher (Settings, Launch), start the game once
+and press Ctrl+Shift+D. The launcher's Patches tab (Assets) then shows what your mod replaces.
+The modding wiki, Part 2, has the rules for numbered sounds and image sizes.
+"#;
+
+/// A Lua identifier from a mod's name: `Field Radio` gives `FieldRadio`.
+fn lua_global(mod_name: &str) -> String {
+    let mut out = String::new();
+    let mut upper = true;
+    for c in mod_name.chars() {
+        if c.is_ascii_alphanumeric() {
+            out.push(if upper { c.to_ascii_uppercase() } else { c });
+            upper = false;
+        } else {
+            upper = true;
+        }
+    }
+    if out.chars().next().is_none_or(|c| c.is_ascii_digit()) {
+        out.insert_str(0, "Mod");
+    }
+    out
+}
+
+/// Creates a new mod folder named after `mod_name` inside `parent_dir`, from one of
+/// `MOD_STARTERS` (by its id or an older alias).
 pub fn scaffold_new_mod(
     parent_dir: &Path,
     mod_id: &str,
@@ -2631,606 +2874,119 @@ pub fn scaffold_new_mod(
     if clean_id.is_empty() {
         return Err("Mod ID cannot be empty".to_string());
     }
+    let known = || {
+        MOD_STARTERS
+            .iter()
+            .map(|s| s.id)
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    if RETIRED_STARTERS.contains(&template) {
+        return Err(format!(
+            "The template '{template}' was removed: it hooked game functions that no longer match the game. Start from one of: {}.",
+            known()
+        ));
+    }
+    let starter = MOD_STARTERS
+        .iter()
+        .find(|s| s.id == template || s.aliases.contains(&template))
+        .ok_or_else(|| format!("Unknown template '{template}'. Templates: {}.", known()))?;
 
-    let mod_dir = parent_dir.join(mod_name.replace(' ', ""));
+    let folder: String = mod_name
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-'))
+        .collect();
+    if folder.is_empty() {
+        return Err("The mod's name needs at least one letter or digit.".to_string());
+    }
+    let mod_dir = parent_dir.join(&folder);
     if mod_dir.exists() {
         return Err(format!("Directory {} already exists", mod_dir.display()));
     }
     fs::create_dir_all(&mod_dir)
         .map_err(|e| format!("Failed to create {}: {e}", mod_dir.display()))?;
 
-    let norm_template = match template {
-        "gmenu_config" => "gmenu_settings",
-        "gameplay_patch" => "multi_file_engine_hook",
-        other => other,
+    let is_faction = starter.id == "faction";
+    let file = clean_id.replace('-', "_");
+    let global = lua_global(mod_name);
+    let fill = |text: &str| {
+        text.replace("__NAME__", mod_name)
+            .replace("__ID__", &clean_id)
+            .replace("__FILE__", &file)
+            .replace("__KEY__", &file)
+            .replace("__GLOBAL__", &global)
     };
-
-    let is_faction = norm_template == "faction_mod";
-    let mut requires = HashMap::new();
-    let mut load_after = if is_faction { Vec::new() } else { vec!["gcore".to_string()] };
-    if norm_template == "gmenu_settings" || norm_template == "multi_file_engine_hook" {
-        requires.insert("gcore".to_string(), ">=1.0.0".to_string());
-        requires.insert("gmenu".to_string(), ">=1.0.0".to_string());
-        load_after.push("gmenu".to_string());
-    }
+    let write = |name: &str, text: String| {
+        fs::write(mod_dir.join(name), text).map_err(|e| format!("Failed to write {name}: {e}"))
+    };
 
     let mut manifest = ModManifest::new(clean_id.clone(), mod_name.to_string(), "1.0.0".to_string());
+    manifest.schema_url = Some(format!("{SITE_SCHEMAS}/mod.schema.json"));
     manifest.authors = vec![author.to_string()];
     manifest.description = format!("{mod_name} for Mud and Blood.");
+    manifest.category = Some(
+        match starter.id {
+            "assets" => "Audio",
+            "faction" => "Content",
+            _ => "Gameplay",
+        }
+        .to_string(),
+    );
     manifest.tags = vec![if is_faction { "Faction" } else { "Gameplay" }.to_string()];
-    manifest.relationships = qm_schema::ModRelationships {
-        requires,
-        load_after,
-        ..Default::default()
-    };
+    write(
+        "mod.json",
+        serde_json::to_string_pretty(&manifest).map_err(|e| e.to_string())?,
+    )?;
 
-    let mod_json = serde_json::to_string_pretty(&manifest).map_err(|e| e.to_string())?;
-    fs::write(mod_dir.join("mod.json"), mod_json).map_err(|e| e.to_string())?;
-
-    // Scaffold standard game-matching assets/ subdirectories for automatic drop-in asset loading.
-    // A faction mod keeps its files out of assets/, which would apply them all the time.
-    if !is_faction {
-        for sub in &["sounds/vo", "music", "sprites", "ui"] {
-            let _ = fs::create_dir_all(mod_dir.join("assets").join(sub));
+    let mut readme_extra = String::new();
+    match starter.id {
+        "empty" => write("qm.toml", fill(&format!("{STARTER_QM_HEAD}{STARTER_EMPTY}")))?,
+        "patch" => write("qm.toml", fill(&format!("{STARTER_QM_HEAD}{STARTER_PATCH}")))?,
+        "module" => {
+            write("qm.toml", fill(&format!("{STARTER_QM_HEAD}{STARTER_MODULE}")))?;
+            write(&format!("{file}.lua"), fill(STARTER_MODULE_LUA))?;
         }
-    }
-
-    // Find preview code from built-in templates if matching
-    let tpl_def = BUILTIN_TEMPLATES.iter().find(|t| t.id == norm_template);
-
-    match norm_template {
-        "gmenu_settings" => {
-            let qm_toml = format!(
-                r#"[manifest]
-version = "1.0.0"
-priority = 50
-
-# Initialize GMenu configuration in main.lua
-[[patches]]
-[patches.pattern]
-target = "main.lua"
-pattern = 'require "includes/directives"'
-position = "after"
-payload = '''
-print("[{mod_name}] GMenu configuration options loaded successfully.")
-'''
-"#
-            );
-            fs::write(mod_dir.join("qm.toml"), qm_toml).map_err(|e| e.to_string())?;
-
-            let config_lua = tpl_def
-                .map(|t| t.preview_code.replace("custom_mod", &clean_id).replace("Custom Mod Settings", mod_name))
-                .unwrap_or_else(|| {
-                    format!(
-                        r#"-- config.lua — {mod_name} configuration definition for GMenu & QuarterMaster
-local config = {{
-  id = "{clean_id}",
-  name = "{mod_name}",
-  options = {{
-    {{
-      id = "enable_feature",
-      label = "Enable {mod_name}",
-      type = "checkbox",
-      default = 1,
-      description = "Toggle the main functionality of {mod_name}."
-    }}
-  }}
-}}
-
-return config
-"#
-                    )
-                });
-            fs::write(mod_dir.join("config.lua"), config_lua).map_err(|e| e.to_string())?;
+        "settings" => {
+            write("qm.toml", fill(&format!("{STARTER_QM_HEAD}{STARTER_MODULE}")))?;
+            write(&format!("{file}.lua"), fill(STARTER_SETTINGS_LUA))?;
+            write("config.toml", fill(STARTER_CONFIG))?;
         }
-
-        "custom_hud_overlay" => {
-            let qm_toml = r#"[manifest]
-version = "1.0.0"
-priority = 50
-
-# 1. Register custom HUD module
-[[patches]]
-[patches.module]
-source = "custom_hud.lua"
-before = "main.lua"
-name = "includes/custom_hud"
-
-# 2. Initialize HUD in main.lua
-[[patches]]
-[patches.pattern]
-target = "main.lua"
-pattern = 'require "includes/directives"'
-position = "after"
-payload = '''
-custom_hud = require "includes/custom_hud"
-custom_hud.init()
-'''
-
-# 3. Canvas render hook into drawFiles.lua drawState0
-[[patches]]
-[patches.pattern]
-target = "includes/drawFiles.lua"
-pattern = 'function drawState0()'
-position = "after"
-payload = '''
-  if custom_hud and custom_hud.draw then
-    custom_hud.draw()
-  end
-'''
-"#.to_string();
-            fs::write(mod_dir.join("qm.toml"), qm_toml).map_err(|e| e.to_string())?;
-
-            let hud_lua = tpl_def
-                .map(|t| t.preview_code.to_string())
-                .unwrap_or_else(|| "-- HUD Overlay Lua Module\n".to_string());
-            fs::write(mod_dir.join("custom_hud.lua"), hud_lua).map_err(|e| e.to_string())?;
+        "assets" => {
+            for sub in ["sounds", "music", "sprites", "ui", "fonts"] {
+                fs::create_dir_all(mod_dir.join("assets").join(sub))
+                    .map_err(|e| format!("Failed to create assets/{sub}: {e}"))?;
+            }
+            readme_extra = STARTER_ASSETS_README.to_string();
         }
-
-        "sprite_replacer" => {
-            let _ = fs::create_dir_all(mod_dir.join("assets").join("sprites").join("icons"));
-            let qm_toml = r#"[manifest]
-version = "1.0.0"
-priority = 50
-
-# 1. Register Sprite Replacer Module
-[[patches]]
-[patches.module]
-source = "sprite_replacer.lua"
-before = "main.lua"
-name = "includes/sprite_replacer"
-
-# 2. Patch sprite loading in includes/gfx.lua
-[[patches]]
-[patches.pattern]
-target = "includes/gfx.lua"
-pattern = 'soldier1_idle = love.graphics.newImage'
-position = "before"
-payload = '''
-local sprite_replacer = require "includes/sprite_replacer"
-sprite_replacer.init()
-'''
-"#.to_string();
-            fs::write(mod_dir.join("qm.toml"), qm_toml).map_err(|e| e.to_string())?;
-
-            let sprite_lua = tpl_def
-                .map(|t| t.preview_code.to_string())
-                .unwrap_or_else(|| "-- Sprite Replacer Module\n".to_string());
-            fs::write(mod_dir.join("sprite_replacer.lua"), sprite_lua).map_err(|e| e.to_string())?;
-        }
-
-        "custom_particle_fx" => {
-            let qm_toml = r#"[manifest]
-version = "1.0.0"
-priority = 50
-
-# 1. Register Custom Particle Module
-[[patches]]
-[patches.module]
-source = "custom_particles.lua"
-before = "main.lua"
-name = "includes/custom_particles"
-
-# 2. Hook into particlesSystem.lua addParticle
-[[patches]]
-[patches.pattern]
-target = "includes/particlesSystem.lua"
-pattern = 'function addParticle(x, y, pType, pArg1, pArg2)'
-position = "after"
-payload = '''
-  local custom_particles = require "includes/custom_particles"
-  if custom_particles.spawnCustomParticle(x, y, pType, pArg1) then
-    return
-  end
-'''
-"#.to_string();
-            fs::write(mod_dir.join("qm.toml"), qm_toml).map_err(|e| e.to_string())?;
-
-            let part_lua = tpl_def
-                .map(|t| t.preview_code.to_string())
-                .unwrap_or_else(|| "-- Custom Particles Module\n".to_string());
-            fs::write(mod_dir.join("custom_particles.lua"), part_lua).map_err(|e| e.to_string())?;
-        }
-
-        "sound_replacer" => {
-            let _ = fs::create_dir_all(mod_dir.join("assets").join("sounds").join("weapons"));
-            let _ = fs::create_dir_all(mod_dir.join("assets").join("sounds").join("explosions"));
-            let qm_toml = r#"[manifest]
-version = "1.0.0"
-priority = 50
-
-# 1. Register Sound Replacer Module
-[[patches]]
-[patches.module]
-source = "sound_replacer.lua"
-before = "main.lua"
-name = "includes/sound_replacer"
-
-# 2. Initialize in audioAudit.lua
-[[patches]]
-[patches.pattern]
-target = "includes/audioAudit.lua"
-pattern = 'function audioAuditCheck()'
-position = "after"
-payload = '''
-  local sound_replacer = require "includes/sound_replacer"
-  sound_replacer.init()
-'''
-"#.to_string();
-            fs::write(mod_dir.join("qm.toml"), qm_toml).map_err(|e| e.to_string())?;
-
-            let sound_lua = tpl_def
-                .map(|t| t.preview_code.to_string())
-                .unwrap_or_else(|| "-- Sound Replacer Module\n".to_string());
-            fs::write(mod_dir.join("sound_replacer.lua"), sound_lua).map_err(|e| e.to_string())?;
-        }
-
-        "custom_battle_music" => {
-            let _ = fs::create_dir_all(mod_dir.join("assets").join("music"));
-            let qm_toml = r#"[manifest]
-version = "1.0.0"
-priority = 50
-
-# 1. Register Battle Music Jukebox Module
-[[patches]]
-[patches.module]
-source = "battle_music.lua"
-before = "main.lua"
-name = "includes/battle_music"
-
-# 2. Intercept Game Tick in main.lua:love.update
-[[patches]]
-[patches.pattern]
-target = "main.lua"
-pattern = 'function love.update(dt)'
-position = "after"
-payload = '''
-  local battle_music = require "includes/battle_music"
-  battle_music.evaluateBattleIntensity()
-'''
-"#.to_string();
-            fs::write(mod_dir.join("qm.toml"), qm_toml).map_err(|e| e.to_string())?;
-
-            let music_lua = tpl_def
-                .map(|t| t.preview_code.to_string())
-                .unwrap_or_else(|| "-- Battle Music Module\n".to_string());
-            fs::write(mod_dir.join("battle_music.lua"), music_lua).map_err(|e| e.to_string())?;
-        }
-
-        "custom_weapon" => {
-            let qm_toml = r#"[manifest]
-version = "1.0.0"
-priority = 50
-
-# 1. Register Custom Weapon Module
-[[patches]]
-[patches.module]
-source = "custom_weapon.lua"
-before = "main.lua"
-name = "includes/custom_weapon"
-
-# 2. Hook into urb_engine.lua weaponCreator
-[[patches]]
-[patches.pattern]
-target = "includes/urb_engine.lua"
-pattern = 'function weaponCreator(weapon, tag)'
-position = "after"
-payload = '''
-  local custom_weapon = require "includes/custom_weapon"
-  if custom_weapon.registerWeapon(weapon, tag) then
-    return
-  end
-'''
-"#.to_string();
-            fs::write(mod_dir.join("qm.toml"), qm_toml).map_err(|e| e.to_string())?;
-
-            let wep_lua = tpl_def
-                .map(|t| t.preview_code.to_string())
-                .unwrap_or_else(|| "-- Custom Weapon Module\n".to_string());
-            fs::write(mod_dir.join("custom_weapon.lua"), wep_lua).map_err(|e| e.to_string())?;
-        }
-
-        "custom_soldier_class" => {
-            let qm_toml = r#"[manifest]
-version = "1.0.0"
-priority = 50
-
-# 1. Register Soldier Archetype Module
-[[patches]]
-[patches.module]
-source = "custom_soldier.lua"
-before = "main.lua"
-name = "includes/custom_soldier"
-
-# 2. Hook into urb_engine.lua createAlliedSoldier
-[[patches]]
-[patches.pattern]
-target = "includes/urb_engine.lua"
-pattern = 'function createAlliedSoldier(dude, soldierClass, x, y)'
-position = "after"
-payload = '''
-  local custom_soldier = require "includes/custom_soldier"
-  if custom_soldier.applyArchetype(dude, soldierClass, x, y) then
-    return
-  end
-'''
-"#.to_string();
-            fs::write(mod_dir.join("qm.toml"), qm_toml).map_err(|e| e.to_string())?;
-
-            let sol_lua = tpl_def
-                .map(|t| t.preview_code.to_string())
-                .unwrap_or_else(|| "-- Custom Soldier Archetype Module\n".to_string());
-            fs::write(mod_dir.join("custom_soldier.lua"), sol_lua).map_err(|e| e.to_string())?;
-        }
-
-        "custom_battle_condition" => {
-            let qm_toml = r#"[manifest]
-version = "1.0.0"
-priority = 50
-
-# 1. Register Custom Battle Condition Module
-[[patches]]
-[patches.module]
-source = "custom_bc.lua"
-before = "main.lua"
-name = "includes/custom_bc"
-
-# 2. Hook into bcChecks.lua affectBc
-[[patches]]
-[patches.pattern]
-target = "includes/bcChecks.lua"
-pattern = 'function affectBc(bc)'
-position = "after"
-payload = '''
-  local custom_bc = require "includes/custom_bc"
-  custom_bc.affect(bc)
-'''
-"#.to_string();
-            fs::write(mod_dir.join("qm.toml"), qm_toml).map_err(|e| e.to_string())?;
-
-            let bc_lua = tpl_def
-                .map(|t| t.preview_code.to_string())
-                .unwrap_or_else(|| "-- Custom BC Module\n".to_string());
-            fs::write(mod_dir.join("custom_bc.lua"), bc_lua).map_err(|e| e.to_string())?;
-        }
-
-        "custom_reinforcement_card" => {
-            let qm_toml = r#"[manifest]
-version = "1.0.0"
-priority = 50
-
-# 1. Register Custom Call-in Card Module
-[[patches]]
-[patches.module]
-source = "custom_callin.lua"
-before = "main.lua"
-name = "includes/custom_callin"
-
-# 2. Hook into trench.lua trenchSkillReset
-[[patches]]
-[patches.pattern]
-target = "includes/trench.lua"
-pattern = 'function trenchSkillReset()'
-position = "after"
-payload = '''
-  local custom_callin = require "includes/custom_callin"
-  custom_callin.registerCard()
-'''
-"#.to_string();
-            fs::write(mod_dir.join("qm.toml"), qm_toml).map_err(|e| e.to_string())?;
-
-            let callin_lua = tpl_def
-                .map(|t| t.preview_code.to_string())
-                .unwrap_or_else(|| "-- Custom Call-in Card Module\n".to_string());
-            fs::write(mod_dir.join("custom_callin.lua"), callin_lua).map_err(|e| e.to_string())?;
-        }
-
-        "custom_map_structure" => {
-            let qm_toml = r#"[manifest]
-version = "1.0.0"
-priority = 50
-
-# 1. Register Custom Map Structure Module
-[[patches]]
-[patches.module]
-source = "map_structure.lua"
-before = "main.lua"
-name = "includes/map_structure"
-
-# 2. Hook into mapBuild.lua
-[[patches]]
-[patches.pattern]
-target = "includes/mapBuild.lua"
-pattern = 'function createTrenchLine(map)'
-position = "after"
-payload = '''
-  local map_structure = require "includes/map_structure"
-  map_structure.createConcretePillbox(200, 360, 0)
-'''
-"#.to_string();
-            fs::write(mod_dir.join("qm.toml"), qm_toml).map_err(|e| e.to_string())?;
-
-            let struct_lua = tpl_def
-                .map(|t| t.preview_code.to_string())
-                .unwrap_or_else(|| "-- Custom Map Structure Module\n".to_string());
-            fs::write(mod_dir.join("map_structure.lua"), struct_lua).map_err(|e| e.to_string())?;
-        }
-
-        "single_anchor_patch" => {
-            let qm_toml = tpl_def
-                .map(|t| t.preview_code.to_string())
-                .unwrap_or_else(|| {
-                    format!(
-                        r#"[manifest]
-version = "1.0.0"
-priority = 50
-
-[[patches]]
-[patches.pattern]
-target = "main.lua"
-pattern = 'require "includes/directives"'
-position = "after"
-payload = '''
-print("[{mod_name}] Initialized cleanly.")
-'''
-"#
-                    )
-                });
-            fs::write(mod_dir.join("qm.toml"), qm_toml).map_err(|e| e.to_string())?;
-        }
-
-        "multi_file_engine_hook" => {
-            let core_file = format!("{clean_id}_interceptor.lua");
-            let qm_toml = format!(
-                r#"[manifest]
-version = "1.0.0"
-priority = 50
-
-# 1. Register standalone interceptor module
-[[patches]]
-[patches.module]
-source = "{core_file}"
-before = "main.lua"
-name = "includes/{clean_id}_interceptor"
-
-# 2. Initialize in main.lua
-[[patches]]
-[patches.pattern]
-target = "main.lua"
-pattern = 'require "includes/directives"'
-position = "after"
-payload = '''
-{clean_id}_interceptor = require "includes/{clean_id}_interceptor"
-{clean_id}_interceptor.init()
-'''
-
-# 3. Intercept Game Tick
-[[patches]]
-[patches.pattern]
-target = "main.lua"
-pattern = 'function love.update(dt)'
-position = "after"
-payload = '''
-  if {clean_id}_interceptor and {clean_id}_interceptor.onTick then
-    {clean_id}_interceptor.onTick(dt)
-  end
-'''
-"#
-            );
-            fs::write(mod_dir.join("qm.toml"), qm_toml).map_err(|e| e.to_string())?;
-
-            let interceptor_lua = format!(
-                r#"-- {core_file} — Multi-File Engine Interceptor for {mod_name}
-local M = {{}}
-
-function M.init()
-  print("[{mod_name}] Engine interceptor initialized.")
-end
-
-function M.onTick(dt)
-  -- Persistent per-tick mod logic without destructive loop override
-end
-
-return M
-"#
-            );
-            fs::write(mod_dir.join(&core_file), interceptor_lua).map_err(|e| e.to_string())?;
-        }
-
-        "asset_file_injection" => {
-            let _ = fs::create_dir_all(mod_dir.join("assets").join("custom"));
-            let mod_file = format!("{clean_id}_module.lua");
-            let qm_toml = format!(
-                r#"[manifest]
-version = "1.0.0"
-priority = 45
-
-# 1. Register new Lua module into Love2D includes/
-[[patches]]
-[patches.module]
-source = "{mod_file}"
-before = "main.lua"
-name = "includes/{clean_id}_module"
-
-# 2. Mount mod asset directory to Love2D virtual filesystem
-[[patches]]
-[patches.pattern]
-target = "main.lua"
-pattern = 'function love.load()'
-position = "after"
-payload = '''
-  if love and love.filesystem and love.filesystem.mount then
-    love.filesystem.mount("MnB-Mods/{clean_id}", "assets/{clean_id}")
-  end
-'''
-"#
-            );
-            fs::write(mod_dir.join("qm.toml"), qm_toml).map_err(|e| e.to_string())?;
-
-            let module_lua = format!(
-                r#"-- {mod_file} — Injected Custom Module for {mod_name}
-local M = {{}}
-
-function M.hello()
-  return "Injected module '{mod_name}' loaded from Love2D virtual filesystem."
-end
-
-return M
-"#
-            );
-            fs::write(mod_dir.join(&mod_file), module_lua).map_err(|e| e.to_string())?;
-        }
-
-        "faction_mod" => {
+        _ => {
             let faction_toml = FACTION_TEMPLATE
-                .replace("custom_faction", &clean_id.replace('-', "_"))
+                .replace("custom_faction", &file)
                 .replace("Custom Faction", mod_name);
-            fs::write(mod_dir.join("faction.toml"), faction_toml).map_err(|e| e.to_string())?;
-            fs::write(
-                mod_dir.join("faction.schema.json"),
-                qm_schema::faction::FACTION_JSON_SCHEMA,
-            )
-            .map_err(|e| e.to_string())?;
+            write("faction.toml", faction_toml)?;
+            write(
+                "faction.schema.json",
+                qm_schema::faction::FACTION_JSON_SCHEMA.to_string(),
+            )?;
             for sub in ["units/base", "units/sarge", "weapons", "voices", "vehicles", "names"] {
                 let _ = fs::create_dir_all(mod_dir.join(sub));
             }
             fs::write(
                 mod_dir.join("names").join("last.txt"),
-                "# One last name per line. Lines starting with # are ignored.
-Ivanov
-Petrov
-Smirnov
-",
+                "# One last name per line. Lines starting with # are ignored.\nIvanov\nPetrov\nSmirnov\n",
             )
             .map_err(|e| e.to_string())?;
         }
-
-        _ => {
-            // Minimal patch mod fallback ("empty" or unknown template)
-            let qm_toml = format!(
-                r#"[manifest]
-version = "1.0.0"
-priority = 50
-
-# Add your [[patches]] blocks below:
-[[patches]]
-[patches.pattern]
-target = "main.lua"
-pattern = 'require "includes/directives"'
-position = "after"
-payload = '''
-print("[{mod_name}] Initialized successfully!")
-'''
-"#
-            );
-            fs::write(mod_dir.join("qm.toml"), qm_toml).map_err(|e| e.to_string())?;
-        }
     }
 
+    let check = if is_faction {
+        "qm faction check ."
+    } else {
+        "qm lint ."
+    };
     let readme = format!(
-        "# {mod_name}\n\nCreated with QuarterMaster Mod Scaffolder (Template: {norm_template}).\n\n## Features\n- Compatible with Mud and Blood `>=0.5.3`\n"
+        "# {mod_name}\n\n{mod_name} for Mud and Blood. Needs [QuarterMaster](https://github.com/Gamiseus/QuarterMaster).\n{readme_extra}\n## Working on it\n\n- Check it against the game: `{check}`\n- Try it: put this folder in your workspace mods folder and switch the launcher to Workspace, or run `qm import .` to copy it into the library.\n- Release it: raise `version` in `mod.json`, then `qm pack .`\n- The modding wiki: https://gamiseus.github.io/wiki/\n"
     );
-    fs::write(mod_dir.join("README.md"), readme).map_err(|e| e.to_string())?;
+    write("README.md", readme)?;
 
     Ok(mod_dir)
 }
@@ -3866,39 +3622,45 @@ mod tests {
     }
 
     #[test]
-    fn test_scaffold_new_mod_all_templates() {
-        let temp_dir = std::env::temp_dir().join(format!(
-            "qm_scaffold_test_{}",
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_millis()
-        ));
-        let _ = fs::create_dir_all(&temp_dir);
-
-        for t in BUILTIN_TEMPLATES {
-            let mod_id = format!("test_{}", t.id);
-            let mod_name = format!("Test {}", t.name);
-            let res = scaffold_new_mod(&temp_dir, &mod_id, &mod_name, "UnitTester", t.id);
-            assert!(
-                res.is_ok(),
-                "Failed to scaffold template '{}': {:?}",
-                t.id,
-                res.err()
-            );
-            let mod_dir = res.unwrap();
-            assert!(mod_dir.join("mod.json").is_file());
-            if t.id == "faction_mod" {
-                // A faction mod is data only: faction.toml instead of qm.toml.
-                assert!(mod_dir.join("faction.toml").is_file());
-                assert!(!mod_dir.join("assets").exists());
-            } else {
-                assert!(mod_dir.join("qm.toml").is_file());
+    fn every_starter_scaffolds_and_old_names_still_work() {
+        let temp = tempfile::tempdir().unwrap();
+        for (i, s) in MOD_STARTERS.iter().enumerate() {
+            let dir = scaffold_new_mod(temp.path(), &format!("test-mod-{i}"), &format!("Test Mod {i}"), "Tester", s.id).unwrap();
+            assert!(dir.join("mod.json").is_file() && dir.join("README.md").is_file(), "{}", s.id);
+            let manifest = ModManifest::from_path(&dir.join("mod.json")).unwrap();
+            assert!(manifest.relationships.requires.is_empty(), "{}: a new mod requires nothing", s.id);
+            match s.id {
+                "faction" => assert!(dir.join("faction.toml").is_file() && !dir.join("assets").exists()),
+                "assets" => assert!(dir.join("assets").join("sounds").is_dir() && !dir.join("qm.toml").exists()),
+                _ => {
+                    // The patch file reads, with the ids and the Lua file the template names.
+                    let text = fs::read_to_string(dir.join("qm.toml")).unwrap();
+                    let parsed: qm_core::patch::PatchFile = toml::from_str(&text).unwrap();
+                    assert!(!text.contains("__"), "{}: a placeholder was left in", s.id);
+                    for p in &parsed.patches {
+                        assert!(p.id().is_some_and(|id| id.starts_with(&format!("test-mod-{i}:"))), "{}", s.id);
+                    }
+                    if matches!(s.id, "module" | "settings") {
+                        let lua = fs::read_to_string(dir.join(format!("test_mod_{i}.lua"))).unwrap();
+                        assert!(lua.contains(&format!("_G.TestMod{i} = TestMod{i}")), "{lua}");
+                    }
+                    assert!(short_form_diagnostic(&dir, &[]).is_none());
+                }
             }
-            assert!(mod_dir.join("README.md").is_file());
+            if s.id == "settings" {
+                let cfg = qm_schema::ModConfigSchema::from_mod_dir(&dir).unwrap().unwrap();
+                assert_eq!(cfg.options.len(), 2);
+            }
+            for (n, alias) in s.aliases.iter().enumerate() {
+                let dir = scaffold_new_mod(temp.path(), "alias", &format!("Alias{i}x{n}"), "Tester", alias).unwrap();
+                assert!(dir.join("mod.json").is_file(), "{alias}");
+            }
         }
-
-        let _ = fs::remove_dir_all(&temp_dir);
+        // A removed template and a mistyped one say what to use instead.
+        let gone = scaffold_new_mod(temp.path(), "x", "Gone", "T", "custom_weapon").unwrap_err();
+        assert!(gone.contains("was removed") && gone.contains("module"), "{gone}");
+        let typo = scaffold_new_mod(temp.path(), "x", "Typo", "T", "modul").unwrap_err();
+        assert!(typo.contains("Unknown template") && !temp.path().join("Typo").exists(), "{typo}");
     }
 
     #[test]

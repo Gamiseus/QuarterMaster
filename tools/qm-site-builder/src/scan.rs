@@ -400,7 +400,26 @@ pub fn scan_archive(bytes: &[u8]) -> ArchiveScan {
 
         let ext = extension(&raw_name);
         let is_source = ext == "lua" || ext == "toml";
-        let limit = if is_source {
+        // A mod can load any of its files as code at run time, so a file that is neither an
+        // asset nor plainly a document is read as source too when it is text of a sane size.
+        let base = raw_name
+            .rsplit('/')
+            .next()
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        let is_document = [
+            "readme",
+            "license",
+            "licence",
+            "changelog",
+            "credits",
+            "notes",
+        ]
+        .iter()
+        .any(|d| base.starts_with(d));
+        let maybe_source =
+            !is_source && !is_document && !qm_schema::security::NOT_CODE.contains(&ext.as_str());
+        let limit = if is_source || maybe_source {
             MAX_SOURCE + 1
         } else {
             SNIFF as u64
@@ -457,6 +476,20 @@ pub fn scan_archive(bytes: &[u8]) -> ArchiveScan {
                 &name,
                 "is an archive inside the archive, which is not looked into.".into(),
             ));
+            continue;
+        }
+        if maybe_source {
+            // Too large or not text: it is data, not a script.
+            if data.len() as u64 <= MAX_SOURCE {
+                if let Ok(text) = std::str::from_utf8(&data) {
+                    scan_text(
+                        &name,
+                        text.trim_start_matches(char::from_u32(0xFEFF).unwrap_or(' ')),
+                        &rules,
+                        &mut out,
+                    );
+                }
+            }
             continue;
         }
         if !is_source {
@@ -542,6 +575,25 @@ mod tests {
         ]));
         assert!(scan.findings.is_empty(), "{:?}", scan.findings);
         assert!(scan.capabilities.is_empty());
+    }
+
+    /// Code under another extension is read like a `.lua` file; documents, assets and data that
+    /// is not text are not.
+    #[test]
+    fn text_files_with_other_extensions_are_scanned_as_code() {
+        let scan = scan_archive(&zip_of(&[
+            ("mod/qm.toml", b"[manifest]\nversion = \"1.0.0\"\n\n[[module]]\nsource = \"core.dat\"\nname = \"core\"\n"),
+            ("mod/core.dat", b"os.execute('calc')\n"),
+            ("mod/README.txt", b"This mod never calls os.execute.\n"),
+            ("mod/notes.md", b"os.execute is not used\n"),
+            ("mod/art/card.png", b"\x89PNG\r\n\x1a\nos.execute('x')"),
+            ("mod/blob.bin", &[0xff, 0xfe, 0x00, 0x01, 0x02]),
+        ]));
+        let files: Vec<&str> = scan.findings.iter().map(|f| f.file.as_str()).collect();
+        assert_eq!(files, ["mod/core.dat"], "{:?}", scan.findings);
+        assert!(scan
+            .capabilities
+            .contains(&SecurityCapability::ProcessExecution));
     }
 
     #[test]

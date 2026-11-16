@@ -266,6 +266,8 @@
 
   /* An author's group: a small stencil label above its patches. */
   .group-label {
+    /* Its own line, across the columns the rows flow into. */
+    grid-column: 1 / -1;
     padding: var(--qm-space-2) 0 var(--qm-space-1);
     color: var(--qm-text-muted);
     font-size: var(--qm-text-12);

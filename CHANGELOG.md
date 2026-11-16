@@ -2,13 +2,18 @@
 
 Versions are `Major.Minor.Patch`.
 
-## 1.9.1
+## 2.0.0
 
 - a patch can be written in a short form: `[[pattern]]`, `[[regex]]`, `[[copy]]` or `[[module]]` in place of `[[patches]]` and `[patches.<type>]`. Both forms can be mixed in one `qm.toml`, and patches keep the order they are written in
 - added feature name `short_patches`
 - a patch can have a `group`; the launcher lists a mod's patches under their groups on its Patches tab
 - launcher: the first-run setup, the import and move offers and Report a problem no longer close on a click outside them or on Escape
 - a QuarterMaster update also replaces `qm.exe` where it is installed
+- `qm new` has six templates that all pass `qm lint`: `empty`, `patch` (the default), `module`, `settings`, `assets` and `faction`. Old template names give the nearest one; seven gameplay templates that no longer matched the game were removed
+- a new mod from `qm new` requires no other mod and points its editor schemas at the site
+- `qm --help` describes every command in plain words and lists the templates; `qm --version` prints the version
+- `qm new` and `qm pack` refuse an option they do not know instead of ignoring it; `qm schema` writes into `schemas` by default
+- `qm lint` and `qm test-patches` print clearer results
 - launcher: the window's place and the launcher's browser data are kept in `qm-data` for an installed or portable copy, not in AppData
 - launcher: a mod with no update source is offered an update found by its id in the mod list, and never installs it without asking unless you chose that for the mod
 - `qm lint` warns when `qm.toml` uses the short patch form and `mod.json` does not list `short_patches`
@@ -17,9 +22,6 @@ Versions are `Major.Minor.Patch`.
 - fixed: a downloaded mod with two dots inside a file name (`v1..v2.txt`) was refused as unsafe
 - fixed: a `.zip` mod took its options from any `config.toml` or `qm.toml` inside it, not only the one at the mod's root
 - fixed: a sound or image the game reloads through a faction's replacement lost what the loader knew about it, so a later replacement or size rule could miss it
-
-## 1.9.0
-
 - there is an installer, `QuarterMaster_<version>_x64-setup.exe`: it installs to Program Files, can install the `qm` command-line tool and add it to PATH, and offers a Start menu entry and a desktop shortcut
 - the uninstaller takes QuarterMaster's files out of the game folder and, when asked, deletes mods, profiles, save slots and settings; a mod workspace folder is never deleted
 - launcher: Settings is in three groups (Game, Mods and saves, QuarterMaster) on one grid, so cards in a row line up; copies of old Mods folders are a row of the Backups card, shown while there are some

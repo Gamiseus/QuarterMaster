@@ -258,7 +258,7 @@
   }
 
   /* A narrow list (wide sidebar, small window) has no room for both: the name wins. */
-  @container (max-width: 35rem) {
+  @container (max-width: 42rem) {
     .name > :global(.badge) {
       display: none;
     }
