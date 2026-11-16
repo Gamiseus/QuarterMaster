@@ -2093,9 +2093,7 @@ impl QuarterMasterPaths {
             fs::write(&script_path, bat_content)
                 .map_err(|e| format!("Failed to write swap script: {e}"))?;
 
-            crate::winproc::system_command("cmd")
-                .args(["/C", "start", "", &script_path.to_string_lossy()])
-                .spawn()
+            spawn_hidden_script(&script_path, &self.cache_dir)
                 .map_err(|e| format!("Failed to execute swap script: {e}"))?;
 
             std::thread::spawn(|| {
@@ -2140,9 +2138,7 @@ impl QuarterMasterPaths {
             fs::write(&script_path, bat_content)
                 .map_err(|e| format!("Failed to write rollback script: {e}"))?;
 
-            crate::winproc::system_command("cmd")
-                .args(["/C", "start", "", &script_path.to_string_lossy()])
-                .spawn()
+            spawn_hidden_script(&script_path, &self.cache_dir)
                 .map_err(|e| format!("Failed to execute rollback script: {e}"))?;
 
             std::thread::spawn(|| {
@@ -2276,6 +2272,23 @@ impl QuarterMasterPaths {
             "changed_files": changed_files,
         })
     }
+}
+
+/// Runs a swap or rollback script in a `cmd` with no window, from the cache folder. Not through
+/// `start`: that opens a console that stays open after the script (`cmd /K`), and the script's
+/// own delete then fails in it. The working folder is the cache, so no leftover `cmd` keeps the
+/// program's folder in use.
+#[cfg(windows)]
+fn spawn_hidden_script(script: &Path, cwd: &Path) -> std::io::Result<std::process::Child> {
+    use std::os::windows::process::CommandExt;
+    let mut cmd = crate::winproc::system_command("cmd");
+    // One quoted path after /C, so cmd keeps the quotes around a path with spaces.
+    cmd.raw_arg(format!("/D /C \"{}\"", script.display()))
+        .current_dir(cwd)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    cmd.spawn()
 }
 
 /// What starts the launcher again at the end of a swap script (left out by tests).
@@ -3425,6 +3438,23 @@ mod tests {
         assert_eq!(SwapDir::text(&d.launcher).as_deref(), Some("launcher 2"));
         assert_eq!(SwapDir::text(&d.loader).as_deref(), Some("loader 2"));
         assert!(!d.old.exists() && !d.old_loader.exists());
+    }
+
+    /// The way the launcher really runs it: hidden, through `cmd /C`, from a folder with a space
+    /// and a percent sign. The swap happens and the script deletes itself afterwards.
+    #[cfg(windows)]
+    #[test]
+    fn a_hidden_swap_runs_and_removes_its_script() {
+        let d = SwapDir::new();
+        fs::write(&d.staged, "launcher 2").unwrap();
+        fs::write(&d.staged_loader, "loader 2").unwrap();
+        let script = swap_script(&d.launcher, &d.staged, &d.old, &d.loader, &d.staged_loader, &d.old_loader, &d.cli, false);
+        fs::write(&d.script, script).unwrap();
+        let status = spawn_hidden_script(&d.script, d.script.parent().unwrap()).unwrap().wait().unwrap();
+        assert!(status.success());
+        assert_eq!(SwapDir::text(&d.launcher).as_deref(), Some("launcher 2"));
+        assert_eq!(SwapDir::text(&d.loader).as_deref(), Some("loader 2"));
+        assert!(!d.script.exists(), "the script deletes itself");
     }
 
     #[cfg(windows)]

@@ -2,6 +2,10 @@
 
 Versions are `Major.Minor.Patch`.
 
+## 2.0.1
+
+- launcher: updating QuarterMaster no longer leaves a console window open with an error in it; the update itself was already fine
+
 ## 2.0.0
 
 - a patch can be written in a short form: `[[pattern]]`, `[[regex]]`, `[[copy]]` or `[[module]]` in place of `[[patches]]` and `[patches.<type>]`. Both forms can be mixed in one `qm.toml`, and patches keep the order they are written in
