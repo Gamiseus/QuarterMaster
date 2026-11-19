@@ -81,6 +81,8 @@ pub enum ConfigOptionType {
     Slider,
     Separator,
     Button,
+    /// One row that opens a sub-page holding the options whose `submenu` names it. Holds no value.
+    Submenu,
 }
 
 #[cfg_attr(feature = "specta", derive(specta::Type))]
@@ -104,6 +106,9 @@ pub struct ConfigOptionDef {
     /// (`ExampleMod.run`) is looked up one level into that global table.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub on_click: Option<String>,
+    /// The id of the `submenu` option this option is shown under. None: the mod's top page.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub submenu: Option<String>,
 }
 
 #[cfg_attr(feature = "specta", derive(specta::Type))]
@@ -193,6 +198,8 @@ struct TomlOptionDef {
     aliases: Vec<String>,
     #[serde(default)]
     on_click: Option<String>,
+    #[serde(default)]
+    submenu: Option<String>,
 }
 
 impl From<TomlOptionDef> for ConfigOptionDef {
@@ -212,6 +219,7 @@ impl From<TomlOptionDef> for ConfigOptionDef {
             button_text: t.button_text,
             aliases: t.aliases,
             on_click: t.on_click,
+            submenu: t.submenu,
         }
     }
 }
@@ -296,10 +304,12 @@ struct TomlModConfig {
 
 impl From<TomlModConfig> for ModConfigSchema {
     fn from(t: TomlModConfig) -> Self {
+        let mut options: Vec<ConfigOptionDef> = t.options.into_iter().map(Into::into).collect();
+        normalize_submenus(&mut options);
         Self {
             mod_id: t.mod_id,
             name: t.name.unwrap_or_else(|| "Mod".to_string()),
-            options: t.options.into_iter().map(Into::into).collect(),
+            options,
             modes: t.modes,
             pages: t.pages.into_iter().map(Into::into).collect(),
             keybinds: t.keybinds.into_iter().map(Into::into).collect(),
@@ -439,6 +449,7 @@ impl ModConfigSchema {
             }
         }
 
+        normalize_submenus(&mut options);
         Ok(ModConfigSchema {
             mod_id,
             name,
@@ -447,6 +458,45 @@ impl ModConfigSchema {
             pages: Vec::new(),
             keybinds: Vec::new(),
         })
+    }
+}
+
+/// An option whose `submenu` names no `submenu` option, or whose submenus lead back to
+/// itself, goes on the mod's top page, so every option can be reached.
+fn normalize_submenus(options: &mut [ConfigOptionDef]) {
+    let submenus: std::collections::HashSet<String> = options
+        .iter()
+        .filter(|o| o.option_type == ConfigOptionType::Submenu)
+        .map(|o| o.id.clone())
+        .collect();
+    for opt in options.iter_mut() {
+        if opt.submenu.as_ref().is_some_and(|p| !submenus.contains(p)) {
+            opt.submenu = None;
+        }
+    }
+    // Break loops: walk each submenu's parents; one that comes back to itself goes to the top.
+    let parent_of = |options: &[ConfigOptionDef], id: &str| -> Option<String> {
+        options.iter().find(|o| o.id == id).and_then(|o| o.submenu.clone())
+    };
+    for i in 0..options.len() {
+        if options[i].option_type != ConfigOptionType::Submenu {
+            continue;
+        }
+        let own = options[i].id.clone();
+        let mut cur = options[i].submenu.clone();
+        let mut steps = 0;
+        while let Some(p) = cur {
+            if p == own {
+                options[i].submenu = None;
+                break;
+            }
+            // A loop further up is broken when its own submenus come round.
+            if steps > options.len() {
+                break;
+            }
+            steps += 1;
+            cur = parent_of(options, &p);
+        }
     }
 }
 
@@ -593,6 +643,7 @@ fn parse_option_entry(
         "slider" | "range" | "number" => ConfigOptionType::Slider,
         "separator" | "header" => ConfigOptionType::Separator,
         "button" | "action" => ConfigOptionType::Button,
+        "submenu" => ConfigOptionType::Submenu,
         _ => ConfigOptionType::Checkbox,
     };
 
@@ -660,6 +711,7 @@ fn parse_option_entry(
         aliases: Vec::new(),
         on_click: extract_string_field(&clean, "on_click")
             .or_else(|| extract_string_field(&clean, "onClick")),
+        submenu: extract_string_field(&clean, "submenu"),
     })
 }
 
@@ -815,8 +867,13 @@ impl ModSettingsStore {
     /// Safe-reset: preserves valid user choices for `mod_id` and resets only unknown or out-of-range keys to defaults.
     pub fn safe_reset_mod(&mut self, mod_id: &str, schema: &ModConfigSchema) {
         let entry = self.mods.entry(mod_id.to_string()).or_default();
-        let valid_ids: std::collections::HashSet<String> =
-            schema.options.iter().map(|o| o.id.clone()).collect();
+        // A submenu holds no value, so a value saved under its id is dropped too.
+        let valid_ids: std::collections::HashSet<String> = schema
+            .options
+            .iter()
+            .filter(|o| o.option_type != ConfigOptionType::Submenu)
+            .map(|o| o.id.clone())
+            .collect();
         entry.retain(|k, _| valid_ids.contains(k));
 
         for opt in &schema.options {

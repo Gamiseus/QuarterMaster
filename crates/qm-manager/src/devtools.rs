@@ -2538,6 +2538,26 @@ pub fn short_form_diagnostic(mod_dir: &Path, qm_features: &[String]) -> Option<M
     )))
 }
 
+/// A warning when the mod's options (`config.toml`, `[config]` in `qm.toml` or `config.lua`) use
+/// a submenu and `mod.json` does not list `config_submenus`: a QuarterMaster from before
+/// submenus cannot read those options.
+pub fn submenu_diagnostic(mod_dir: &Path, qm_features: &[String]) -> Option<ManifestDiagnostic> {
+    if qm_features.iter().any(|f| f == "config_submenus") {
+        return None;
+    }
+    let schema = qm_schema::ModConfigSchema::from_mod_dir(mod_dir).ok()??;
+    let used = schema
+        .options
+        .iter()
+        .any(|o| o.option_type == qm_schema::ConfigOptionType::Submenu);
+    if !used {
+        return None;
+    }
+    Some(ManifestDiagnostic::warning(
+        "The mod's options use a submenu (type = \"submenu\"). Add \"config_submenus\" to \"qm_features\" in mod.json: without it, a QuarterMaster older than 2.0.2 cannot read the mod's options.".to_string(),
+    ))
+}
+
 /// 1. Validates `mod.json` schema & version ranges
 /// 2. Parses `qm.toml` and verifies all `[[patches.module]]` / `[[patches.copy]]` source files exist
 /// 3. Dry-runs every patch against `vanilla_files` to verify 0 broken anchors
@@ -2549,6 +2569,7 @@ pub fn lint_mod_directory(
     let installed = inspect_mod_directory(mod_dir, false)?;
     let mut diagnostics = installed.manifest.validate();
     diagnostics.extend(short_form_diagnostic(mod_dir, &installed.manifest.qm_features));
+    diagnostics.extend(submenu_diagnostic(mod_dir, &installed.manifest.qm_features));
 
     // Load patches via a temporary parent structure or directly parse `qm.toml`
     let temp = tempfile::Builder::new()
@@ -3337,6 +3358,38 @@ mod tests {
         let long = "[manifest]\nversion = \"1.0.0\"\n\n[[patches]]\n[patches.pattern]\ntarget = \"main.lua\"\npattern = \"x\"\nposition = \"after\"\npayload = \"y\"\n";
         fs::write(tmp.path().join("qm.toml"), long).unwrap();
         assert!(short_form_diagnostic(tmp.path(), &[]).is_none());
+    }
+
+    #[test]
+    fn lint_warns_when_a_submenu_is_used_without_its_feature_name() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cfg = r#"
+[[options]]
+id = "advanced"
+label = "Advanced"
+type = "submenu"
+
+[[options]]
+id = "flag"
+label = "Flag"
+type = "checkbox"
+default = true
+submenu = "advanced"
+"#;
+        fs::write(tmp.path().join("config.toml"), cfg).unwrap();
+        let d = submenu_diagnostic(tmp.path(), &[]).unwrap();
+        assert!(d.message.contains("config_submenus"), "{}", d.message);
+        assert!(submenu_diagnostic(tmp.path(), &["config_submenus".to_string()]).is_none());
+        // No submenu, or no options at all: nothing to say.
+        let plain = r#"
+[[options]]
+id = "flag"
+label = "Flag"
+"#;
+        fs::write(tmp.path().join("config.toml"), plain).unwrap();
+        assert!(submenu_diagnostic(tmp.path(), &[]).is_none());
+        fs::remove_file(tmp.path().join("config.toml")).unwrap();
+        assert!(submenu_diagnostic(tmp.path(), &[]).is_none());
     }
 
     /// A folder with a launcher, its loader and (when given) a staged pair, as an update finds it.

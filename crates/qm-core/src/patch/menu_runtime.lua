@@ -23,6 +23,7 @@ menu.menuButtons = {}     -- Array of custom game mode cards
 menu.optionsByMod = {}    -- modId -> { id, name, options }
 menu.modList = {}         -- Ordered list of modIds
 menu.activeModIndex = 1   -- Selected tab on Screen 86
+menu.openSubmenu = {}     -- modId -> id of the submenu open on Screen 86 (nil: the mod's top page)
 menu.savedSettings = {}   -- Persistent table saved to saveModSettings.lua
 
 -- Sound helper
@@ -165,6 +166,41 @@ end
 local function snakeToCamel(s)
   if type(s) ~= "string" then return s end
   return (s:gsub("_(%a)", function(c) return c:upper() end))
+end
+
+local function optionTypeOf(opt)
+  return opt.option_type or opt.type
+end
+
+local function isSubmenu(opt)
+  return optionTypeOf(opt) == "submenu"
+end
+
+-- A checkbox may hold true/false or 1/0, so a rule written with one matches the other.
+local function sameValue(a, b)
+  if a == b then return true end
+  if type(a) == "boolean" and type(b) == "number" then return (a and 1 or 0) == b end
+  if type(b) == "boolean" and type(a) == "number" then return (b and 1 or 0) == a end
+  return false
+end
+
+local function findOption(modId, id)
+  local modData = menu.optionsByMod[modId]
+  if not modData or not modData.options or id == nil then return nil end
+  for _, opt in ipairs(modData.options) do
+    if opt.id == id then return opt end
+  end
+  return nil
+end
+
+-- The submenu an option is shown under, or nil for the mod's top page. A `submenu` that names
+-- no submenu option of the same mod counts as the top page.
+local function submenuOf(modId, opt)
+  local parentId = opt.submenu
+  if parentId == nil or parentId == opt.id then return nil end
+  local parent = findOption(modId, parentId)
+  if parent and isSubmenu(parent) then return parentId end
+  return nil
 end
 
 local function getOptionAliases(opt)
@@ -311,6 +347,13 @@ function menu.registerOption(modId, modName, def)
   _G.QM.settings[modId] = _G.QM.settings[modId] or {}
   menu.savedSettings[modId] = menu.savedSettings[modId] or {}
 
+  -- A submenu is only a row that opens a page: it holds no value.
+  if isSubmenu(def) then
+    _G.QM.settings[modId][def.id] = nil
+    menu.savedSettings[modId][def.id] = nil
+    return
+  end
+
   -- Determine active setting value: saved > default
   local initialVal = def.default
   if menu.savedSettings[modId][def.id] ~= nil then
@@ -337,6 +380,7 @@ function menu.registerOption(modId, modName, def)
 end
 
 function menu.getOptionValue(modId, opt)
+  if isSubmenu(opt) then return nil end
   if _G.QM.settings[modId] and _G.QM.settings[modId][opt.id] ~= nil then
     return _G.QM.settings[modId][opt.id]
   end
@@ -365,28 +409,75 @@ function menu.setOptionValue(modId, opt, newVal)
   end
 end
 
-function menu.getVisibleOptions(modId)
+-- Whether an option's `show_if` lets it show, from the current value of the option it names.
+function menu.isOptionShown(modId, opt)
+  local rule = opt.show_if
+  if not rule then return true end
+  local targetId = rule.option_id or rule.id
+  if not targetId then return true end
+  local target = findOption(modId, targetId)
+  local depVal
+  if target then
+    depVal = menu.getOptionValue(modId, target)
+  else
+    depVal = _G.QM.settings[modId] and _G.QM.settings[modId][targetId]
+  end
+  if rule.equals and type(rule.equals) == "table" and #rule.equals > 0 then
+    for _, allowed in ipairs(rule.equals) do
+      if sameValue(depVal, allowed) then return true end
+    end
+    return false
+  elseif rule.value ~= nil then
+    return sameValue(depVal, rule.value)
+  end
+  return true
+end
+
+-- The submenu open for a mod, or nil for its top page. When the open submenu, or one it sits
+-- in, is hidden by `show_if` or gone, the deepest one still shown is used.
+function menu.currentSubmenu(modId)
+  local chain = {}
+  local cur = menu.openSubmenu[modId]
+  while cur ~= nil and #chain < 64 do
+    table.insert(chain, 1, cur)
+    local opt = findOption(modId, cur)
+    cur = opt and submenuOf(modId, opt) or nil
+  end
+  local valid = nil
+  for _, id in ipairs(chain) do
+    local opt = findOption(modId, id)
+    if opt and isSubmenu(opt) and menu.isOptionShown(modId, opt) then
+      valid = id
+    else
+      break
+    end
+  end
+  menu.openSubmenu[modId] = valid
+  return valid
+end
+
+function menu.openSubmenuPage(modId, submenuId)
+  menu.openSubmenu[modId] = submenuId
+end
+
+-- Up one level: from a submenu to the page it sits on. False when already on the top page.
+function menu.closeSubmenuPage(modId)
+  local cur = menu.currentSubmenu(modId)
+  if cur == nil then return false end
+  local opt = findOption(modId, cur)
+  menu.openSubmenu[modId] = opt and submenuOf(modId, opt) or nil
+  return true
+end
+
+-- The options shown on one page of a mod: its top page (submenuId nil) or a submenu. With no
+-- submenuId given, the page open on Screen 86.
+function menu.getVisibleOptions(modId, submenuId)
   local modData = menu.optionsByMod[modId]
   if not modData or not modData.options then return {} end
+  if submenuId == nil then submenuId = menu.currentSubmenu(modId) end
   local list = {}
   for _, opt in ipairs(modData.options) do
-    local isVis = true
-    if opt.show_if then
-      local rule = opt.show_if
-      local targetId = rule.option_id or rule.id
-      if targetId then
-        local depVal = _G.QM.settings[modId] and _G.QM.settings[modId][targetId]
-        if rule.equals and type(rule.equals) == "table" and #rule.equals > 0 then
-          isVis = false
-          for _, allowed in ipairs(rule.equals) do
-            if depVal == allowed then isVis = true; break end
-          end
-        elseif rule.value ~= nil then
-          isVis = (depVal == rule.value)
-        end
-      end
-    end
-    if isVis then
+    if submenuOf(modId, opt) == submenuId and menu.isOptionShown(modId, opt) then
       table.insert(list, opt)
     end
   end
@@ -596,6 +687,7 @@ end
 
 function _G.menu_modOptionsButton()
   playClickSound()
+  menu.openSubmenu = {}
   menuPage = menu.PAGE_MOD_OPTIONS
   mouseOverText = ""
   contextualText = ""
@@ -798,6 +890,12 @@ function menu.registerModOptionsButtons()
   buttons[#buttons + 1] = Button.new(32, 686, 60, 30, "qm_opt_back", "active", true, mouseOverBack)
   _G.qm_opt_backButton = function()
     playClickSound()
+    local backModId = getActiveModAndOptions()
+    if backModId and menu.closeSubmenuPage(backModId) then
+      mouseOverText = ""
+      contextualText = ""
+      return
+    end
     local hasModes = menu.menuButtons and #menu.menuButtons > 0
     menuPage = hasModes and menu.PAGE_MOD_MODES or 1
     mouseOverText = ""
@@ -854,6 +952,7 @@ function menu.registerModOptionsButtons()
       _G[tabLabel .. "Button"] = function()
         playClickSound()
         menu.activeModIndex = mIdx
+        menu.openSubmenu[mId] = nil
       end
     end
   end
@@ -915,6 +1014,12 @@ function menu.registerModOptionsButtons()
           playClickSound()
           menu.setOptionValue(activeModId, opt, nextVal)
         end
+
+      elseif optType == "submenu" then
+        playClickSound()
+        menu.openSubmenuPage(activeModId, opt.id)
+        mouseOverText = ""
+        contextualText = ""
 
       elseif optType == "button" then
         playClickSound()
@@ -1019,6 +1124,22 @@ function menu.drawModOptions()
     return
   end
 
+  -- Where in the mod's submenus this page is, under the title.
+  local openId = menu.currentSubmenu(activeModId)
+  if openId and nonoFont then
+    local path = {}
+    local cur = openId
+    while cur ~= nil and #path < 64 do
+      local sub = findOption(activeModId, cur)
+      if not sub then break end
+      table.insert(path, 1, (sub.label or sub.id):upper())
+      cur = submenuOf(activeModId, sub)
+    end
+    love.graphics.setFont(nonoFont)
+    love.graphics.setColor(love.math.colorFromBytes(180, 180, 180, fade))
+    love.graphics.print(table.concat(path, "  >  "), 32, 162)
+  end
+
   local options = menu.getVisibleOptions(activeModId)
   if #options == 0 then
     drawCleanShadowText("No options visible in this view.", 50, 220, 600, "left", bigFont)
@@ -1121,6 +1242,23 @@ function menu.drawModOptions()
 
       local btnColor = { 255, 255, 255, fade }
       drawCleanShadowText(opt.button_text or opt.buttonText or "EXECUTE", btnX, btnY + 4, btnW, "center", cardFont or bigFont, btnColor)
+
+    elseif optType == "submenu" then
+      -- The whole row opens the submenu; the arrow box shows it does.
+      local btnW = 40
+      local btnH = 30
+      local btnX = cardX + cardW - btnW - 15
+      local btnY = cardY + 10
+
+      love.graphics.setColor(love.math.colorFromBytes(28, 30, 34, 240))
+      love.graphics.rectangle("fill", btnX, btnY, btnW, btnH)
+      if hovered then
+        love.graphics.setColor(love.math.colorFromBytes(101, 24, 24, 210))
+        love.graphics.rectangle("fill", btnX + 1, btnY + 1, btnW - 2, btnH - 2)
+      end
+      love.graphics.setColor(love.math.colorFromBytes(75, 80, 90, 255))
+      love.graphics.rectangle("line", btnX, btnY, btnW, btnH)
+      drawCleanShadowText(">", btnX, btnY + 4, btnW, "center", cardFont or bigFont, { 255, 255, 255, fade })
     end
   end
 

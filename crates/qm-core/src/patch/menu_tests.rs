@@ -21,6 +21,7 @@ fn test_compile_menu_configs_generates_valid_lua_table() {
             button_text: None,
             aliases: Vec::new(),
             on_click: None,
+            submenu: None,
         }],
         modes: Vec::new(),
         pages: Vec::new(),

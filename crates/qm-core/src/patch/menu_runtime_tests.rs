@@ -18,3 +18,26 @@ fn test_menu_runtime_lua_embedded_and_valid() {
     assert!(runtime.contains("registerOptionButtonHandlers"), "Must implement automatic op_*Button registration");
     assert!(runtime.contains("applyOptionToTable"), "Must implement option-to-table alias mapping");
 }
+
+/// Submenu pages and `show_if`, run by a real Lua interpreter with the game's drawing stubbed.
+#[test]
+fn submenus_and_show_if_in_the_options_screen() {
+    let Some(lua) = ["luajit", "lua5.1", "lua"].into_iter().find(|exe| {
+        std::process::Command::new(exe).arg("-v").output().is_ok()
+    }) else {
+        eprintln!("skipping menu runtime test: needs a Lua interpreter");
+        return;
+    };
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let out = std::process::Command::new(lua)
+        .arg(dir.join("testdata/menu_harness.lua"))
+        .arg(dir.join("src/patch/menu_runtime.lua"))
+        .output()
+        .unwrap();
+    let text = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(out.status.success() && text.contains("ok"), "menu harness failed:\n{text}");
+}

@@ -1530,11 +1530,15 @@ export type ConfigOptionDef = { id: string; label: string; option_type: ConfigOp
  * For a `button`: the global function the game calls on a click, by name. A dotted name
  * (`ExampleMod.run`) is looked up one level into that global table.
  */
-on_click?: string | null }
+on_click?: string | null; 
+/**
+ * The id of the `submenu` option this option is shown under. None: the mod's top page.
+ */
+submenu?: string | null }
 /**
  * Normalized option control type for the Launcher UI and `GMenu`.
  */
-export type ConfigOptionType = "checkbox" | "cycle" | "slider" | "separator" | "button"
+export type ConfigOptionType = "checkbox" | "cycle" | "slider" | "separator" | "button" | "submenu"
 export type ConfigPageDef = { id: string; title: string; page_type: string | null; content: string | null; action_label: string | null; action_on_click: string | null }
 export type ConfigResetMode = "defaults" | "safe"
 /**

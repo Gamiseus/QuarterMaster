@@ -2,7 +2,7 @@
   import { Button, Select, Switch, TextField } from "../../../components/ui";
   import { call } from "../../../lib/api";
   import { commands, type ConfigResetMode, type ConfigValue, type ModConfigSchema } from "../../../lib/bindings";
-  import { buildForm, clampNumber, diffValues, selectValue, type FieldModel } from "../../../lib/modlist/config-form";
+  import { buildForm, clampNumber, diffValues, fieldsUnder, selectValue, type FieldModel } from "../../../lib/modlist/config-form";
 
   type Values = Partial<Record<string, ConfigValue>>;
 
@@ -66,59 +66,81 @@
   const reset = (mode: ConfigResetMode) => run(() => call(commands.modConfigReset(modId, mode)));
 </script>
 
+<!-- One level of options; a group (submenu) opens to its own options below its heading. -->
+{#snippet level(parent: string | null)}
+  {#each fieldsUnder(fields, parent) as f (f.key)}
+    {#if f.kind === "group"}
+      <details class="group">
+        <summary>
+          <span class="group-label">{f.label}</span>
+          {#if f.description}
+            <span class="hint qm-muted">{f.description}</span>
+          {/if}
+        </summary>
+        <div class="options nested">
+          {#if fieldsUnder(fields, f.key).length === 0}
+            <p class="hint qm-muted">No options to show here with the current settings.</p>
+          {/if}
+          {@render level(f.key)}
+        </div>
+      </details>
+    {:else}
+      <div class="field">
+        {#if f.kind === "bool"}
+          <Switch
+            checked={f.value === true}
+            label={f.label}
+            disabled={!canMutate || busy}
+            onCheckedChange={(v: boolean) => set(f.key, v)}
+          />
+        {:else if f.kind === "number"}
+          <TextField
+            type="number"
+            label={f.label}
+            bind:value={() => drafts[f.key] ?? String(f.value), (v) => typeNumber(f, v)}
+            min={f.min}
+            max={f.max}
+            step={f.step}
+            disabled={!canMutate || busy}
+            onchange={() => settleNumber(f)}
+          />
+        {:else if f.kind === "string"}
+          <TextField
+            label={f.label}
+            value={String(f.value)}
+            disabled={!canMutate || busy}
+            oninput={(e) => set(f.key, e.currentTarget.value)}
+          />
+        {:else if f.kind === "select"}
+          <Select
+            label={f.label}
+            items={(f.options ?? []).map((o, i) => ({ value: o, label: f.labels?.[i] ?? o }))}
+            bind:value={() => String(f.value), (v) => v !== undefined && set(f.key, selectValue(f, v))}
+            disabled={!canMutate || busy}
+          />
+        {:else}
+          <div class="readonly">
+            <span class="qm-muted">{f.label}</span>
+            {#if f.value === null}
+              <span class="qm-muted">Not set</span>
+            {:else}
+              <span>{String(f.value)}</span>
+            {/if}
+          </div>
+        {/if}
+        {#if f.description}
+          <p class="hint qm-muted">{f.description}</p>
+        {/if}
+      </div>
+    {/if}
+  {/each}
+{/snippet}
+
 <div class="options">
   {#if fields.length === 0}
     <p class="qm-muted">This mod has no options.</p>
   {/if}
-  {#each fields as f (f.key)}
-    <div class="field">
-      {#if f.kind === "bool"}
-        <Switch
-          checked={f.value === true}
-          label={f.label}
-          disabled={!canMutate || busy}
-          onCheckedChange={(v: boolean) => set(f.key, v)}
-        />
-      {:else if f.kind === "number"}
-        <TextField
-          type="number"
-          label={f.label}
-          bind:value={() => drafts[f.key] ?? String(f.value), (v) => typeNumber(f, v)}
-          min={f.min}
-          max={f.max}
-          step={f.step}
-          disabled={!canMutate || busy}
-          onchange={() => settleNumber(f)}
-        />
-      {:else if f.kind === "string"}
-        <TextField
-          label={f.label}
-          value={String(f.value)}
-          disabled={!canMutate || busy}
-          oninput={(e) => set(f.key, e.currentTarget.value)}
-        />
-      {:else if f.kind === "select"}
-        <Select
-          label={f.label}
-          items={(f.options ?? []).map((o, i) => ({ value: o, label: f.labels?.[i] ?? o }))}
-          bind:value={() => String(f.value), (v) => v !== undefined && set(f.key, selectValue(f, v))}
-          disabled={!canMutate || busy}
-        />
-      {:else}
-        <div class="readonly">
-          <span class="qm-muted">{f.label}</span>
-          {#if f.value === null}
-            <span class="qm-muted">Not set</span>
-          {:else}
-            <span>{String(f.value)}</span>
-          {/if}
-        </div>
-      {/if}
-      {#if f.description}
-        <p class="hint qm-muted">{f.description}</p>
-      {/if}
-    </div>
-  {/each}
+  {@render level(null)}
   {#if fields.length > 0}
     <div class="actions">
       <Button variant="primary" size="sm" disabled={!canMutate || busy || !dirty} onclick={save}>Save</Button>
@@ -137,8 +159,50 @@
     align-items: start;
   }
 
-  .options > :is(p, .actions) {
+  .options > :is(p, .actions, .group) {
     grid-column: 1 / -1;
+  }
+
+  /* A submenu: a bordered block that opens to its own grid of options. */
+  .group {
+    border: 1px solid var(--qm-border);
+    border-radius: var(--qm-radius-sm);
+    padding: var(--qm-space-2) var(--qm-space-3);
+  }
+
+  .group > summary {
+    display: flex;
+    flex-direction: column;
+    gap: var(--qm-space-1);
+    cursor: pointer;
+  }
+
+  .group > summary {
+    list-style: none;
+  }
+
+  .group > summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .group-label::before {
+    content: "\25B8";
+    display: inline-block;
+    width: 1.2em;
+    transition: transform 120ms ease;
+  }
+
+  .group[open] > summary .group-label::before {
+    transform: rotate(90deg);
+  }
+
+  .group > summary:focus-visible {
+    outline: none;
+    box-shadow: var(--qm-focus-ring);
+  }
+
+  .nested {
+    margin-top: var(--qm-space-3);
   }
 
   .field {

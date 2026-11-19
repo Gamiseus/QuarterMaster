@@ -219,3 +219,150 @@ type = "checkbox"
     let schema3 = ModConfigSchema::from_mod_dir(&mod_dir).unwrap().unwrap();
     assert_eq!(schema3.name, "Mod C (versioned)");
 }
+
+#[test]
+fn a_submenu_holds_the_options_that_name_it() {
+    let toml = r#"
+id = "example_mod"
+name = "Example Mod"
+
+[[options]]
+id = "speed"
+label = "Speed"
+type = "checkbox"
+default = true
+
+[[options]]
+id = "advanced"
+label = "Advanced"
+type = "submenu"
+description = "Finer settings"
+
+[[options]]
+id = "advanced_flag"
+label = "Flag"
+type = "checkbox"
+default = false
+submenu = "advanced"
+"#;
+    let schema = ModConfigSchema::from_toml_str(toml).unwrap();
+    assert_eq!(schema.options[1].option_type, ConfigOptionType::Submenu);
+    assert_eq!(schema.options[1].default, None);
+    assert_eq!(schema.options[0].submenu, None);
+    assert_eq!(schema.options[2].submenu.as_deref(), Some("advanced"));
+
+    // The game and the launcher get the key; an option outside a submenu leaves it out.
+    let json = serde_json::to_value(&schema).unwrap();
+    assert_eq!(json["options"][1]["option_type"], "submenu");
+    assert_eq!(json["options"][2]["submenu"], "advanced");
+    assert!(json["options"][0].get("submenu").is_none());
+}
+
+#[test]
+fn an_option_whose_submenu_cannot_be_reached_goes_on_the_top_page() {
+    let toml = r#"
+[[options]]
+id = "plain"
+label = "Plain"
+type = "checkbox"
+
+[[options]]
+id = "missing_parent"
+label = "Missing"
+type = "checkbox"
+submenu = "nowhere"
+
+[[options]]
+id = "not_a_submenu"
+label = "Not A Submenu"
+type = "checkbox"
+submenu = "plain"
+
+[[options]]
+id = "loop_a"
+label = "Loop A"
+type = "submenu"
+submenu = "loop_b"
+
+[[options]]
+id = "loop_b"
+label = "Loop B"
+type = "submenu"
+submenu = "loop_a"
+
+[[options]]
+id = "self_loop"
+label = "Self"
+type = "submenu"
+submenu = "self_loop"
+
+[[options]]
+id = "inner"
+label = "Inner"
+type = "submenu"
+submenu = "loop_b"
+"#;
+    let schema = ModConfigSchema::from_toml_str(toml).unwrap();
+    let parent = |id: &str| {
+        schema
+            .options
+            .iter()
+            .find(|o| o.id == id)
+            .unwrap()
+            .submenu
+            .clone()
+    };
+    assert_eq!(parent("missing_parent"), None);
+    assert_eq!(parent("not_a_submenu"), None);
+    assert_eq!(parent("self_loop"), None);
+    // One link of the loop is cut, so both submenus can be reached from the top page.
+    assert!(parent("loop_a").is_none() || parent("loop_b").is_none());
+    assert!(parent("loop_a").is_some() || parent("loop_b").is_some());
+    assert_eq!(parent("inner").as_deref(), Some("loop_b"));
+}
+
+#[test]
+fn a_config_lua_option_can_be_in_a_submenu() {
+    let lua = r#"
+return {
+  name = "Example Mod",
+  options = {
+    { id = "advanced", label = "Advanced", type = "submenu" },
+    { id = "advanced_flag", label = "Flag", type = "checkbox", default = false, submenu = "advanced" },
+  }
+}"#;
+    let schema = ModConfigSchema::from_lua_str(lua).unwrap();
+    assert_eq!(schema.options[0].option_type, ConfigOptionType::Submenu);
+    assert_eq!(schema.options[0].submenu, None);
+    assert_eq!(schema.options[1].submenu.as_deref(), Some("advanced"));
+}
+
+#[test]
+fn safe_reset_drops_a_value_saved_under_a_submenu() {
+    let toml = r#"
+[[options]]
+id = "advanced"
+label = "Advanced"
+type = "submenu"
+
+[[options]]
+id = "advanced_flag"
+label = "Flag"
+type = "checkbox"
+default = true
+submenu = "advanced"
+"#;
+    let schema = ModConfigSchema::from_toml_str(toml).unwrap();
+    let mut store = ModSettingsStore::default();
+    store.mods.insert(
+        "example_mod".into(),
+        HashMap::from([
+            ("advanced".to_string(), ConfigValue::Bool(true)),
+            ("advanced_flag".to_string(), ConfigValue::Bool(false)),
+        ]),
+    );
+    store.safe_reset_mod("example_mod", &schema);
+    let saved = &store.mods["example_mod"];
+    assert!(!saved.contains_key("advanced"));
+    assert_eq!(saved["advanced_flag"], ConfigValue::Bool(false));
+}

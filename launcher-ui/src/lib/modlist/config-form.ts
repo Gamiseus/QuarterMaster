@@ -1,6 +1,7 @@
 import type { ConfigOptionDef, ConfigValue, ModConfigSchema } from "../bindings";
 
-export type FieldKind = "bool" | "number" | "string" | "select" | "readonly";
+/** `group` is a submenu: a heading over the fields whose `parent` names it. It holds no value. */
+export type FieldKind = "bool" | "number" | "string" | "select" | "readonly" | "group";
 
 export type FieldModel = {
   key: string;
@@ -17,6 +18,10 @@ export type FieldModel = {
   min?: number;
   max?: number;
   step?: number;
+  /** The key of the group (submenu) this field is shown under; none for the top level. */
+  parent?: string;
+  /** Shown only while the field `key` holds one of `equals`. */
+  showIf?: { key: string; equals: ConfigValue[] };
 };
 
 function kindOf(def: ConfigOptionDef, value: ConfigValue): FieldKind {
@@ -37,14 +42,17 @@ function kindOf(def: ConfigOptionDef, value: ConfigValue): FieldKind {
 /** One field per schema option. Unknown types, type mismatches and options with no value are read only. */
 export function buildForm(schema: ModConfigSchema, saved: Partial<Record<string, ConfigValue>>): FieldModel[] {
   return schema.options.map((def) => {
-    const value = saved[def.id] ?? def.default ?? null;
+    const group = def.option_type === "submenu";
+    const value = group ? null : (saved[def.id] ?? def.default ?? null);
     const field: FieldModel = {
       key: def.id,
       label: def.label || def.id,
-      kind: value === null ? "readonly" : kindOf(def, value),
+      kind: group ? "group" : value === null ? "readonly" : kindOf(def, value),
       value,
     };
     if (def.description) field.description = def.description;
+    if (def.submenu) field.parent = def.submenu;
+    if (def.show_if) field.showIf = { key: def.show_if.option_id, equals: [...def.show_if.equals] };
     if (field.kind === "select") {
       field.options = def.options.map(String);
       field.choices = [...def.options];
@@ -84,4 +92,30 @@ export function clampNumber(field: FieldModel, n: number): number {
   if (field.min !== undefined) out = Math.max(field.min, out);
   if (field.max !== undefined) out = Math.min(field.max, out);
   return out;
+}
+
+/** Equal values; a switch's `true`/`false` also matches `1`/`0`, as in the game. */
+export function sameValue(a: ConfigValue | null, b: ConfigValue | null): boolean {
+  if (a === b) return true;
+  if (typeof a === "boolean" && typeof b === "number") return (a ? 1 : 0) === b;
+  if (typeof b === "boolean" && typeof a === "number") return (b ? 1 : 0) === a;
+  return false;
+}
+
+/** Whether a field's `showIf` lets it show, from the current values of `fields`. */
+export function isShown(field: FieldModel, fields: FieldModel[]): boolean {
+  if (!field.showIf || field.showIf.equals.length === 0) return true;
+  const target = fields.find((f) => f.key === field.showIf!.key);
+  const value = target ? target.value : null;
+  return field.showIf.equals.some((v) => sameValue(value, v));
+}
+
+/** The shown fields directly under a group, or at the top level for `null`. A `parent` that
+ * names no group counts as the top level. */
+export function fieldsUnder(fields: FieldModel[], parent: string | null): FieldModel[] {
+  const groups = new Set(fields.filter((f) => f.kind === "group").map((f) => f.key));
+  return fields.filter((f) => {
+    const p = f.parent !== undefined && f.parent !== f.key && groups.has(f.parent) ? f.parent : null;
+    return p === parent && isShown(f, fields);
+  });
 }
