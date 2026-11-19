@@ -9,6 +9,7 @@ Versions are `Major.Minor.Patch`.
 - launcher: the Options tab hides an option while its `show_if` does not match, as the game does
 - in the game and the launcher, `show_if` with `value = true` also matches a checkbox saved as `1` (and `false` matches `0`)
 - Safe reset drops a value saved under a submenu's id, since a submenu holds none
+- fixed: the game's Mod Settings screen drew a mod's options past the 14th off the screen; they are now on pages of 14, turned with page buttons or the mouse wheel
 
 ## 2.0.1
 

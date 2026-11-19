@@ -1065,6 +1065,11 @@ function input.handleWheelMoved(x, y)
     end
   end
 
+  -- Screen 86 (Mod Options) pages its option rows the same way.
+  if _G.QM and _G.QM.Menu and _G.QM.Menu.scrollOptions and menuPage == _G.QM.Menu.PAGE_MOD_OPTIONS then
+    _G.QM.Menu.scrollOptions(y)
+  end
+
   if input.origWheelMoved then
     input.origWheelMoved(x, y)
   end

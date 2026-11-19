@@ -107,6 +107,69 @@ menu.registerOption("plain_mod", "Plain", { id = "b", label = "B", option_type =
   show_if = { option_id = "a", equals = { false } } })
 eq(ids(menu.getVisibleOptions("plain_mod")), "a", "show_if still hides on a mod with no submenus")
 
+-- More options than fit on the screen are split into pages of 14.
+local long = {}
+for i = 1, 30 do
+  long[#long + 1] = { id = "o" .. i, label = "Option " .. i, option_type = "checkbox", default = true }
+end
+long[#long + 1] = { id = "sub", label = "Sub", option_type = "submenu" }
+for i = 1, 16 do
+  long[#long + 1] = { id = "s" .. i, label = "Inner " .. i, option_type = "checkbox", default = true, submenu = "sub" }
+end
+menu.applyConfigs({ long_mod = { name = "Long Mod", options = long } })
+for i, m in ipairs(menu.modList) do if m == "long_mod" then menu.activeModIndex = i end end
+local function onScreen()
+  buttons = {}
+  menu.registerModOptionsButtons()
+  menu.drawModOptions()
+  local list, pageIdx, totalPages = menu.getPagedOptions("long_mod")
+  return ids(list), pageIdx, totalPages
+end
+local shown, pageIdx, totalPages = onScreen()
+eq(totalPages, 3, "31 rows make three pages")
+eq(shown, "o1,o2,o3,o4,o5,o6,o7,o8,o9,o10,o11,o12,o13,o14", "the first page holds 14 rows")
+eq(pageIdx, 1, "page 1")
+local hasPrev, hasNext = false, false
+for _, b in ipairs(buttons) do
+  if b.label == "qm_opt_page_prev" then hasPrev = true end
+  if b.label == "qm_opt_page_next" then hasNext = true end
+end
+check(not hasPrev and hasNext, "page 1 has a Next button and no Previous")
+qm_opt_page_nextButton()
+shown, pageIdx = onScreen()
+eq(pageIdx, 2, "Next turns the page")
+eq(shown:match("^[^,]+"), "o15", "page 2 starts at the 15th row")
+qm_opt_page_nextButton()
+shown, pageIdx = onScreen()
+eq(shown, "o29,o30,sub", "the last page holds the rest")
+-- The submenu opens on its own first page; Back returns to the page it was opened from.
+click(3)
+shown, pageIdx, totalPages = onScreen()
+eq(totalPages, 2, "the submenu has its own pages")
+eq(pageIdx, 1, "and opens on its first")
+menu.scrollOptions(-1)
+shown, pageIdx = onScreen()
+eq(pageIdx, 2, "the wheel down turns to the next page")
+eq(shown, "s15,s16", "the submenu's second page")
+menu.scrollOptions(-1)
+shown, pageIdx = onScreen()
+eq(pageIdx, 2, "the wheel stops at the last page")
+menu.scrollOptions(1)
+shown, pageIdx = onScreen()
+eq(pageIdx, 1, "the wheel up turns back")
+_G.qm_opt_backButton()
+shown, pageIdx = onScreen()
+eq(pageIdx, 3, "Back returns to the page the submenu was opened from")
+-- Fewer rows than the page held (options hidden): the page moves back to the last one.
+for i = 1, 30 do QM.Menu.optionsByMod.long_mod.options[i].show_if = { option_id = "o1", equals = { false } } end
+shown, pageIdx, totalPages = onScreen()
+eq(totalPages, 1, "with rows hidden there is one page")
+eq(pageIdx, 1, "and the page follows")
+-- Entering the screen starts on the first page.
+menu.optionsPageIndex["long_mod/"] = 3
+menu_modOptionsButton()
+eq(menu.optionsPageIndex["long_mod/"], nil, "the options screen opens on page 1")
+
 if failures > 0 then
   print(failures .. " check(s) failed")
   os.exit(1)

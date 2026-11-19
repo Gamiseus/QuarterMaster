@@ -24,6 +24,10 @@ menu.optionsByMod = {}    -- modId -> { id, name, options }
 menu.modList = {}         -- Ordered list of modIds
 menu.activeModIndex = 1   -- Selected tab on Screen 86
 menu.openSubmenu = {}     -- modId -> id of the submenu open on Screen 86 (nil: the mod's top page)
+menu.optionsPageIndex = {} -- "modId/submenuId" -> page of option rows shown on Screen 86
+menu.OPTION_ROWS = 7       -- rows per column on Screen 86
+menu.OPTION_COLUMNS = 2
+menu.OPTIONS_PER_PAGE = menu.OPTION_ROWS * menu.OPTION_COLUMNS
 menu.savedSettings = {}   -- Persistent table saved to saveModSettings.lua
 
 -- Sound helper
@@ -409,6 +413,12 @@ function menu.setOptionValue(modId, opt, newVal)
   end
 end
 
+-- Which page of rows is shown for the open page of a mod's options, kept apart for the top page
+-- and each submenu so Back returns to the page you left.
+local function optionsPageKey(modId, submenuId)
+  return tostring(modId) .. "/" .. tostring(submenuId or "")
+end
+
 -- Whether an option's `show_if` lets it show, from the current value of the option it names.
 function menu.isOptionShown(modId, opt)
   local rule = opt.show_if
@@ -458,6 +468,7 @@ end
 
 function menu.openSubmenuPage(modId, submenuId)
   menu.openSubmenu[modId] = submenuId
+  menu.optionsPageIndex[optionsPageKey(modId, submenuId)] = 1
 end
 
 -- Up one level: from a submenu to the page it sits on. False when already on the top page.
@@ -467,6 +478,40 @@ function menu.closeSubmenuPage(modId)
   local opt = findOption(modId, cur)
   menu.openSubmenu[modId] = opt and submenuOf(modId, opt) or nil
   return true
+end
+
+-- The rows on screen for a mod: its visible options cut to the current page. Also returns the
+-- page and the number of pages, with the page kept inside 1..pages.
+function menu.getPagedOptions(modId)
+  local all = menu.getVisibleOptions(modId)
+  local key = optionsPageKey(modId, menu.currentSubmenu(modId))
+  local perPage = menu.OPTIONS_PER_PAGE
+  local totalPages = math.max(1, math.ceil(#all / perPage))
+  local pageIdx = math.min(math.max(menu.optionsPageIndex[key] or 1, 1), totalPages)
+  menu.optionsPageIndex[key] = pageIdx
+  local list = {}
+  for i = (pageIdx - 1) * perPage + 1, math.min(#all, pageIdx * perPage) do
+    list[#list + 1] = all[i]
+  end
+  return list, pageIdx, totalPages
+end
+
+-- Moves the open options page of a mod by delta pages (-1 back, 1 on), within its pages.
+function menu.turnOptionsPage(modId, delta)
+  local _, pageIdx, totalPages = menu.getPagedOptions(modId)
+  local nextIdx = math.min(math.max(pageIdx + delta, 1), totalPages)
+  menu.optionsPageIndex[optionsPageKey(modId, menu.currentSubmenu(modId))] = nextIdx
+  return nextIdx ~= pageIdx
+end
+
+-- The mouse wheel on Screen 86: up is the page before, down the page after.
+function menu.scrollOptions(y)
+  local modList = menu.modList or {}
+  local modId = modList[menu.activeModIndex] or modList[1]
+  if not modId or not y or y == 0 then return end
+  if menu.turnOptionsPage(modId, y > 0 and -1 or 1) then
+    playClickSound()
+  end
 end
 
 -- The options shown on one page of a mod: its top page (submenuId nil) or a submenu. With no
@@ -688,6 +733,7 @@ end
 function _G.menu_modOptionsButton()
   playClickSound()
   menu.openSubmenu = {}
+  menu.optionsPageIndex = {}
   menuPage = menu.PAGE_MOD_OPTIONS
   mouseOverText = ""
   contextualText = ""
@@ -953,6 +999,7 @@ function menu.registerModOptionsButtons()
         playClickSound()
         menu.activeModIndex = mIdx
         menu.openSubmenu[mId] = nil
+        menu.optionsPageIndex[optionsPageKey(mId, nil)] = 1
       end
     end
   end
@@ -961,7 +1008,26 @@ function menu.registerModOptionsButtons()
   local activeModId, modData = getActiveModAndOptions()
   if not modData or not modData.options then return end
 
-  local options = menu.getVisibleOptions(activeModId)
+  local options, pageIdx, totalPages = menu.getPagedOptions(activeModId)
+
+  -- Page buttons, where the Controls screen has its own (x = 460 to 730)
+  if totalPages > 1 then
+    if pageIdx > 1 then
+      buttons[#buttons + 1] = Button.new(460, 686, 80, 30, "qm_opt_page_prev", "active", true, "Previous page of options")
+      _G.qm_opt_page_prevButton = function()
+        playClickSound()
+        menu.turnOptionsPage(activeModId, -1)
+      end
+    end
+    if pageIdx < totalPages then
+      buttons[#buttons + 1] = Button.new(650, 686, 80, 30, "qm_opt_page_next", "active", true, "Next page of options")
+      _G.qm_opt_page_nextButton = function()
+        playClickSound()
+        menu.turnOptionsPage(activeModId, 1)
+      end
+    end
+  end
+
   if #options == 0 then return end
 
   local cardW = 500
@@ -969,8 +1035,8 @@ function menu.registerModOptionsButtons()
   local rowGap = 12
 
   for idx, opt in ipairs(options) do
-    local col = math.floor((idx - 1) / 7)
-    local row = (idx - 1) % 7
+    local col = math.floor((idx - 1) / menu.OPTION_ROWS)
+    local row = (idx - 1) % menu.OPTION_ROWS
     local cardX = 50 + col * 525
     local cardY = 185 + row * (cardH + rowGap)
 
@@ -1140,7 +1206,30 @@ function menu.drawModOptions()
     love.graphics.print(table.concat(path, "  >  "), 32, 162)
   end
 
-  local options = menu.getVisibleOptions(activeModId)
+  local options, pageIdx, totalPages = menu.getPagedOptions(activeModId)
+
+  -- Page buttons, drawn as on the Controls screen (x = 460 to 730)
+  if totalPages > 1 then
+    local pageFont = cardFont or bigFont
+    local prevHov = (mx >= 460 and mx <= 540 and my >= 686 and my <= 716 and pageIdx > 1)
+    love.graphics.setColor(love.math.colorFromBytes(prevHov and 101 or 35, prevHov and 24 or 35, prevHov and 24 or 35, fade))
+    love.graphics.rectangle("fill", 460, 686, 80, 26)
+    love.graphics.setColor(love.math.colorFromBytes(180, 180, 180, fade))
+    love.graphics.rectangle("line", 460, 686, 80, 26)
+    local prevTextColor = pageIdx > 1 and { 255, 255, 255, fade } or { 120, 120, 120, fade }
+    drawCleanShadowText("< PREV", 460, 690, 80, "center", pageFont, prevTextColor)
+
+    drawCleanShadowText(string.format("PAGE %d / %d", pageIdx, totalPages), 545, 690, 100, "center", pageFont, { 211, 211, 211, fade })
+
+    local nextHov = (mx >= 650 and mx <= 730 and my >= 686 and my <= 716 and pageIdx < totalPages)
+    love.graphics.setColor(love.math.colorFromBytes(nextHov and 101 or 35, nextHov and 24 or 35, nextHov and 24 or 35, fade))
+    love.graphics.rectangle("fill", 650, 686, 80, 26)
+    love.graphics.setColor(love.math.colorFromBytes(180, 180, 180, fade))
+    love.graphics.rectangle("line", 650, 686, 80, 26)
+    local nextTextColor = pageIdx < totalPages and { 255, 255, 255, fade } or { 120, 120, 120, fade }
+    drawCleanShadowText("NEXT >", 650, 690, 80, "center", pageFont, nextTextColor)
+  end
+
   if #options == 0 then
     drawCleanShadowText("No options visible in this view.", 50, 220, 600, "left", bigFont)
     return
@@ -1151,8 +1240,8 @@ function menu.drawModOptions()
   local rowGap = 12
 
   for idx, opt in ipairs(options) do
-    local col = math.floor((idx - 1) / 7)
-    local row = (idx - 1) % 7
+    local col = math.floor((idx - 1) / menu.OPTION_ROWS)
+    local row = (idx - 1) % menu.OPTION_ROWS
     local cardX = 50 + col * 525
     local cardY = 185 + row * (cardH + rowGap)
 
