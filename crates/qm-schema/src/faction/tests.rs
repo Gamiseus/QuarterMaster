@@ -621,7 +621,7 @@ fn grenades_and_explosions() {
     let dir = mod_with(&["weapons/limonka.png"]);
     let ok = format!(
         "{HEADER}\n[[explosions]]\nid = \"limonka_blast\"\nbased_on = \"frag\"\nfrag_radius = 150\nstun_time = 6\n\n\
-         [[ordnance]]\nid = \"limonka\"\nsprite = \"weapons/limonka.png\"\nexplosion = \"limonka_blast\"\nrange = 900\nspin = 0\n\
+         [[ordnance]]\nid = \"limonka\"\nsprite = \"weapons/limonka.png\"\nexplosion = \"limonka_blast\"\nrange = 900\nspin = 0\nimpact = true\n\
          skill = {{ class = \"light\", slot = 2 }}\nreplaces_frag = true\n\n\
          [[ordnance]]\nid = \"spare\"\nsprite = \"weapons/limonka.png\"\nexplosion = \"contact\"\n"
     );
@@ -636,6 +636,8 @@ fn grenades_and_explosions() {
     assert_eq!((g.skill_class.as_deref(), g.skill_slot), (Some("light"), Some(2)));
     assert!(g.replaces_frag);
     assert_eq!(g.spin, Some(0.0));
+    assert!(g.impact);
+    assert!(!f.ordnance[1].impact);
     assert_eq!(f.ordnance[1].explosion, "contactExplosion", "a preset by name is its game tag");
     assert_eq!(f.ordnance[1].spin, None);
 

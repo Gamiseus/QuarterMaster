@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onDestroy, untrack } from "svelte";
   import type { SpritePlace } from "../../../lib/bindings";
-  import { bounds, centreOf, corners, fmt, moved, resized, turnHandle, turned, zoomStep, type Point } from "../../../lib/engine/sprites";
+  import { bounds, centreOf, corners, moved, resized, turnHandle, turned, zoomStep, type Point } from "../../../lib/engine/sprites";
   import { refKey, sprites, type Ground } from "../../../lib/stores/sprites.svelte";
 
   /** Screen pixels a handle reaches, and the turn handle's distance above the top edge. */
@@ -38,8 +38,9 @@
   const place = $derived(sprites.place);
   const box = $derived(sprites.box);
   const otherRect = $derived(sprites.otherRect);
-  const mineShown = $derived(!!sprites.mine?.visible && (!sprites.blinking || blinkMine));
-  const otherShown = $derived(!!sprites.other?.visible && (!sprites.blinking || !blinkMine));
+  // Blinking shows each image in turn, whether or not it is hidden.
+  const mineShown = $derived(sprites.blinking ? blinkMine : !!sprites.mine?.visible);
+  const otherShown = $derived(sprites.blinking ? !blinkMine : !!sprites.other?.visible);
   const sharp = $derived(zoom > 1);
 
   const toScreen = (p: Point): Point => ({ x: origin.x + p.x * zoom, y: origin.y + p.y * zoom });
@@ -169,9 +170,16 @@
     if (stage?.hasPointerCapture(e.pointerId)) stage.releasePointerCapture(e.pointerId);
   }
 
+  /** Wheel movement not yet turned into a zoom step: a trackpad sends many small ones. */
+  let wheel = 0;
   function onwheel(e: WheelEvent) {
     e.preventDefault();
-    zoomTo(zoomStep(zoom, e.deltaY < 0 ? 1 : -1), local(e));
+    // Lines and pages count as a full step each; pixels add up to one.
+    wheel += e.deltaMode === 0 ? e.deltaY : Math.sign(e.deltaY) * 100;
+    if (Math.abs(wheel) < 60) return;
+    const dir = wheel < 0 ? 1 : -1;
+    wheel = 0;
+    zoomTo(zoomStep(zoom, dir), local(e));
   }
 
   function onkeydown(e: KeyboardEvent) {
@@ -216,6 +224,13 @@
     const s = toScreen({ x: 0, y: 0 });
     return { x: s.x, y: s.y, w: box.w * zoom, h: box.h * zoom };
   });
+  /** The comparison's outline, when it is not the box itself. */
+  const otherOutline = $derived.by(() => {
+    const r = otherRect;
+    if (!r || !box || !otherShown || (Math.abs(r.w - box.w) < 0.01 && Math.abs(r.h - box.h) < 0.01)) return null;
+    const s = toScreen({ x: r.x, y: r.y });
+    return { x: s.x, y: s.y, w: r.w * zoom, h: r.h * zoom };
+  });
   const outline = $derived(place ? corners(place).map(toScreen) : []);
   const turnAt = $derived(place ? toScreen(turnHandle(place, TURN_GAP / zoom)) : null);
   const topMid = $derived(outline.length === 4 ? { x: (outline[0].x + outline[1].x) / 2, y: (outline[0].y + outline[1].y) / 2 } : null);
@@ -254,7 +269,9 @@
   <svg class="overlay" {width} {height} aria-hidden="true">
     {#if boxRect}
       <rect class="box" x={boxRect.x - 0.5} y={boxRect.y - 0.5} width={boxRect.w + 1} height={boxRect.h + 1} />
-      <text class="box-label" x={boxRect.x} y={boxRect.y - 6}>Game's box {fmt(box?.w ?? 0)} x {fmt(box?.h ?? 0)}</text>
+    {/if}
+    {#if otherOutline}
+      <rect class="other" x={otherOutline.x - 0.5} y={otherOutline.y - 0.5} width={otherOutline.w + 1} height={otherOutline.h + 1} />
     {/if}
     {#if outline.length === 4 && sprites.mine?.visible}
       <polygon class="mine" points={outline.map((c) => `${c.x},${c.y}`).join(" ")} />
@@ -330,13 +347,11 @@
     stroke-width: 1;
   }
 
-  .box-label {
-    fill: #e8c25a;
-    font-family: var(--qm-font-sans);
-    font-size: 11px;
-    paint-order: stroke;
-    stroke: #000000a0;
-    stroke-width: 3px;
+  .other {
+    fill: none;
+    stroke: #e58ad6;
+    stroke-dasharray: 1 3;
+    stroke-width: 1;
   }
 
   .mine {

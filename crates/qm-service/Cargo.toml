@@ -1,6 +1,6 @@
 [package]
 name = "qm-service"
-version = "2.2.0"
+version = "2.2.1"
 edition = "2021"
 description = "Tauri-free application layer for QuarterMaster"
 authors = ["QuarterMaster Team"]

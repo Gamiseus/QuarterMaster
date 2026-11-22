@@ -195,3 +195,81 @@ export function setOf(item: SpriteItem, all: SpriteItem[]): SpriteItem[] {
 export function fmt(v: number): string {
   return Number.isInteger(v) ? String(v) : String(Math.round(v * 100) / 100);
 }
+
+/** The drawn part of an image: the rectangle around its pixels that are not see-through, in
+ * the file's own pixels, with the file's size. */
+export interface Drawn {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  fileW: number;
+  fileH: number;
+}
+
+/** The rectangle around the pixels whose alpha is above `min`, or null when none are. */
+export function drawnBounds(alpha: ArrayLike<number>, fileW: number, fileH: number, min = 16): Drawn | null {
+  let x0 = fileW;
+  let y0 = fileH;
+  let x1 = -1;
+  let y1 = -1;
+  for (let y = 0; y < fileH; y++) {
+    for (let x = 0; x < fileW; x++) {
+      if (alpha[y * fileW + x] > min) {
+        if (x < x0) x0 = x;
+        if (x > x1) x1 = x;
+        if (y < y0) y0 = y;
+        if (y > y1) y1 = y;
+      }
+    }
+  }
+  return x1 < 0 ? null : { x: x0, y: y0, w: x1 - x0 + 1, h: y1 - y0 + 1, fileW, fileH };
+}
+
+/**
+ * Your image sized and moved so its drawn part covers the comparison's drawn part. `rect` is
+ * where the comparison is shown in the box. With `keepShape` one scale is used for both sides
+ * (the mean of the two); without, each side is fitted on its own. The turn is taken off; the
+ * mirroring stays.
+ */
+export function matchDrawn(
+  start: SpritePlace,
+  mine: Drawn,
+  other: Drawn,
+  rect: { x: number; y: number; w: number; h: number },
+  keepShape: boolean,
+): SpritePlace {
+  // The comparison's drawn part, in the game's pixels.
+  const kx = rect.w / other.fileW;
+  const ky = rect.h / other.fileH;
+  const target = { x: rect.x + other.x * kx, y: rect.y + other.y * ky, w: other.w * kx, h: other.h * ky };
+  let sx = target.w / mine.w;
+  let sy = target.h / mine.h;
+  if (keepShape) {
+    const s = Math.sqrt(sx * sy);
+    sx = s;
+    sy = s;
+  }
+  const width = Math.max(1, Math.round(mine.fileW * sx));
+  const height = Math.max(1, Math.round(mine.fileH * sy));
+  // After rounding, the scale the picture is really drawn at.
+  const rx = width / mine.fileW;
+  const ry = height / mine.fileH;
+  // Mirrored, the drawn part sits on the other side of the picture.
+  const ax = start.flip_x ? mine.fileW - mine.x - mine.w : mine.x;
+  const ay = start.flip_y ? mine.fileH - mine.y - mine.h : mine.y;
+  // Its middle on the target's middle.
+  const x = target.x + target.w / 2 - (ax + mine.w / 2) * rx;
+  const y = target.y + target.h / 2 - (ay + mine.h / 2) * ry;
+  return { ...start, x: Math.round(x), y: Math.round(y), width, height, rotate: 0 };
+}
+
+/** The scale a file seems drawn at against the game's image: 2 for a file twice its size each
+ * way, up to 4; 1 when it is not a whole multiple. */
+export function guessFileScale(file: Size, game: Size): number {
+  for (const k of [2, 3, 4]) {
+    const near = (a: number, b: number) => Math.abs(a - b) <= Math.max(1, b * 0.03);
+    if (near(file.w, game.w * k) && near(file.h, game.h * k)) return k;
+  }
+  return 1;
+}

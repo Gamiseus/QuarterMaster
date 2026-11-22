@@ -3,7 +3,8 @@
   import { Badge, Button, Callout, Dialog, EmptyState, Select, Switch } from "../../../components/ui";
   import type { SpriteItem, SpritePlace } from "../../../lib/bindings";
   import { centredOn, fmt, normalTurn, sizedAround, wholeBox, ZOOMS } from "../../../lib/engine/sprites";
-  import { sprites, type Ground } from "../../../lib/stores/sprites.svelte";
+  import { engine, isDirty } from "../../../lib/stores/engine.svelte";
+  import { refKey, sprites, type Ground } from "../../../lib/stores/sprites.svelte";
   import LayerCard from "./LayerCard.svelte";
   import SpriteCanvas from "./SpriteCanvas.svelte";
   import SpritePicker from "./SpritePicker.svelte";
@@ -19,6 +20,9 @@
   let picking = $state<"mine" | "other" | null>(null);
   let mineSet = $state<SpriteItem[]>([]);
   let otherSet = $state<SpriteItem[]>([]);
+  /** Why Match the drawing could not line it up, until the place changes. */
+  let matchNote = $state<string | null>(null);
+  let matching = $state(false);
   /** Set while the "save first?" question waits. */
   let asking = $state<{ resolve: (go: boolean) => void } | null>(null);
 
@@ -48,10 +52,36 @@
     sprites.setFor(layer).then((s) => (otherSet = s));
   });
 
+  // A note about the last Match the drawing goes when the place changes.
+  $effect(() => {
+    void sprites.place;
+    untrack(() => (matchNote = null));
+  });
+
   const use = $derived(sprites.use);
   const place = $derived(sprites.place);
   const box = $derived(sprites.box);
   const projectName = $derived(sprites.shelves.find((s) => s.source === "workspace" && s.owner === folder)?.label ?? folder);
+  /** The comparison is something other than the game's image this use replaces. */
+  const notTheGames = $derived(
+    !!use?.original && (!sprites.other || refKey(sprites.other.item.sprite) !== refKey(use.original.sprite)),
+  );
+  const target = $derived(use ? (use.target === "qm" ? "qm.toml" : "faction.toml") : null);
+  /** The file Save writes has edits not saved in the Files view: saving now would set the two
+   * against each other. */
+  const editedThere = $derived(!!target && engine.files.some((f) => f.path.toLowerCase() === target && isDirty(f)));
+
+  /** Saves the place, unless the file it goes into has unsaved edits in Files. */
+  async function save(): Promise<boolean> {
+    if (editedThere) return false;
+    return sprites.save();
+  }
+
+  function openTarget() {
+    if (!target) return;
+    engine.view = "files";
+    void engine.open(target).catch(() => {});
+  }
 
   /** Unsaved changes to the place are settled before another image or use replaces them. */
   function settle(): Promise<boolean> {
@@ -94,36 +124,65 @@
     sprites.setPlace(p);
   }
 
-  function num(v: string): number | null {
+  /** A typed number, or null (and the box shows the place again) when it is not one. */
+  function num(input: HTMLInputElement, now: number): number | null {
+    const v = input.value;
     const n = Number(v);
-    return v.trim() !== "" && Number.isFinite(n) ? n : null;
+    if (v.trim() === "" || !Number.isFinite(n)) {
+      input.value = fmt(now);
+      return null;
+    }
+    return n;
   }
 
-  function setX(v: string) {
-    const n = num(v);
-    if (n !== null && place) set({ ...place, x: n });
+  function setX(input: HTMLInputElement) {
+    if (!place) return;
+    const n = num(input, place.x);
+    if (n !== null) set({ ...place, x: n });
   }
-  function setY(v: string) {
-    const n = num(v);
-    if (n !== null && place) set({ ...place, y: n });
+  function setY(input: HTMLInputElement) {
+    if (!place) return;
+    const n = num(input, place.y);
+    if (n !== null) set({ ...place, y: n });
   }
-  function setW(v: string) {
-    const n = num(v);
-    if (n === null || n <= 0 || !place) return;
+  function setW(input: HTMLInputElement) {
+    if (!place) return;
+    const n = num(input, place.width);
+    if (n === null) return;
+    if (n <= 0) {
+      input.value = fmt(place.width);
+      return;
+    }
     const h = sprites.keepShape ? (n * place.height) / place.width : place.height;
     set(sizedAround(place, { w: n, h: Math.max(0.1, Math.round(h * 100) / 100) }));
   }
-  function setH(v: string) {
-    const n = num(v);
-    if (n === null || n <= 0 || !place) return;
+  function setH(input: HTMLInputElement) {
+    if (!place) return;
+    const n = num(input, place.height);
+    if (n === null) return;
+    if (n <= 0) {
+      input.value = fmt(place.height);
+      return;
+    }
     const w = sprites.keepShape ? (n * place.width) / place.height : place.width;
     set(sizedAround(place, { w: Math.max(0.1, Math.round(w * 100) / 100), h: n }));
   }
-  function setTurn(v: string) {
-    const n = num(v);
-    if (n !== null && place) set({ ...place, rotate: normalTurn(n) });
+  function setTurn(input: HTMLInputElement) {
+    if (!place) return;
+    const n = num(input, place.rotate);
+    if (n !== null) set({ ...place, rotate: normalTurn(n) });
   }
 
+  /** Sizes and moves your sprite so its drawn part covers the comparison's. */
+  async function matchDrawing() {
+    matching = true;
+    try {
+      const why = await sprites.matchDrawn();
+      matchNote = why;
+    } finally {
+      matching = false;
+    }
+  }
   /** Your image takes the comparison's size and spot. */
   function fitToIt() {
     const r = sprites.otherRect;
@@ -135,13 +194,17 @@
     const at = r ? { x: r.x + r.w / 2, y: r.y + r.h / 2 } : box ? { x: box.w / 2, y: box.h / 2 } : null;
     if (place && at) set(centredOn(place, at));
   }
-  /** Your file's own pixels, one to one game pixel, its middle kept. */
-  function actualPixels() {
+  /** Your file at its own size in the game, its middle kept: its pixels over the scale it is drawn at. */
+  function actualSize() {
     const s = sprites.mine?.size;
-    if (place && s) set(sizedAround(place, s));
+    const k = sprites.fileScale;
+    if (place && s) set(sizedAround(place, { w: Math.round((s.w / k) * 100) / 100, h: Math.round((s.h / k) * 100) / 100 }));
   }
   function resetPlace() {
     if (box) set(wholeBox(box));
+  }
+  function revert() {
+    if (sprites.saved) set({ ...sprites.saved });
   }
 
   function onkeydown(e: KeyboardEvent) {
@@ -155,7 +218,7 @@
       sprites.redo();
       e.preventDefault();
     } else if (k === "s" && sprites.dirty) {
-      void sprites.save();
+      void save();
       e.preventDefault();
     }
   }
@@ -166,6 +229,12 @@
       label: `${u.global}${u.original ? "" : " (new image)"}, in ${u.target === "qm" ? "qm.toml" : "faction.toml"}`,
     })),
   );
+  const scaleItems = [
+    { value: 1, label: "the game's size" },
+    { value: 2, label: "2x the game's size" },
+    { value: 3, label: "3x the game's size" },
+    { value: 4, label: "4x the game's size" },
+  ];
   const grounds: { value: Ground; label: string }[] = [
     { value: "checker", label: "Checks" },
     { value: "dark", label: "Dark" },
@@ -177,103 +246,136 @@
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div class="sprites" {onkeydown}>
   <section class="controls" aria-label="Sprite line-up">
-    <h2 class="qm-stencil head">Sprites of {projectName}</h2>
-    {#if !sprites.mine}
-      <p class="qm-muted intro">
-        Line up an image of this mod with the game's image it replaces: move, size and turn yours over it until it sits right, then save that into the mod. The game then draws it there.
-      </p>
-      <Button variant="primary" onclick={() => (picking = "mine")}>Pick your sprite</Button>
-    {:else}
-      <LayerCard
-        title="Your sprite"
-        who="your sprite"
-        layer={sprites.mine}
-        from="this mod"
-        set={mineSet}
-        pickLabel="Pick another"
-        onpick={() => (picking = "mine")}
-        onstep={stepMine}
-      />
+    <div class="scroll">
+      <h2 class="qm-stencil head">Sprites of {projectName}</h2>
+      {#if !sprites.mine}
+        <p class="qm-muted intro">
+          Line up an image of this mod with the game's image it replaces: move, size and turn yours over it until it sits right, then save that into the mod. The game then draws it there.
+        </p>
+        <Button variant="primary" onclick={() => (picking = "mine")}>Pick your sprite</Button>
+      {:else}
+        <LayerCard
+          title="Your sprite"
+          who="your sprite"
+          layer={sprites.mine}
+          from="this mod"
+          set={mineSet}
+          pickLabel="Pick another"
+          onpick={() => (picking = "mine")}
+          onstep={stepMine}
+        >
+          {#snippet extra()}
+            <div class="scale">
+              <Select label="Drawn at" items={scaleItems} bind:value={sprites.fileScale} />
+            </div>
+          {/snippet}
+        </LayerCard>
 
-      <div class="where">
-        {#if useItems.length > 1}
-          <Select label="Shown in game as" items={useItems} bind:value={() => sprites.useIndex, (v) => v !== undefined && void chooseUse(v)} />
-        {:else if use}
-          <p class="small">
-            Shown in game as <strong class="mono">{use.global}</strong>{use.original ? ", in place of the game's image" : ", a new image"}.
-          </p>
-        {/if}
-        {#if use?.size_rule}
-          <p class="qm-muted small">Its size rule, <span class="mono">{use.size_rule}</span>, sets the box the game's code sees.</p>
-        {/if}
-        {#if sprites.uses?.note}
-          <Callout tone="info">{sprites.uses.note}</Callout>
-        {/if}
-      </div>
+        <div class="where">
+          {#if useItems.length > 1}
+            <Select label="Shown in game as" items={useItems} bind:value={() => sprites.useIndex, (v) => v !== undefined && void chooseUse(v)} />
+          {:else if use}
+            <p class="small">
+              Shown in game as <strong class="mono">{use.global}</strong>{use.original ? ", in place of the game's image" : ", a new image"}.
+            </p>
+          {/if}
+          {#if use?.size_rule}
+            <p class="qm-muted small">Its size rule, <span class="mono">{use.size_rule}</span>, sets the box the game's code sees.</p>
+          {/if}
+          {#if sprites.uses?.note}
+            <Callout tone="info">{sprites.uses.note}</Callout>
+          {/if}
+        </div>
 
-      <LayerCard
-        title="Compare with"
-        who="the comparison"
-        layer={sprites.other}
-        from={sprites.other ? fromLabel(sprites.other.item) : ""}
-        set={otherSet}
-        pickLabel={sprites.other ? "Pick another" : "Pick an image"}
-        onpick={() => (picking = "other")}
-        onstep={(item) => void sprites.pickOther(item)}
-      >
-        {#snippet extra()}
-          <Switch label="On top" bind:checked={sprites.otherOnTop} />
-        {/snippet}
-      </LayerCard>
+        <LayerCard
+          title="Compare with"
+          who="the comparison"
+          layer={sprites.other}
+          from={sprites.other ? fromLabel(sprites.other.item) : ""}
+          set={otherSet}
+          pickLabel={sprites.other ? "Pick another" : "Pick an image"}
+          onpick={() => (picking = "other")}
+          onstep={(item) => void sprites.pickOther(item)}
+        >
+          {#snippet extra()}
+            <Switch label="On top" bind:checked={sprites.otherOnTop} />
+            {#if notTheGames}
+              <Button size="sm" variant="ghost" title="Compare with the game's image your sprite replaces again." onclick={() => void sprites.compareWithGame()}>The game's image</Button>
+            {/if}
+          {/snippet}
+        </LayerCard>
 
-      {#if place}
-        <section class="card" aria-label="Place">
-          <h3 class="title">Place</h3>
-          <div class="nums">
-            <label><span>X</span><input type="number" step="1" value={fmt(place.x)} onchange={(e) => setX(e.currentTarget.value)} aria-label="Move right" /></label>
-            <label><span>Y</span><input type="number" step="1" value={fmt(place.y)} onchange={(e) => setY(e.currentTarget.value)} aria-label="Move down" /></label>
-            <label><span>W</span><input type="number" step="1" min="0.1" value={fmt(place.width)} onchange={(e) => setW(e.currentTarget.value)} aria-label="Width" /></label>
-            <label><span>H</span><input type="number" step="1" min="0.1" value={fmt(place.height)} onchange={(e) => setH(e.currentTarget.value)} aria-label="Height" /></label>
-            <label><span>Turn</span><input type="number" step="1" value={fmt(place.rotate)} onchange={(e) => setTurn(e.currentTarget.value)} aria-label="Turn in degrees" /></label>
-          </div>
-          <div class="row">
-            <Switch label="Keep shape" bind:checked={sprites.keepShape} />
-          </div>
-          <div class="row wrap" role="group" aria-label="Mirror">
-            <span class="small">Mirror</span>
-            <button type="button" class="toggle" aria-pressed={place.flip_x} onclick={() => set({ ...place, flip_x: !place.flip_x })}>Left-right</button>
-            <button type="button" class="toggle" aria-pressed={place.flip_y} onclick={() => set({ ...place, flip_y: !place.flip_y })}>Up-down</button>
-          </div>
-          <div class="buttons">
-            <Button size="sm" disabled={!sprites.otherRect} title="Your sprite takes the size and spot of the image you compare with." onclick={fitToIt}>Fit to it</Button>
-            <Button size="sm" title="Your sprite's middle on the middle of the image you compare with." onclick={centreOnIt}>Centre on it</Button>
-            <Button size="sm" disabled={!sprites.mine?.size} title="Your file's own size: one pixel of the file to one pixel of the game." onclick={actualPixels}>Actual pixels</Button>
-            <Button size="sm" title="Fill the game's box, unturned: how the game shows your sprite without a place." onclick={resetPlace}>Reset</Button>
-          </div>
-          <div class="row">
-            <Button size="sm" variant="ghost" disabled={sprites.undoSize === 0} onclick={() => sprites.undo()}>Undo</Button>
-            <Button size="sm" variant="ghost" disabled={sprites.redoSize === 0} onclick={() => sprites.redo()}>Redo</Button>
-          </div>
-        </section>
+        {#if place}
+          <section class="card" aria-label="Place">
+            <h3 class="title">Place</h3>
+            <Button
+              size="sm"
+              variant="primary"
+              disabled={!sprites.otherRect || matching}
+              aria-busy={matching}
+              title="Sizes and moves your sprite so its drawn part (what is not see-through) covers the drawn part of the image you compare with. Then fine-tune by hand."
+              onclick={matchDrawing}>Match the drawing</Button
+            >
+            {#if matchNote}<p class="note small" role="status">{matchNote}</p>{/if}
+            <div class="nums">
+              <label title="How far right your sprite's top-left corner is from the box's, in the game's pixels"><span>X</span><input type="number" step="1" value={fmt(place.x)} onchange={(e) => setX(e.currentTarget)} aria-label="Move right" /></label>
+              <label title="How far down your sprite's top-left corner is from the box's, in the game's pixels"><span>Y</span><input type="number" step="1" value={fmt(place.y)} onchange={(e) => setY(e.currentTarget)} aria-label="Move down" /></label>
+              <label title="The width your sprite is drawn at, in the game's pixels"><span>W</span><input type="number" step="1" min="0.1" value={fmt(place.width)} onchange={(e) => setW(e.currentTarget)} aria-label="Width" /></label>
+              <label title="The height your sprite is drawn at, in the game's pixels"><span>H</span><input type="number" step="1" min="0.1" value={fmt(place.height)} onchange={(e) => setH(e.currentTarget)} aria-label="Height" /></label>
+              <label title="Degrees clockwise about its middle; minus turns the other way"><span>Turn</span><input type="number" step="1" value={fmt(place.rotate)} onchange={(e) => setTurn(e.currentTarget)} aria-label="Turn in degrees" /></label>
+            </div>
+            <div class="row">
+              <Switch label="Keep shape" bind:checked={sprites.keepShape} />
+            </div>
+            <div class="row wrap" role="group" aria-label="Mirror">
+              <span class="small">Mirror</span>
+              <button type="button" class="toggle" aria-pressed={place.flip_x} onclick={() => set({ ...place, flip_x: !place.flip_x })}>Left-right</button>
+              <button type="button" class="toggle" aria-pressed={place.flip_y} onclick={() => set({ ...place, flip_y: !place.flip_y })}>Up-down</button>
+            </div>
+            <div class="buttons">
+              <Button size="sm" disabled={!sprites.otherRect} title="Your sprite takes the size and spot of the image you compare with." onclick={fitToIt}>Fit to it</Button>
+              <Button size="sm" title="Your sprite's middle on the middle of the image you compare with." onclick={centreOnIt}>Centre on it</Button>
+              <Button size="sm" disabled={!sprites.mine?.size} title="Your file at its own size in the game: its pixels over the size it is drawn at (above)." onclick={actualSize}>Actual size</Button>
+              <Button size="sm" title="Fill the game's box, unturned: how the game shows your sprite without a place." onclick={resetPlace}>Reset</Button>
+            </div>
+            <div class="row">
+              <Button size="sm" variant="ghost" disabled={sprites.undoSize === 0} onclick={() => sprites.undo()}>Undo</Button>
+              <Button size="sm" variant="ghost" disabled={sprites.redoSize === 0} onclick={() => sprites.redo()}>Redo</Button>
+            </div>
+          </section>
+        {/if}
       {/if}
+    </div>
 
-      <section class="save" aria-label="Save">
+    {#if sprites.mine}
+      <!-- Always in view, however long the column. -->
+      <section class="savebar" aria-label="Save">
         <div class="row wrap">
-          <Button variant="primary" disabled={!use || !sprites.dirty || sprites.saving} aria-busy={sprites.saving} onclick={() => void sprites.save()}>
+          <Button variant="primary" disabled={!use || !sprites.dirty || sprites.saving || editedThere} aria-busy={sprites.saving} onclick={() => void save()}>
             {sprites.saving ? "Saving..." : "Save to mod"}
           </Button>
-          {#if sprites.dirty}<Badge tone="warn">Not saved</Badge>{/if}
+          {#if sprites.dirty}
+            <Button variant="ghost" title="Back to the place saved in the mod." onclick={revert}>Revert</Button>
+            <Badge tone="warn">Not saved</Badge>
+          {/if}
         </div>
-        {#if use}
-          <p class="qm-muted small">Saves into {use.target === "qm" ? "qm.toml" : "faction.toml"}; only what differs from the game's box is written.</p>
+        {#if editedThere}
+          <p class="note small" role="status">
+            {target} has changes not saved in the Files view. Save or undo them there first, so neither overwrites the other.
+            <button type="button" class="link" onclick={openTarget}>Open it</button>
+          </p>
+        {:else if sprites.lastSaved}
+          <p class="saved small" role="status">{sprites.lastSaved.message}</p>
+          {#if sprites.lastSaved.written}
+            <details class="lines">
+              <summary class="small">The lines in {sprites.lastSaved.file}</summary>
+              <pre class="written">{sprites.lastSaved.written}</pre>
+            </details>
+          {/if}
+        {:else if use}
+          <p class="qm-muted small">Into {target}, only what differs from the game's box.</p>
         {:else}
           <p class="qm-muted small">The game does not load this file, so its place cannot be saved.</p>
-        {/if}
-        {#if sprites.lastSaved}
-          <Callout tone="info" title="Saved">
-            <p class="saved">{sprites.lastSaved.message}</p>
-            {#if sprites.lastSaved.written}<pre class="written">{sprites.lastSaved.written}</pre>{/if}
-          </Callout>
         {/if}
       </section>
     {/if}
@@ -294,6 +396,12 @@
         {/each}
       </div>
       <button type="button" class="toggle" aria-pressed={sprites.blinking} disabled={!sprites.mine || !sprites.other} title="Shows one image, then the other, to spot what differs." onclick={() => (sprites.blinking = !sprites.blinking)}>Blink</button>
+      {#if box && sprites.mine}
+        <span class="legend small" title="The space the game gives the image. Its code sees this size; your sprite is placed inside it.">
+          <span class="swatch box-swatch" aria-hidden="true"></span>Game's box {fmt(box.w)} x {fmt(box.h)}
+          <span class="swatch mine-swatch" aria-hidden="true"></span>Your sprite
+        </span>
+      {/if}
     </div>
     {#if sprites.mine}
       <SpriteCanvas bind:this={canvas} bind:zoom />
@@ -331,7 +439,7 @@
         asking?.resolve(true);
       }}>Don't save</Button
     >
-    <Button variant="primary" data-autofocus="" onclick={async () => asking?.resolve(await sprites.save())}>Save</Button>
+    <Button variant="primary" data-autofocus="" disabled={editedThere} onclick={async () => asking?.resolve(await save())}>Save</Button>
   {/snippet}
 </Dialog>
 
@@ -348,10 +456,31 @@
   .controls {
     display: flex;
     flex-direction: column;
+    min-height: 0;
+  }
+
+  .scroll {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
     gap: var(--qm-space-3);
     min-height: 0;
     padding-right: var(--qm-space-2);
+    padding-bottom: var(--qm-space-3);
     overflow-y: auto;
+  }
+
+  .savebar {
+    display: flex;
+    flex: none;
+    flex-direction: column;
+    gap: var(--qm-space-1);
+    padding-top: var(--qm-space-3);
+    border-top: 1px solid var(--qm-border);
+  }
+
+  .savebar p {
+    margin: 0;
   }
 
   .head {
@@ -374,6 +503,11 @@
     margin: 0;
   }
 
+  .scale {
+    flex: 1;
+    min-width: 0;
+  }
+
   .card {
     display: flex;
     flex-direction: column;
@@ -388,6 +522,11 @@
     font-size: var(--qm-text-13);
     letter-spacing: 0.06em;
     text-transform: uppercase;
+  }
+
+  .note {
+    margin: 0;
+    color: var(--qm-text-muted);
   }
 
   .nums {
@@ -473,18 +612,24 @@
     opacity: 0.5;
   }
 
-  .save {
-    display: flex;
-    flex-direction: column;
-    gap: var(--qm-space-2);
-  }
-
-  .save p {
-    margin: 0;
-  }
-
   .saved {
     margin: 0;
+    color: var(--qm-ok);
+  }
+
+  .link {
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--qm-accent-text);
+    font: inherit;
+    text-decoration: underline;
+    cursor: pointer;
+  }
+
+  .lines summary {
+    color: var(--qm-text-muted);
+    cursor: pointer;
   }
 
   .written {
@@ -544,6 +689,27 @@
   .help {
     flex: none;
     margin: 0;
+  }
+
+  .legend {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--qm-space-1);
+    margin-left: auto;
+    color: var(--qm-text-muted);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .swatch {
+    display: inline-block;
+    width: 14px;
+    height: 0;
+    margin-left: var(--qm-space-2);
+    border-top: 2px dashed #e8c25a;
+  }
+
+  .mine-swatch {
+    border-top: 2px solid #5fb4ff;
   }
 
   .empty {

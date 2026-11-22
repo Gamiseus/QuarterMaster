@@ -61,7 +61,7 @@
       />
       <span class="small value">{layer.opacity}%</span>
     </label>
-    <div class="row">
+    <div class="row tools">
       <Checkbox label="Show" bind:checked={layer.visible} aria-label={`Show ${who}`} />
       {@render extra?.()}
     </div>

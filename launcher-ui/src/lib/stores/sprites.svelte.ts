@@ -11,7 +11,7 @@ import {
   type SpriteSource,
   type SpriteUses,
 } from "../bindings";
-import { comparisonRect, samePlace, setOf, wholeBox, type Size } from "../engine/sprites";
+import { comparisonRect, drawnBounds, guessFileScale, matchDrawn, samePlace, setOf, wholeBox, type Drawn, type Size } from "../engine/sprites";
 
 export type Ground = "checker" | "dark" | "light";
 
@@ -70,10 +70,16 @@ class SpriteStore {
   /** Undo and redo steps kept, for the buttons. */
   undoSize = $state(0);
   redoSize = $state(0);
+  /** How many times the game's resolution your file is drawn at (1 to 4), for Actual size. */
+  fileScale = $state(1);
   #undo: SpritePlace[] = [];
   #redo: SpritePlace[] = [];
   #images = new Map<string, string>();
+  /** The drawn part of each image, by its key (`refKey`); dropped when the file changes. */
+  #drawn = new Map<string, Drawn | null>();
   #seq = 0;
+  /** The comparison was put there for the use (the game's image), not picked. */
+  #otherAuto = false;
 
   get use() {
     return this.uses?.uses[this.useIndex] ?? null;
@@ -118,6 +124,9 @@ class SpriteStore {
     this.lastSaved = null;
     this.blinking = false;
     this.request = null;
+    this.fileScale = 1;
+    this.#otherAuto = false;
+    this.#drawn.clear();
     this.#undo = [];
     this.#redo = [];
     this.#counts();
@@ -200,6 +209,10 @@ class SpriteStore {
     this.#undo = [];
     this.#redo = [];
     this.#counts();
+    // A file drawn at twice (or three or four times) the game's image is taken as such.
+    const original = uses.uses[0]?.original;
+    this.fileScale =
+      layer.size && original && original.width > 0 ? guessFileScale(layer.size, { w: original.width, h: original.height }) : 1;
     await this.#applyUse(seq);
   }
 
@@ -224,6 +237,11 @@ class SpriteStore {
       const layer = await this.#layer(u.original, keep?.opacity ?? 50);
       if (seq !== this.#seq) return;
       this.other = layer;
+      this.#otherAuto = true;
+    } else if (this.#otherAuto) {
+      // The game's image of the last sprite means nothing for a new image.
+      this.other = null;
+      this.#otherAuto = false;
     }
   }
 
@@ -233,6 +251,45 @@ class SpriteStore {
     if (seq !== this.#seq) return;
     layer.visible = true;
     this.other = layer;
+    this.#otherAuto = false;
+  }
+
+  /** The comparison is the game's image the use replaces again. */
+  async compareWithGame(): Promise<void> {
+    const original = this.use?.original;
+    if (!original) return;
+    await this.pickOther(original);
+    this.#otherAuto = true;
+  }
+
+  /** The drawn part of a layer's image: the pixels that are not see-through. */
+  async drawn(layer: Layer): Promise<Drawn | null> {
+    const key = refKey(layer.item.sprite);
+    if (this.#drawn.has(key)) return this.#drawn.get(key) ?? null;
+    if (!layer.url) return null;
+    const found = await drawnOf(layer.url);
+    this.#drawn.set(key, found);
+    return found;
+  }
+
+  /**
+   * Sizes and moves your image so its drawn part covers the comparison's. Returns why it could
+   * not, in words, or null when it did.
+   */
+  async matchDrawn(): Promise<string | null> {
+    const mine = this.mine;
+    const other = this.other;
+    const rect = this.otherRect;
+    const place = this.place;
+    if (!mine || !other || !rect || !place) return "Pick an image to compare with first.";
+    const [a, b] = await Promise.all([this.drawn(mine), this.drawn(other)]);
+    if (!a) return "Your sprite has no drawn pixels: it is all see-through.";
+    if (!b) return "The image you compare with has no drawn pixels.";
+    if (this.mine !== mine || this.other !== other || !this.place) return null;
+    const next = matchDrawn(this.place, a, b, rect, this.keepShape);
+    if (samePlace(next, this.place)) return "Already lined up: the drawn parts cover each other.";
+    this.setPlace(next);
+    return null;
   }
 
   /** The numbered set the layer's image belongs to, from its shelf's catalog. */
@@ -336,6 +393,7 @@ class SpriteStore {
           const natural = await naturalSize(url);
           const now = this[which];
           if (now && refKey(now.item.sprite) === refKey(s)) {
+            this.#drawn.delete(refKey(s));
             now.url = url;
             if (natural) now.size = natural;
             now.error = null;
@@ -373,6 +431,35 @@ class SpriteStore {
     } catch {
       // The file was removed; the view keeps what it shows.
     }
+  }
+}
+
+/** The drawn part of an image, read from its pixels; null when it cannot be read. */
+async function drawnOf(url: string): Promise<Drawn | null> {
+  if (typeof document === "undefined" || typeof Image === "undefined") return null;
+  const img = new Image();
+  const loaded = await new Promise<boolean>((resolve) => {
+    img.onload = () => resolve(true);
+    img.onerror = () => resolve(false);
+    img.src = url;
+  });
+  const w = img.naturalWidth;
+  const h = img.naturalHeight;
+  if (!loaded || w === 0 || h === 0) return null;
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  if (!ctx) return null;
+  try {
+    ctx.drawImage(img, 0, 0);
+    const data = ctx.getImageData(0, 0, w, h).data;
+    const alpha = new Uint8Array(w * h);
+    for (let i = 0; i < w * h; i++) alpha[i] = data[i * 4 + 3];
+    return drawnBounds(alpha, w, h);
+  } catch {
+    // Pixels the page may not read.
+    return null;
   }
 }
 

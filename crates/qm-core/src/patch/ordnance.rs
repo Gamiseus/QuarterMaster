@@ -13,7 +13,7 @@ pub const FEATURES: [&str; 2] = ["ordnance", "skills"];
 
 /// Where the hooks go: (id, name, target, the game's lines, payload, after them or before,
 /// how many times the game's lines appear in their file).
-pub const HOOKS: [(&str, &str, &str, &str, &str, bool, usize); 8] = [
+pub const HOOKS: [(&str, &str, &str, &str, &str, bool, usize); 9] = [
     (
         "qm_ordnance_click",
         "QuarterMaster Ordnance: the click after a skill is armed",
@@ -68,6 +68,17 @@ pub const HOOKS: [(&str, &str, &str, &str, &str, bool, usize); 8] = [
         "elseif(ticle.typez == \"rifleGrenade\" and ticle.qmOrdnance and QM and QM.Ordnance and QM.Ordnance.blast and QM.Ordnance.blast(ticle, ticle.x, ticle.y)) then\n  table.remove(player.particles, i)",
         false,
         2,
+    ),
+    (
+        // A thrown grenade reaches where it was thrown: an impact grenade goes off there
+        // instead of bouncing (bounce = 1 skips the game's bounce, lifeSpan < 0 its blast).
+        "qm_ordnance_impact",
+        "QuarterMaster Ordnance: an impact grenade lands",
+        "includes/particlesSystem.lua",
+        "if(distanceCheck(ticle.x, ticle.y, ticle.targetx, ticle.targety) < 10 and ticle.bounce == 0) then",
+        "if ticle.qmImpact and ticle.bounce == 0 and distanceCheck(ticle.x, ticle.y, ticle.targetx, ticle.targety) < 10 then\n  ticle.bounce, ticle.velocity, ticle.spin, ticle.lifeSpan = 1, 0, 0, -1\nend",
+        false,
+        1,
     ),
     (
         // The game's mortar queued a round's createExplosion: a mod's mortar changes it.
@@ -220,7 +231,7 @@ mod tests {
             }
             checked += 1;
         }
-        assert_eq!(checked, 8);
+        assert_eq!(checked, 9);
     }
 
     /// The explosion presets carry the game's own numbers.
@@ -274,10 +285,10 @@ mod tests {
     #[test]
     fn hooks_only_for_a_mod_that_lists_grenades() {
         assert!(build_ordnance_patches(&[meta(&["events"])], false).is_empty());
-        assert_eq!(build_ordnance_patches(&[meta(&["events"])], true).len(), 8, "a faction's ordnance");
-        assert_eq!(build_ordnance_patches(&[meta(&["skills"])], false).len(), 8, "class skills alone");
+        assert_eq!(build_ordnance_patches(&[meta(&["events"])], true).len(), 9, "a faction's ordnance");
+        assert_eq!(build_ordnance_patches(&[meta(&["skills"])], false).len(), 9, "class skills alone");
         let patches = build_ordnance_patches(&[meta(&[]), meta(&["ordnance"])], false);
-        assert_eq!(patches.len(), 8);
+        assert_eq!(patches.len(), 9);
         let times: Vec<Option<usize>> = patches
             .iter()
             .map(|p| match p {
@@ -287,7 +298,7 @@ mod tests {
             .collect();
         assert_eq!(
             times,
-            [Some(1), Some(1), Some(1), Some(1), Some(1), Some(2), Some(1), Some(1)],
+            [Some(1), Some(1), Some(1), Some(1), Some(1), Some(2), Some(1), Some(1), Some(1)],
             "the rifle grenade's two places"
         );
     }

@@ -121,6 +121,15 @@ eq(sp.spin, 0, "spin 0 does not turn")
 eq(sp.innerRotation, sp.rotationz, "and points the way it was thrown")
 G.throw(1, twirl, 300, 0)
 eq(player.particles[#player.particles].spin, 0.3, "a spin of its own")
+eq(player.particles[#player.particles].qmImpact, nil, "a grenade bounces unless impact is set")
+
+-- impact: it goes off where it lands.
+local at = G.register({ id = "example_mod:at", sprite = "limonka", impact = true })
+check(at.impact, "an impact grenade")
+eq(G.register({ id = "example_mod:impact_rifle", kind = "rifle", sprite = "limonka", impact = true }).impact, nil,
+  "impact is for a thrown grenade")
+G.throw(1, at, 300, 0)
+eq(player.particles[#player.particles].qmImpact, true, "its particle goes off where it lands")
 
 -- The AI's frag, swapped for the Axis.
 check(G.throwFor(2), "an Axis frag is swapped")
@@ -479,7 +488,7 @@ if arg[4] then
     id = "red_army", replaces = "axis", root = "mods/RedArmy",
     explosions = { { id = "red_army:blast", based_on = "contact", numbers = { fragRadius = 120 } } },
     ordnance = { { id = "red_army:limonka", sprite = "weapons/limonka.png", explosion = "red_army:blast",
-      range = 800, spin = 0, skill_class = "light", skill_slot = 1, replaces_frag = true },
+      range = 800, spin = 0, impact = true, skill_class = "light", skill_slot = 1, replaces_frag = true },
       { id = "red_army:vog", kind = "rifle", sprite = "weapons/vog.png", explosion = "rifleGrenadeExplosion",
         replaces_rifle_grenade = true },
       { id = "red_army:hvy", kind = "mortar", explosion = "hvyExplosion", shots = 3, replaces_mortar = true },
@@ -522,6 +531,7 @@ if arg[4] then
   eq(qmf_red_army_limonka, limonka, "set to the faction's image")
   eq(fg and fg.range, 800, "with its range")
   eq(fg and fg.spin, 0, "and its spin")
+  check(fg and fg.impact, "and impact")
   eq(G.skills["light:1"], fg, "it takes the class skill")
   eq(G.swaps.axis, fg, "and the faction's side throws it for frags")
 end

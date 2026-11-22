@@ -20,6 +20,7 @@ ExampleMod.grenade = QM.Ordnance.register({
   range = 1000,                      -- the farthest a soldier throws it
   cooldown = 120,                    -- seconds before the skill is ready again
   -- spin = 0,                       -- no turning: it flies pointing the way it was thrown
+  -- impact = true,                  -- goes off where it lands, without bouncing
   skill = { class = "light", slot = 2 },   -- the light infantry's second skill throws it
 })
 

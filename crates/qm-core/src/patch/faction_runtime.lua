@@ -847,6 +847,7 @@ function R.load_ordnance(f)
       cooldown = g.cooldown,
       tension = g.tension,
       spin = g.spin,
+      impact = g.impact or nil,
       skill = skill,
       kind = g.kind,
       shots = g.shots,

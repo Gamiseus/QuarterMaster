@@ -2,6 +2,14 @@
 
 Versions are `Major.Minor.Patch`.
 
+## 2.2.1
+
+- launcher: plainer guidance on every screen. Mods, Saves, Diagnostics and Mod Engine each open with a line on what they are for; the mod list says how load order works and what locking does; an empty list, the Browse tab, the Add mod dialog and the Patches views say what to do next; buttons, chips and the mod list's status badges (broken, conflict, patches, update) explain themselves on hover, and a mod's Patches tab and the patch Order view say what they are for. The hook DLL is called the game hook, with a note on what it does.
+- Mod Engine: Sprites view: Match the drawing lines your sprite's drawn part up with the image you compare with in one click. Drawn at (1x to 4x, guessed from the file) makes Actual size right for art drawn at a higher resolution. Save to mod stays in view at the bottom of the column, with Revert and the lines it wrote, and waits while `qm.toml` or `faction.toml` has unsaved changes in the Files view. The comparison goes back to the game's image in one click, and the picker searches every other mod at once, with images of your sprite's name first. A faction's class badges are found too
+- Mod Engine: Sprites view fixes: Blink shows both images even when one is hidden, trackpad zoom is no longer too fast, the box's size no longer covers a corner handle, and a new sprite with no game image no longer keeps the last sprite's comparison
+- Lua and factions: `impact = true` makes a thrown grenade go off where it lands, as an impact fuse, instead of bouncing
+- launcher: the Mods screen no longer scrolls as a whole page at large text sizes, and the Diagnostics live log keeps its height when the health checks have more to say (the cards above it scroll instead)
+
 ## 2.2.0
 
 - Lua: `QM.Ordnance` and `QM.Explosions` make new ordnance (anything a soldier throws, fires or calls in), starting with grenades, without patching the game by hand. An explosion is one of the game's own (frag, contact, AT grenade, rifle grenade, mortar, faust) with the numbers you change; a grenade has its own sprite, explosion or blast code, range and cooldown, and flies as the frag does. A grenade can take over a class skill, or stand in for the frag for one side, so AI soldiers throw it too. QuarterMaster hands out the numbers the game uses for them, so two mods never pick the same one, and adds the hooks they need only for a mod that lists `ordnance` in `qm_features`
@@ -27,7 +35,6 @@ Versions are `Major.Minor.Patch`.
 - saves: a new data folder (a new install) got no default save slot, so the default profile pointed at a slot that did not exist, and the first profile switch put the game's saves into a slot folder the Saves page did not show. The default slot is made again; a slot folder whose `save_profile.json` is missing or unreadable comes back as a slot with its saves (an unreadable file is kept beside it, and a slot left with no saves gets its newest backup back); and a profile linked to a slot that does not exist gets that slot, empty
 - saves: a save played with a mod that is now off no longer stops the game on that mod's weapons: a soldier's weapon the game neither knows nor has art for becomes the K98 when the save loads, and the log names each one. A draw of an image that does not exist is left out instead of stopping the game, with one warning and where it came from in the log
 - launcher: before a launch, the check says when the profile's save slot was last played with mods the profile does not load (from the slot and from the save's own stamp), with a way to the save slots; the profile switch preview reads the save's stamp too
-- launcher: plainer guidance on every screen. Mods, Saves, Diagnostics and Mod Engine each open with a line on what they are for; the mod list says how load order works and what locking does; an empty list, the Browse tab, the Add mod dialog and the Patches views say what to do next; buttons, chips and the mod list's status badges (broken, conflict, patches, update) explain themselves on hover, and a mod's Patches tab and the patch Order view say what they are for. The hook DLL is called the game hook, with a note on what it does.
 
 ## 2.1.0
 

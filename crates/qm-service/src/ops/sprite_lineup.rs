@@ -798,7 +798,7 @@ impl Service {
 }
 
 /// The globals a faction sets image `rel` on: frames (`<tag>_<frame>`), weapons
-/// (`top_<tag>`, `side_<tag>`), `[sprites]` and vehicle parts.
+/// (`top_<tag>`, `side_<tag>`), `[sprites]`, vehicle parts and class badges (`spec_<class>`).
 fn faction_globals(f: &qm_schema::faction::ResolvedFaction, rel: &str) -> Vec<String> {
     let same = |p: &str| p.eq_ignore_ascii_case(rel);
     let mut out: Vec<String> = Vec::new();
@@ -827,6 +827,12 @@ fn faction_globals(f: &qm_schema::faction::ResolvedFaction, rel: &str) -> Vec<St
             if same(p) {
                 out.push(global.clone());
             }
+        }
+    }
+    // A class's badge goes on `spec_<class>`.
+    for (class, c) in &f.classes {
+        if c.icon.as_deref().is_some_and(same) {
+            out.push(format!("spec_{class}"));
         }
     }
     out.dedup();

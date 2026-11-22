@@ -66,10 +66,14 @@
   }
 
   /* Health and crashes sit side by side at the same height, each capped at 40% of the screen (half in a tall window). */
+  /* The cards give way before the log does: they scroll inside, and the log keeps enough
+     height to read (more than 200px of lines at 1280x800). */
   .top {
-    flex: none;
+    flex: 0 1 auto;
+    min-height: 0;
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-rows: minmax(0, auto);
     gap: var(--qm-space-4);
     /* Both cards are as tall as the taller one: no gap under the shorter. */
     align-items: stretch;
@@ -87,6 +91,10 @@
     .top :global(:is(.health, .crashes)) {
       max-height: 50vh;
     }
+  }
+
+  .diag :global(.console) {
+    flex: 1 0 21rem;
   }
 
   .top :global(.card-scroll) {

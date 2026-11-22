@@ -399,6 +399,7 @@
           }
         },
         "spin": { "type": "number", "minimum": 0, "description": "A thrown grenade: how fast it turns in the air (the frag's is 0.1 to 1 at random). 0 flies pointing the way it was thrown." },
+        "impact": { "type": "boolean", "description": "A thrown grenade: it goes off where it lands, as an impact fuse, instead of bouncing." },
         "replaces_frag": { "type": "boolean", "description": "Soldiers of this faction's side throw it wherever they would throw a frag." },
         "replaces_rifle_grenade": { "type": "boolean", "description": "A rifle grenade: soldiers of this faction's side fire it wherever they would fire the game's." },
         "replaces_mortar": { "type": "boolean", "description": "A mortar: the faction's mortar men fire it (on the Allied side, the rifle class's third skill too)." },

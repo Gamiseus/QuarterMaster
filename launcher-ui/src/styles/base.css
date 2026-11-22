@@ -31,8 +31,11 @@ body {
 }
 
 /* A scroll region: fills the space its parent gives it and scrolls inside. The gutter is reserved
-   so content does not shift when the scrollbar appears. */
+   so content does not shift when the scrollbar appears. It is positioned so that absolutely
+   positioned content inside it (visually hidden labels) is clipped and scrolled with it, instead
+   of stretching the page below it. */
 .qm-scroll {
+  position: relative;
   flex: 1;
   min-height: 0;
   overflow: auto;

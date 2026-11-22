@@ -1,8 +1,9 @@
 <script lang="ts">
   import { untrack } from "svelte";
   import { Button, Dialog, Select, Skeleton, TextField } from "../../../components/ui";
-  import type { SpriteCatalog, SpriteItem, SpriteShelf } from "../../../lib/bindings";
-  import { shelfKey, sprites } from "../../../lib/stores/sprites.svelte";
+  import type { SpriteItem, SpriteShelf } from "../../../lib/bindings";
+  import { numbered } from "../../../lib/engine/sprites";
+  import { refKey, shelfKey, sprites } from "../../../lib/stores/sprites.svelte";
 
   interface Props {
     open?: boolean;
@@ -16,13 +17,17 @@
 
   /** How many images show before "Show more". */
   const PAGE = 240;
+  /** "Other mods" with every one of them at once. */
+  const ALL = "*";
 
   type Tab = "mod" | "game" | "others";
+  /** An image and, from more than one mod, the mod's name. */
+  type Shown = { item: SpriteItem; from: string | null };
   let tab = $state<Tab>("mod");
-  let otherKey = $state<string | null>(null);
+  let otherKey = $state<string>(ALL);
   let query = $state("");
   let limit = $state(PAGE);
-  let catalog = $state<SpriteCatalog | null>(null);
+  let shown = $state<Shown[] | null>(null);
   let loading = $state(false);
   let failed = $state<string | null>(null);
 
@@ -38,10 +43,12 @@
         ] as { value: Tab; label: string }[]),
   );
 
-  const shelf = $derived.by((): SpriteShelf | null => {
-    if (tab === "mod") return { source: "workspace", owner: folder, label: "This mod" };
-    if (tab === "game") return sprites.shelves.find((s) => s.source === "game") ?? null;
-    return others.find((s) => shelfKey(s.source, s.owner) === otherKey) ?? null;
+  /** The shelves the tab shows: one, or every other mod. */
+  const picked = $derived.by((): SpriteShelf[] => {
+    if (tab === "mod") return [{ source: "workspace", owner: folder, label: "This mod" }];
+    if (tab === "game") return sprites.shelves.filter((s) => s.source === "game");
+    if (otherKey === ALL) return others;
+    return others.filter((s) => shelfKey(s.source, s.owner) === otherKey);
   });
 
   // Each time it opens: this mod first when picking yours; the game when comparing.
@@ -51,34 +58,56 @@
       query = "";
       limit = PAGE;
       tab = mode === "other" && hasGame ? "game" : "mod";
-      if (!otherKey && others.length > 0) otherKey = shelfKey(others[0].source, others[0].owner);
     });
   });
 
+  let loadSeq = 0;
   $effect(() => {
-    const s = shelf;
-    if (!open || !s) {
-      catalog = null;
+    const list = picked;
+    if (!open || list.length === 0) {
+      shown = null;
       return;
     }
+    const seq = ++loadSeq;
     loading = true;
     failed = null;
-    sprites
-      .catalog(s.source, s.owner)
-      .then((c) => {
-        if (shelf === s) catalog = c;
+    // Another tab or mod: the last one's images go at once.
+    shown = null;
+    const many = list.length > 1;
+    // A mod whose images cannot be read is left out of "every mod"; alone it says why.
+    Promise.allSettled(list.map((s) => sprites.catalog(s.source, s.owner).then((c) => ({ s, c }))))
+      .then((results) => {
+        if (seq !== loadSeq) return;
+        const ok = results.flatMap((r) => (r.status === "fulfilled" ? [r.value] : []));
+        const bad = results.find((r) => r.status === "rejected");
+        if (ok.length === 0 && bad && bad.status === "rejected") {
+          failed = bad.reason instanceof Error ? bad.reason.message : String(bad.reason);
+          shown = null;
+          return;
+        }
+        shown = ok.flatMap(({ s, c }) => c.items.map((item) => ({ item, from: many ? s.label : null })));
       })
-      .catch((e) => {
-        failed = e instanceof Error ? e.message : String(e);
-        catalog = null;
-      })
-      .finally(() => (loading = false));
+      .finally(() => {
+        if (seq === loadSeq) loading = false;
+      });
   });
 
+  /** When comparing: images of the same name as yours (allied_walk for allied_walk1) first. */
+  const yourBase = $derived.by(() => {
+    if (mode !== "other" || !sprites.mine) return null;
+    // The name the game shows it as (allied_fire for a faction's fire.png), else the file's.
+    return numbered(sprites.use?.global ?? sprites.mine.item.name).base.toLowerCase();
+  });
   const matches = $derived.by(() => {
-    const items = catalog?.items ?? [];
+    const items = shown ?? [];
     const q = query.trim().toLowerCase();
-    return q ? items.filter((i) => i.sprite.path.toLowerCase().includes(q)) : items;
+    const found = q
+      ? items.filter((i) => i.item.sprite.path.toLowerCase().includes(q) || (i.from ?? "").toLowerCase().includes(q))
+      : items;
+    const base = yourBase;
+    if (!base) return found;
+    const same = (i: Shown) => numbered(i.item.name).base.toLowerCase() === base;
+    return [...found.filter(same), ...found.filter((i) => !same(i))];
   });
 
   $effect(() => {
@@ -109,7 +138,10 @@
     return { destroy: () => io.disconnect() };
   }
 
-  const otherItems = $derived(others.map((s) => ({ value: shelfKey(s.source, s.owner), label: s.source === "library" ? `${s.label} (library)` : s.label })));
+  const otherItems = $derived([
+    { value: ALL, label: "Every other mod" },
+    ...others.map((s) => ({ value: shelfKey(s.source, s.owner), label: s.source === "library" ? `${s.label} (library)` : s.label })),
+  ]);
 </script>
 
 <Dialog
@@ -144,18 +176,32 @@
         <p class="qm-muted">No other mods are in the workspace or the library.</p>
       {:else if failed}
         <p class="qm-muted">{failed}</p>
-      {:else if loading && !catalog}
+      {:else if loading && !shown}
         <Skeleton lines={4} />
       {:else if matches.length === 0}
-        <p class="qm-muted">{query ? "No image has that in its name." : mode === "mine" ? "This mod has no images yet. Put your PNG files in the mod's folder (images that replace the game's go under assets/sprites/), then pick one here." : "No images here."}</p>
+        <p class="qm-muted">
+          {query
+            ? "No image has that in its name."
+            : mode === "mine" || tab === "mod"
+              ? "This mod has no images yet. Put your PNG files in the mod's folder (images that replace the game's go under assets/sprites/), then pick one here."
+              : tab === "others"
+                ? "No other mod has images."
+                : "No images here."}
+        </p>
       {:else}
         <ul class="grid" aria-label="Images">
-          {#each matches.slice(0, limit) as item (item.sprite.path)}
+          {#each matches.slice(0, limit) as { item, from } (refKey(item.sprite))}
             <li>
-              <button type="button" class="tile" title={item.sprite.path} aria-label={item.width > 0 ? `${item.name}, ${item.width} x ${item.height}` : item.name} onclick={() => choose(item)}>
+              <button
+                type="button"
+                class="tile"
+                title={from ? `${from}: ${item.sprite.path}` : item.sprite.path}
+                aria-label={item.width > 0 ? `${item.name}, ${item.width} x ${item.height}` : item.name}
+                onclick={() => choose(item)}
+              >
                 <span class="thumb"><img use:thumb={item} alt="" draggable="false" /></span>
                 <span class="name">{item.name}</span>
-                <span class="size">{item.width > 0 ? `${item.width} x ${item.height}` : item.sprite.path.split(".").pop()?.toUpperCase()}</span>
+                <span class="size">{item.width > 0 ? `${item.width} x ${item.height}` : item.sprite.path.split(".").pop()?.toUpperCase()}{#if from}, {from}{/if}</span>
               </button>
             </li>
           {/each}
@@ -287,8 +333,11 @@
   }
 
   .size {
+    overflow: hidden;
     color: var(--qm-text-muted);
     font-size: var(--qm-text-11);
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .more {

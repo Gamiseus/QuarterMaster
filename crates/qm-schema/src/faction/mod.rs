@@ -222,6 +222,9 @@ pub struct OrdnanceDef {
     /// A thrown grenade: how fast it turns in the air (the frag's is 0.1 to 1 at random); 0
     /// flies pointing the way it was thrown.
     pub spin: Option<f64>,
+    /// A thrown grenade: it goes off where it lands, as an impact fuse, instead of bouncing.
+    #[serde(default)]
+    pub impact: bool,
     pub skill: Option<OrdnanceSkill>,
     #[serde(default)]
     pub replaces_frag: bool,
@@ -565,6 +568,8 @@ pub struct ResolvedOrdnance {
     pub tension: Option<f64>,
     /// A thrown grenade's turn rate in the air; 0 points it the way it was thrown.
     pub spin: Option<f64>,
+    /// A thrown grenade that goes off where it lands.
+    pub impact: bool,
     pub skill_class: Option<String>,
     pub skill_slot: Option<u32>,
     pub skill_unlock: Option<u32>,
@@ -1236,6 +1241,11 @@ impl<'a> Checker<'a> {
             if g.spin.is_some_and(|v| !v.is_finite() || v < 0.0) {
                 self.error(format!("{label}: spin can't be negative."));
             }
+            if g.impact && kind != "thrown" {
+                self.warn(format!(
+                    "{label}: impact is for a thrown grenade; a {kind} goes off as the game's own, and impact is left out."
+                ));
+            }
             if g.spin.is_some() && kind != "thrown" {
                 self.warn(format!(
                     "{label}: spin is for a thrown grenade; a {kind} flies as the game's own, and spin is left out."
@@ -1323,6 +1333,7 @@ impl<'a> Checker<'a> {
                 cooldown: g.cooldown,
                 tension: g.tension,
                 spin: if kind == "thrown" { g.spin } else { None },
+                impact: kind == "thrown" && g.impact,
                 skill_class,
                 skill_slot,
                 skill_unlock,

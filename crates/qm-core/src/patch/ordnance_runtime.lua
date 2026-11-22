@@ -189,6 +189,8 @@ do
         -- A thrown grenade's turn rate in the air (the frag's own, 0.1 to 1 at random, unless
         -- set); 0 flies pointing the way it was thrown.
         spin = kind == "thrown" and tonumber(def.spin) and math.max(0, tonumber(def.spin)) or nil,
+        -- A thrown grenade that goes off where it lands, as an impact fuse, instead of bouncing.
+        impact = kind == "thrown" and def.impact == true or nil,
         sound = def.sound or base.sound,
         sounds = tonumber(def.sounds) or (def.sound and 1 or base.sounds),
         -- What a throw uses up (frags unless set). The game's own code counts a rifle
@@ -210,6 +212,9 @@ do
       }
       if def.on_blast and not base.sprite then
         warn("ordnance " .. def.id .. ": on_blast is for thrown and rifle grenades; a " .. kind .. " goes off with its explosion")
+      end
+      if def.impact and kind ~= "thrown" then
+        warn("ordnance " .. def.id .. ": impact is for a thrown grenade; a " .. kind .. " goes off as the game's own")
       end
       if def.spin ~= nil and kind ~= "thrown" then
         warn("ordnance " .. def.id .. ": spin is for a thrown grenade; a " .. kind .. " flies as the game's own")
@@ -838,6 +843,7 @@ do
         -- No spin: it keeps the soldier's facing, the top of its image forward.
         if g.spin == 0 then part.innerRotation = part.rotationz end
       end
+      if g.impact then part.qmImpact = true end
       part.qmOrdnance = g.id
       table.insert(player.particles, part)
       part.targetx, part.targety = x, y
