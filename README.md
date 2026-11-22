@@ -13,8 +13,10 @@ The game packs its scripts and art inside `mnb.exe`, so changing them by hand me
 
 - **Installs and updates mods.** Browse the mod list in the launcher, or add a `.zip` or a folder. Every download is checked against the hash the site recorded.
 - **Profiles.** Each profile has its own mods, load order and save slot. The built-in Vanilla profile runs the game without mods.
-- **Shows what your mods change.** The Patches tab shows every changed game file line by line, which mod changed it, and where two mods collide, with fixes you can apply.
-- **Looks after saves.** Save slots, automatic backups before a switch or a restore, and a dossier of each save.
+- **Load order.** Tick mods on, drag them into order and lock the ones that must keep their place. Mods can say what they need and what they must load after.
+- **Shows what your mods change.** The Patches tab shows every changed game file line by line, which mod changed it, and where two mods collide, with fixes you can apply and undo. Where two mods replace the same sound or image, you pick which one wins.
+- **Looks after saves.** Save slots, automatic backups before a switch or a restore, a dossier of each save, and a warning before you load a save with mods it was not played with.
+- **Mod settings.** Mods can add options, keybinds and pages of their own to the game's menus; their options can be changed from the launcher too.
 - **Finds the cause of a crash.** Crash reports name the mod that was running, and a test launch can narrow a crash down to one mod.
 - **Keeps modded runs off the leaderboards.** Steam leaderboard uploads, achievements and stats are blocked while mods are on.
 
@@ -52,7 +54,7 @@ If you installed an older QuarterMaster by hand (`winmm.dll` and a `Mods` folder
 
 ### Updating and removing
 
-QuarterMaster checks for its own updates and for mod updates (Settings > Updates) and installs them when you say so. To remove it, use **Apps > Installed apps** in Windows: the uninstaller also takes `winmm.dll` and the `Mods` link out of the game folder, so the game runs without mods again. Tick **Also delete my mods, profiles, save slots, backups and settings** to remove `qm-data` as well; left unticked, it stays for a later install. Your mod workspace folder is never deleted.
+QuarterMaster checks for its own updates and for mod updates (Settings > Updates) and installs them when you say so. To remove it, use **Apps > Installed apps** in Windows: the uninstaller also takes `winmm.dll` and the `Mods` link out of the game folder, so the game runs without mods again. Tick **Also delete my mods, profiles, save slots, backups and settings** to remove `qm-data` as well; left unticked, it stays for a later install. Your mod workspace folder is never deleted. To remove the portable copy, press **Restore clean game folder** in Diagnostics, then delete its folder.
 
 ## Reporting a problem
 
@@ -68,7 +70,17 @@ Search the [open issues](https://github.com/Gamiseus/QuarterMaster/issues) first
 
 ## Making mods
 
-A mod is a folder with any of: `mod.json` (its name and version), `qm.toml` (changes to game code), `config.toml` (settings and keybinds), `faction.toml` (a faction) and `assets/` (replacement sounds, music, sprites and fonts). The [modding wiki](https://gamiseus.github.io/wiki/) documents all of them, and the `qm` command-line tool checks and packs a mod.
+A mod is a folder with any of: `mod.json` (its name and version), `qm.toml` (changes to game code), `config.toml` (settings and keybinds), `faction.toml` (a faction) and `assets/` (replacement sounds, music, sprites and fonts). Many mods need no code. The [modding wiki](https://gamiseus.github.io/wiki/) documents all of them, and the `qm` command-line tool checks and packs a mod.
+
+The launcher's **Mod Engine** (the switch at the bottom of the sidebar) is a workshop for the mods in your workspace folder:
+
+- about 50 templates, each a small working mod for one part of the kit, to start a mod from or add to one;
+- an editor that knows QuarterMaster's files, with suggestions and the checks `qm lint` runs as you type, and Lua checked with the game's own Lua;
+- the Patch Studio: pick the game's lines to change, write the code, and see the file as the game would load it before saving;
+- the Sprites view: line your image up over the game's, by dragging or in one click, and save where it sits into the mod, whatever the file's resolution;
+- Test in game, which runs the game with only your mod and what it requires, and Release, which sets the version, writes the changelog and packs the zip.
+
+Built-in helpers cover faction mods without code (units, weapons, classes, voices, vehicles, ranks), new grenades, rifle grenades, mortars, artillery, air strikes and supply drops, class skills, game events for your Lua, and image sizes independent of a file's resolution.
 
 ## Building from source
 
