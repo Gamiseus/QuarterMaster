@@ -377,6 +377,15 @@ impl ModManifest {
             diags.push(ManifestDiagnostic::error("Mod `name` cannot be empty."));
         }
 
+        if let Some(category) = &self.category {
+            if !MOD_CATEGORIES.contains(&category.as_str()) {
+                diags.push(ManifestDiagnostic::warning(format!(
+                    "Mod `category` '{category}' is not one of: {}.",
+                    MOD_CATEGORIES.join(", ")
+                )));
+            }
+        }
+
         if let Err(e) = ParsedVersion::parse(&self.version) {
             diags.push(ManifestDiagnostic::warning(format!(
                 "Mod `version` '{}' is malformed: {e}",
@@ -424,6 +433,9 @@ impl ModManifest {
         diags
     }
 }
+
+/// The mod categories `mod.json` may name (the editor schema lists the same).
+pub const MOD_CATEGORIES: &[&str] = &["Core", "UI", "Gameplay", "Content", "Audio", "Visuals", "Tools", "Dev", "Modpack", "Other"];
 
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -528,7 +540,7 @@ pub fn generate_mod_json_schema() -> serde_json::Value {
             },
             "category": {
                 "type": "string",
-                "enum": ["Core", "UI", "Gameplay", "Content", "Audio", "Visuals", "Tools", "Dev", "Modpack", "Other"],
+                "enum": MOD_CATEGORIES,
                 "description": "Primary organizational category."
             },
             "tags": {
@@ -621,8 +633,53 @@ pub fn generate_mod_json_schema() -> serde_json::Value {
 /// Generates the official JSON Schema for `qm.toml` patch files.
 pub fn generate_qm_toml_schema() -> serde_json::Value {
     let mut schema = qm_toml_schema_long_form();
+    move_shared_keys_into_patch_tables(&mut schema);
     add_short_patch_lists(&mut schema);
     schema
+}
+
+/// The keys every patch type shares (`priority`, `before`, `after`, `on_failure`) go in the
+/// patch's own table, where the loader reads them. A `[[patches]]` entry holds exactly one
+/// table (`[patches.pattern]` and so on); a key beside it stops the file from loading.
+fn move_shared_keys_into_patch_tables(schema: &mut serde_json::Value) {
+    let shared = [
+        ("priority", serde_json::json!({ "type": "integer", "description": "Overrides the mod's priority for this patch. Lower runs first." })),
+        ("before", serde_json::json!({ "type": "array", "items": { "type": "string" }, "description": "Patches this one runs before, by id, \"mod_id:patch_id\" or \"mod_id:*\"." })),
+        ("after", serde_json::json!({ "type": "array", "items": { "type": "string" }, "description": "Patches this one runs after, by id, \"mod_id:patch_id\" or \"mod_id:*\"." })),
+        ("on_failure", serde_json::json!({ "type": "string", "enum": ["warn", "skip_patch", "skip_mod", "abort"], "default": "warn" })),
+        ("description", serde_json::json!({ "type": "string" })),
+    ];
+    for (kind, keys) in [
+        ("pattern", &["priority", "before", "after", "on_failure", "description"][..]),
+        ("regex", &["priority", "before", "after", "on_failure", "description"][..]),
+        ("copy", &["priority", "before", "after", "on_failure"][..]),
+        ("module", &["priority", "on_failure"][..]),
+    ] {
+        let Some(props) = schema
+            .pointer_mut(&format!("/properties/patches/items/properties/{kind}/properties"))
+            .and_then(|p| p.as_object_mut())
+        else {
+            continue;
+        };
+        for (key, value) in &shared {
+            if keys.contains(key) && !props.contains_key(*key) {
+                props.insert((*key).to_string(), value.clone());
+            }
+        }
+    }
+    if let Some(entry) = schema.pointer_mut("/properties/patches/items").and_then(|e| e.as_object_mut()) {
+        if let Some(props) = entry.get_mut("properties").and_then(|p| p.as_object_mut()) {
+            for key in ["id", "name", "priority", "before", "after", "on_failure"] {
+                props.remove(key);
+            }
+        }
+        entry.insert("minProperties".to_string(), serde_json::json!(1));
+        entry.insert("maxProperties".to_string(), serde_json::json!(1));
+        entry.insert(
+            "description".to_string(),
+            serde_json::json!("One patch: exactly one of [patches.pattern], [patches.regex], [patches.copy] or [patches.module], with all of the patch's keys inside it."),
+        );
+    }
 }
 
 /// Every patch type takes `group`, and each type is also a top-level list (`[[pattern]]`,
@@ -789,7 +846,7 @@ fn qm_toml_schema_long_form() -> serde_json::Value {
             },
             "sprites": {
                 "type": "object",
-                "description": "The size an image is shown at, by the name of its global (e.g. top_m1), whatever the file's resolution. A replaced image takes the original's size without a rule. See the modding wiki, Part 2: https://gamiseus.github.io/wiki/",
+                "description": "The size an image is shown at, and where it sits, by the name of its global (e.g. top_m1), whatever the file's resolution. A replaced image takes the original's size without a rule. See the modding wiki, Part 2: https://gamiseus.github.io/wiki/",
                 "additionalProperties": {
                     "type": "object",
                     "additionalProperties": false,
@@ -809,6 +866,29 @@ fn qm_toml_schema_long_form() -> serde_json::Value {
                         "like": {
                             "type": "string",
                             "description": "Show the image at the size another image global is shown at."
+                        },
+                        "offset": {
+                            "type": "array",
+                            "items": { "type": "number" },
+                            "minItems": 2,
+                            "maxItems": 2,
+                            "description": "Move the image by [x, y] game pixels, right and down, inside the place the game draws it. Needs \"sprite_transforms\" in qm_features."
+                        },
+                        "rotate": {
+                            "type": "number",
+                            "description": "Turn the image about its middle, in degrees clockwise. Needs \"sprite_transforms\" in qm_features."
+                        },
+                        "flip": {
+                            "type": "string",
+                            "enum": ["x", "y", "xy"],
+                            "description": "Mirror the image about its middle: x left-right, y up-down, xy both. Needs \"sprite_transforms\" in qm_features."
+                        },
+                        "draw_size": {
+                            "type": "array",
+                            "items": { "type": "number", "exclusiveMinimum": 0 },
+                            "minItems": 2,
+                            "maxItems": 2,
+                            "description": "Draw the picture at [width, height] game pixels inside its place, while the game's code still sees the original's size. Needs \"sprite_transforms\" in qm_features."
                         }
                     }
                 }
@@ -975,6 +1055,21 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_category_outside_the_list_is_a_warning() {
+        let with = |c: &str| {
+            ModManifest::from_json_str(&format!(r#"{{"id": "m", "name": "M", "version": "1.0.0", "category": "{c}"}}"#))
+                .unwrap()
+                .validate()
+        };
+        assert!(with("Visuals").is_empty(), "{:?}", with("Visuals"));
+        let d = with("Visual");
+        assert_eq!(d.len(), 1, "{d:?}");
+        assert_eq!(d[0].severity, DiagnosticSeverity::Warning);
+        assert!(d[0].message.contains("'Visual' is not one of: Core, UI, Gameplay"), "{}", d[0].message);
+        assert_eq!(generate_mod_json_schema()["properties"]["category"]["enum"], serde_json::json!(MOD_CATEGORIES));
+    }
+
+    #[test]
     fn normalizes_legacy_gspecialevents_and_tactical_overhaul() {
         let legacy_gse = r#"{
             "id": "g_special_events",
@@ -1110,5 +1205,23 @@ mod tests {
             assert_eq!(short, long, "{name}");
             assert!(short.get("group").is_some(), "{name}");
         }
+    }
+
+    #[test]
+    fn shared_patch_keys_are_in_the_patch_tables_not_beside_them() {
+        // The loader reads a [[patches]] entry as exactly one table; a key beside it fails.
+        let schema = generate_qm_toml_schema();
+        let entry = schema.pointer("/properties/patches/items").unwrap();
+        for key in ["id", "name", "priority", "before", "after", "on_failure"] {
+            assert!(entry.pointer(&format!("/properties/{key}")).is_none(), "{key}");
+        }
+        assert_eq!(entry["maxProperties"], 1);
+        for kind in ["pattern", "regex", "copy"] {
+            for key in ["priority", "before", "after", "on_failure"] {
+                let at = format!("/properties/{kind}/items/properties/{key}");
+                assert!(schema.pointer(&at).is_some(), "{at}");
+            }
+        }
+        assert!(schema.pointer("/properties/module/items/properties/priority").is_some());
     }
 }

@@ -1,0 +1,11 @@
+name = "Faction images and sounds"
+part = 3
+order = 7
+section = "Other images and sounds: `[sprites]`, `[sounds]`"
+summary = "Any other game image or sound replaced while the faction is active, by its game name."
+open = "faction.toml"
+try_next = ["Find other image and sound names in the game's main.lua and includes/."]
+[[examples]]
+section = "Other images and sounds: `[sprites]`, `[sounds]`"
+block = 1
+file = "faction.toml"

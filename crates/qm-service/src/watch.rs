@@ -15,11 +15,16 @@ const MAX_LINES_PER_BATCH: usize = 200;
 const MAX_TAIL_BYTES: u64 = 256 * 1024;
 
 /// What a changed path means to the service.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Classified {
     Invalidate(Scope),
     Log(LogSource),
     CrashDir,
+    /// A file of a workspace mod changed: its folder, and the path inside it.
+    Workspace {
+        folder: String,
+        path: String,
+    },
     Ignore,
 }
 
@@ -35,6 +40,9 @@ struct Rules {
     saves: PathBuf,
     logs: PathBuf,
     game_saves: Option<PathBuf>,
+    workspace: Option<PathBuf>,
+    /// The running launcher uses the workspace's mods: a change there is a mods change too.
+    workspace_mode: bool,
 }
 
 impl Rules {
@@ -46,6 +54,8 @@ impl Rules {
             saves: p.saves_dir.clone(),
             logs: p.logs_dir.clone(),
             game_saves: p.load_settings().save_dir_path,
+            workspace: p.load_settings().workspace_mods_dir,
+            workspace_mode: p.workspace_mode,
         }
     }
 
@@ -84,6 +94,21 @@ impl Rules {
                 return Classified::Log(LogSource::Launcher);
             }
             return Classified::CrashDir;
+        }
+        // 3b. A workspace mod's file. Folders the loader skips, dot names (`.git`) and the
+        //     Mod Engine's own temp files are not changes.
+        if let Some(rel) = self.workspace.as_deref().and_then(|w| under(path, w)) {
+            let folder = &rel[0];
+            let skipped = folder.starts_with(['.', '_'])
+                || eq(folder, "qm")
+                || rel.iter().any(|part| part.starts_with('.'));
+            if skipped || rel.len() < 2 {
+                return Classified::Ignore;
+            }
+            return Classified::Workspace {
+                folder: folder.clone(),
+                path: rel[1..].join("/"),
+            };
         }
         // 4.
         if under(path, &self.profiles).is_some() {
@@ -306,6 +331,11 @@ impl Service {
                     .with_details(e.to_string())
             })?;
         }
+        if let Some(w) = rules.workspace.as_ref() {
+            if w.is_dir() && !roots.iter().any(|r| under(w, r).is_some() || w == r) {
+                roots.push(w.clone());
+            }
+        }
         if let Some(g) = rules.game_saves.as_ref() {
             if !g.is_dir() {
                 tracing::warn!(
@@ -349,9 +379,19 @@ impl Service {
     ) {
         let mut scopes: Vec<Scope> = Vec::new();
         let mut logs: Vec<(PathBuf, LogSource)> = Vec::new();
+        let mut workspace: Vec<(String, String)> = Vec::new();
         for path in paths {
             let scope = match rules.classify(path) {
                 Classified::Invalidate(s) => s,
+                Classified::Workspace { folder, path } => {
+                    if !workspace.contains(&(folder.clone(), path.clone())) {
+                        workspace.push((folder, path));
+                    }
+                    if !rules.workspace_mode {
+                        continue;
+                    }
+                    Scope::Mods
+                }
                 Classified::CrashDir => Scope::Crashes,
                 Classified::Log(src) => {
                     if !logs.iter().any(|(p, _)| p == path) {
@@ -387,6 +427,11 @@ impl Service {
                 continue;
             }
             self.inner.sink.emit(QmEvent::LogLine { source, line });
+        }
+        for (folder, path) in workspace {
+            self.inner
+                .sink
+                .emit(QmEvent::WorkspaceChanged { folder, path });
         }
         for scope in scopes {
             self.invalidate(scope);

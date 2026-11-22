@@ -1,0 +1,11 @@
+name = "Faction grenades"
+part = 3
+order = 9
+section = "Ordnance: `[[ordnance]]` and `[[explosions]]`"
+summary = "Faction grenades: one with its own explosion, thrown by a class skill and in place of the frag, and a rifle grenade in place of the game's."
+open = "faction.toml"
+try_next = ["Draw the grenades in grenades/ (40 by 40 for the hand grenade, as the frag; 20 by 20 for the rifle grenade).", "Make it a fourth skill: slot = 4, with a name, and an icon in the skill table.", "Give another class a second grenade on another skill slot."]
+[[examples]]
+section = "Ordnance: `[[ordnance]]` and `[[explosions]]`"
+block = 1
+file = "faction.toml"

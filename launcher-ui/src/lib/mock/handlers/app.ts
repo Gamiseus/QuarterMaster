@@ -29,6 +29,9 @@ export const handlers: Handlers = {
   game_status: () => state.game,
   game_launch: (args) => launch(args.req as LaunchRequest),
   jobs_list: () => jobs,
-  "plugin:opener|open_url": () => null,
+  "plugin:opener|open_url": (args) => {
+    log.openedUrls.push(String(args.url));
+    return null;
+  },
   "plugin:dialog|open": (args) => dialogOpen(args.options),
 };

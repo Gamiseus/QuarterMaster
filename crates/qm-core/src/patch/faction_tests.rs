@@ -82,6 +82,14 @@ map = { hurt = "alliedHurt" }
 [text]
 mouseOverLightSpec = "Scout, fast."
 
+[ranks]
+soldier = ["Krasnoarmeyets", "Yefreitor"]
+cadet = "Kursant"
+
+[sprites]
+rank_1 = { file = "misc/rank_1.png", size = [18, 22] }
+spec_rifle = { scale = 0.5 }
+
 [[vehicles]]
 reskin = "sherman"
 name = "T-34/76"
@@ -118,6 +126,7 @@ fn red_army_mod(mods: &Path) -> PathBuf {
             "vehicles/t34/body.png",
             "vehicles/t34/debris1.png",
             "vehicles/t34/debris2.png",
+            "misc/rank_1.png",
         ],
     );
     write(&root, "faction.toml", RED_ARMY);
@@ -549,4 +558,65 @@ print('MAGAZINES OK')"#,
     let text =
         String::from_utf8_lossy(&out.stdout).to_string() + &String::from_utf8_lossy(&out.stderr);
     assert!(text.contains("COMPILES"), "{text}");
+}
+
+/// The Sarge's title: the five patches land where the game names him, finds him and speaks of
+/// him, and the patched files still compile.
+#[test]
+fn sarge_title_patches_match_the_vanilla_sources() {
+    let base = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../decompile");
+    if !base.join("includes/urb_engine.lua").is_file() {
+        eprintln!("skipping: decompiled game sources not found");
+        return;
+    }
+    let dir = TempDir::new().unwrap();
+    let root = red_army_mod(dir.path());
+    write(
+        &root,
+        "faction.toml",
+        &RED_ARMY.replace("cadet = \"Kursant\"\n", "cadet = \"Kursant\"\nsarge = \"Starshina\"\n"),
+    );
+    let lf = loaded(&root);
+    assert_eq!(lf.faction.ranks.as_ref().and_then(|r| r.sarge.as_deref()), Some("Starshina"));
+    let mut files: std::collections::BTreeMap<String, String> = std::collections::BTreeMap::new();
+    let mut seen = Vec::new();
+    for patch in build_faction_patches(&[lf], None) {
+        let Some(id) = patch.id().filter(|id| id.starts_with("qm_factions_sarge")).map(str::to_string) else {
+            continue;
+        };
+        let Patch::Regex(p) = &patch else { panic!("{id} is a regex patch") };
+        let target = p.target.primary().to_string();
+        let text = files
+            .entry(target.clone())
+            .or_insert_with(|| fs::read_to_string(base.join(&target)).unwrap());
+        let mut rope = crop::Rope::from(text.as_str());
+        let entry = p.apply(&target, &mut rope, Path::new("test")).unwrap();
+        let want = match id.as_str() {
+            "qm_factions_sarge_found" => 2,
+            "qm_factions_sarge_lines" => 5,
+            _ => 1,
+        };
+        assert_eq!(entry.matched_count, want, "{id}: {:?}", entry.warnings);
+        *text = rope.to_string();
+        seen.push(id);
+    }
+    assert_eq!(seen.len(), 5, "{seen:?}");
+    let urb = &files["includes/urb_engine.lua"];
+    assert!(urb.contains(r#"if((__qm_is_sarge and __qm_is_sarge(grunt) or grunt.name == "Sarge")) then"#));
+    assert!(urb.contains(r#"anounceStuff((__qm_sarge_text and __qm_sarge_text("HEADS UP, SARGE IN THE AO!!") or "HEADS UP, SARGE IN THE AO!!"))"#));
+    assert!(urb.contains(r#".name = (__qm_sarge_text and __qm_sarge_text("Sarge") or "Sarge")"#));
+    assert!(urb.contains(r#"__qm_sarge_text("There is only one Sarge. \nAnd he died on your watch!!")"#));
+    assert!(!urb.contains(r#"name == "Sarge" and"#), "both finds are patched");
+    if let Some(lua) = lua_exe() {
+        for (target, text) in &files {
+            let p = dir.path().join(target.replace('/', "_"));
+            fs::write(&p, text).unwrap();
+            let out = Command::new(&lua)
+                .arg("-e")
+                .arg(format!("assert((loadstring or load)(io.open([[{}]], 'rb'):read('*a')))", p.display()))
+                .output()
+                .unwrap();
+            assert!(out.status.success(), "{target} does not compile: {}", String::from_utf8_lossy(&out.stderr));
+        }
+    }
 }

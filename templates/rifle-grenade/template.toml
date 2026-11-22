@@ -1,0 +1,11 @@
+name = "A rifle grenade"
+part = 5
+order = 6
+section = "Rifle grenades"
+summary = "A rifle grenade with its own sprite and explosion, fired by the riflemen's second skill and by the Axis."
+open = "rifle_grenade.lua"
+try_next = ["Draw your rifle grenade in assets/sprites/ (20 by 20, fins up, as the game's).", "Make it a fourth skill: skill = { class = \"sniper\", slot = 4 }, for a class whose rifle takes rifle grenades.", "Change the explosion's numbers, or base it on \"at_grenade\" for an anti-tank rifle grenade.", "A mortar or an artillery barrage works the same way: template mortar-and-artillery."]
+[[examples]]
+section = "Rifle grenades"
+block = 1
+file = "rifle_grenade.lua"

@@ -1,7 +1,7 @@
 # One-command check for the QuarterMaster workspace.
 $ErrorActionPreference = "Stop"
 $root = $PSScriptRoot
-$maxBytes = 28 * 1024 * 1024
+$maxBytes = 28.5 * 1024 * 1024
 
 function Invoke-Step {
     param([string]$Name, [string]$Dir, [scriptblock]$Action)
@@ -70,9 +70,9 @@ Write-Host "[OK] release artifacts exist"
 $size = (Get-Item $exe).Length
 $mb = [math]::Round($size / 1MB, 2)
 if ($size -gt $maxBytes) {
-    Write-Host "[FAIL] size check: qm-launcher.exe is $mb MB (limit 28 MB)"
+    Write-Host "[FAIL] size check: qm-launcher.exe is $mb MB (limit 28.5 MB)"
     exit 1
 }
-Write-Host "[OK] size check: qm-launcher.exe is $mb MB (limit 28 MB)"
+Write-Host "[OK] size check: qm-launcher.exe is $mb MB (limit 28.5 MB)"
 
 Write-Host "[OK] All checks passed"

@@ -1,0 +1,29 @@
+#:schema https://gamiseus.github.io/schemas/faction.schema.json
+# Example Mod: faction mortars and artillery.
+# This faction stands in for the Axis: its mortar men fire heavy mortar rounds, and its
+# artillery barrages land as heavier shells. Neither needs an image: only the blast shows.
+# mod.json lists "ordnance" in qm_features (QuarterMaster 2.2.0 or newer).
+# Change first: the shell's numbers.
+# Wiki: Part 3, Ordnance: https://gamiseus.github.io/wiki/faction-mods/#ordnance-ordnance-and-explosions
+
+schema = 1
+id = "example_army"
+name = "Example Army"
+replaces = "axis"
+
+[[explosions]]
+id = "heavy_shell"
+based_on = "artillery"                  # the game's artillery shell, then these
+frag_radius = 150
+
+[[ordnance]]
+id = "heavy_mortar"
+kind = "mortar"                         # a soldier's mortar rounds, as the game's
+explosion = "heavy_mortar"              # the game's heavy mortar
+replaces_mortar = true                  # the faction's mortar men fire it
+
+[[ordnance]]
+id = "heavy_barrage"
+kind = "artillery"                      # a barrage, as the game's
+explosion = "heavy_shell"
+replaces_artillery = true               # the faction's barrages land as heavy shells

@@ -1,0 +1,7 @@
+name = "Replace a game text"
+part = 2
+order = 7
+section = "Text files"
+summary = "A game text string (the M1's description) replaced by a .txt file. No code."
+open = "assets/text/weaponText_m1.txt"
+try_next = ["Find other text names in the game's includes/localisation.lua and add a file for each."]

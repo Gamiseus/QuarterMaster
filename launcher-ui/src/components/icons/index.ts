@@ -19,3 +19,4 @@ export { default as IconDanger } from "./IconDanger.svelte";
 export { default as IconInfo } from "./IconInfo.svelte";
 export { default as IconChevronLeft } from "./IconChevronLeft.svelte";
 export { default as IconChevronRight } from "./IconChevronRight.svelte";
+export { default as IconFolderPlus } from "./IconFolderPlus.svelte";

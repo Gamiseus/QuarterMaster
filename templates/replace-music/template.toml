@@ -1,0 +1,8 @@
+name = "Replace music"
+part = 2
+order = 6
+section = "Folders"
+summary = "A music track replaced by a file in assets/music/. No code."
+open = "qm.toml"
+aliases = ["custom_battle_music"]
+try_next = ["Put your own track in place of the placeholder (.ogg, .wav or .mp3)."]

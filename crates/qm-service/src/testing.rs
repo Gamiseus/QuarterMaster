@@ -419,3 +419,10 @@ pub fn fail_next_suggestions(svc: &Service) {
         .fail_next_suggestions
         .store(true, std::sync::atomic::Ordering::SeqCst);
 }
+
+/// Mod Engine deletes remove files for good instead of filling the Recycle Bin.
+pub fn engine_delete_for_good(svc: &Service) {
+    svc.inner
+        .engine_delete_for_good
+        .store(true, std::sync::atomic::Ordering::Relaxed);
+}

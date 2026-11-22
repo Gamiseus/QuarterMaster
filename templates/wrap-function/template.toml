@@ -1,0 +1,11 @@
+name = "Wrap a game function"
+part = 5
+order = 3
+section = "Wrapping a game function"
+summary = "A game function wrapped so your code runs every time it is called, then the original."
+open = "wrap.lua"
+try_next = ["Change the text before passing it on, or skip it in some cases."]
+[[examples]]
+section = "Wrapping a game function"
+block = 1
+file = "wrap.lua"

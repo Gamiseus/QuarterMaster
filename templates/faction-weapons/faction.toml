@@ -1,0 +1,41 @@
+#:schema https://gamiseus.github.io/schemas/faction.schema.json
+# Example Mod: faction weapons.
+# The M1 Garand becomes the Example Rifle (new art, sound and stats). The Example SMG is a new
+# weapon built on the M3; it drops as Allied loot, joins the random pools, and takes the
+# Thompson's place wherever the game would give one.
+# The images and the sound in weapons/ are placeholders.
+# Change first: the names, the art in weapons/, then the stats.
+# Wiki: Part 3, Weapons: https://gamiseus.github.io/wiki/faction-mods/#weapons-weapons
+
+schema = 1
+id = "example_army"
+name = "Example Army"
+replaces = "allied"
+
+[[weapons]]
+reskin = "m1"                      # the Garand becomes...
+description = "Example Rifle. Reliable and accurate."
+top_sprite = "weapons/example_rifle_top.png"
+side_sprite = "weapons/example_rifle_side.png"
+sound = "springfieldSound"
+stats = { action = "bolt", ammo = 5, maxAmmo = 5, range = 480, damage = 110 }
+
+[[weapons]]
+tag = "example_smg"
+based_on = "m3"
+name = "Example SMG"
+top_sprite = "weapons/example_smg_top.png"
+side_sprite = "weapons/example_smg_side.png"
+sound = "weapons/example_smg"
+stats = { maxAmmo = 35 }           # ammo follows maxAmmo unless you set it
+loot_side = "allied"               # also drops as Allied loot
+pools = ["smg", "grunt"]           # and joins these random pools
+
+# A random pool: which weapons a spawn can roll.
+[pools.grunt]
+add = ["example_smg"]
+remove = ["springfield"]
+
+# Everywhere the game hands out a Thompson, it gives the Example SMG instead.
+[spawn_swap]
+tommy = "example_smg"

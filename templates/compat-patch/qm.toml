@@ -1,0 +1,28 @@
+#:schema https://gamiseus.github.io/schemas/qm.schema.json
+# Example Mod: a compatibility patch.
+# This mod has no code of its own. It changes other mods' patches: one is turned off, one runs
+# after another, and one keeps its code next to the other mod's copy of the line it hooks.
+# mod.json requires both mods and loads after them.
+# Change first: the patch ids, which you see on the launcher's Patches tab.
+# Wiki: Part 7, Compatibility patches: https://gamiseus.github.io/wiki/working-with-other-mods/#compatibility-patches
+
+[manifest]
+version = "1.0.0"
+
+# Turn off a patch that the other mod makes unnecessary.
+[[overrides]]
+patch = "other_mod:old_halt"
+disable = true
+
+# Run one patch after another.
+[[overrides]]
+patch = "example_mod:require"
+after = ["other_mod:load_module"]
+
+# Keep Example Mod's halt code next to Other Mod's copy of the line it hooks.
+[[overrides]]
+patch = "example_mod:halt_extra"
+[[overrides.anchors]]
+within = "other_mod:halt_fix"
+pattern = "OtherMod.clearPath(soldier)"
+exact = true

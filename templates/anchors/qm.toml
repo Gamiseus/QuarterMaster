@@ -1,0 +1,31 @@
+#:schema https://gamiseus.github.io/schemas/qm.schema.json
+# Example Mod: an anchor on another mod's code.
+# The anchor puts the line after the last line of other_mod's load_module patch. It is used
+# only when mod.json requires other_mod ("relationships": {"requires": {"other_mod": ">=1.0.0"}});
+# until then, or with other_mod off, the pattern is the fallback (the game's own line) and the
+# log says the anchor was not used. mod.json lists "anchors" in qm_features.
+# Change first: within (the other mod's patch id) and edge; then require that mod.
+# Wiki: Part 7, Anchors:
+#   https://gamiseus.github.io/wiki/working-with-other-mods/#anchors-placing-your-code-on-another-mods-code
+
+[manifest]
+version = "1.0.0"
+
+[[patches]]
+[patches.module]
+id = "example_mod:module"
+source = "example.lua"
+name = "includes/example_mod"
+before = "main.lua"
+
+[[patches]]
+[patches.pattern]
+id = "example_mod:after_other"
+target = "main.lua"
+pattern = 'require "includes/directives"'    # the fallback, used when other_mod is off
+position = "after"
+payload = 'ExampleMod = require "includes/example_mod"'
+
+[[patches.pattern.anchors]]
+within = "other_mod:load_module"
+edge = "end"                                 # after the last line of that patch's block

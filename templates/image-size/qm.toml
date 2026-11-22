@@ -1,0 +1,19 @@
+#:schema https://gamiseus.github.io/schemas/qm.schema.json
+# Example Mod: image sizes.
+# A new image is shown at its own pixel size. These rules choose another size for three new
+# images in assets/sprites/ (placeholders here). Each rule is named after the image's global
+# name, which is its file name without the extension.
+# Change first: the rules below; use exactly one key in each.
+# Wiki: Part 2, Image resolution and size: https://gamiseus.github.io/wiki/replacing-art-and-sound/#image-resolution-and-size
+
+[manifest]
+version = "1.0.0"
+
+[sprites.example_badge]
+scale = 0.25               # a quarter of its own pixels: a 400x400 file shows at 100x100
+
+[sprites.top_example_smg]
+like = "top_m3"            # the size another image is shown at
+
+[sprites.side_example_smg]
+size = [150, 100]          # an exact size, in the game's pixels

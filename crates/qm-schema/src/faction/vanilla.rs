@@ -369,4 +369,27 @@ pub const VEHICLE_PARTS: &[(&str, &str)] = &[
 ];
 
 pub const IMAGE_EXTS: &[&str] = &["png", "jpg", "jpeg", "bmp"];
+
+/// The game's explosions a faction's `[[explosions]]` and `[[ordnance]]` can name, with the
+/// tag `createExplosion` knows them by. The same presets are in QuarterMaster's grenade runtime.
+pub const EXPLOSION_PRESETS: &[(&str, &str)] = &[
+    ("frag", "mineExplosion"),
+    ("contact", "contactExplosion"),
+    ("at_grenade", "atGrenadeExplosion"),
+    ("rifle_grenade", "rifleGrenadeExplosion"),
+    ("mortar", "mortarExplosion"),
+    ("faust", "faustExplosion"),
+    ("artillery", "artyExplosion"),
+    ("heavy_mortar", "hvyExplosion"),
+    ("bomb", "bombExplosion"),
+    ("strafe", "flakExplosion"),
+];
+
+/// A preset by its name or by the game's tag: (name, tag).
+pub fn explosion_preset(name: &str) -> Option<(&'static str, &'static str)> {
+    EXPLOSION_PRESETS
+        .iter()
+        .find(|(n, t)| *n == name || *t == name)
+        .copied()
+}
 pub const AUDIO_EXTS: &[&str] = &["wav", "ogg", "mp3"];

@@ -1,0 +1,34 @@
+#:schema https://gamiseus.github.io/schemas/qm.schema.json
+# Example Mod: the short form and groups.
+# [[pattern]] and [[regex]] are the short form of [[patches]] with [patches.pattern]; mod.json
+# lists "short_patches" in qm_features for it. group sorts the patches on the launcher's
+# Patches tab; the game ignores it.
+# Change first: the group names.
+# Wiki: Part 4, Two ways to write a patch: https://gamiseus.github.io/wiki/changing-game-code/#two-ways-to-write-a-patch
+
+[manifest]
+version = "1.0.0"
+
+[[pattern]]
+id = "example_mod:save_note"
+group = "Saves"
+target = "main.lua"
+pattern = 'print("loading Save")'
+position = "after"
+payload = 'print("[Example Mod] a save was found")'
+
+[[pattern]]
+id = "example_mod:new_profile_note"
+group = "Saves"
+target = "main.lua"
+pattern = "newProfile(player)"
+position = "after"
+payload = 'print("[Example Mod] started a new profile")'
+
+[[regex]]
+id = "example_mod:faster_reload"
+group = "Balance"
+target = "includes/urb_engine.lua"
+pattern = 'reloadTime = \d+'
+position = "at"
+payload = "reloadTime = 3"

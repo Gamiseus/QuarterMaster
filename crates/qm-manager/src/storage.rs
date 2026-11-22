@@ -182,6 +182,21 @@ impl WindowSettings {
     }
 }
 
+/// `fs::rename`, tried again for up to half a second while Windows refuses it: a file just
+/// written can be held open for a moment by a virus scanner or the search indexer.
+fn rename_retrying(from: &Path, to: &Path) -> std::io::Result<()> {
+    let mut tries = 0;
+    loop {
+        match fs::rename(from, to) {
+            Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied && tries < 20 => {
+                tries += 1;
+                std::thread::sleep(std::time::Duration::from_millis(25));
+            }
+            other => return other,
+        }
+    }
+}
+
 fn default_color_vision() -> String {
     "standard".to_string()
 }
@@ -403,7 +418,7 @@ impl QuarterMasterPaths {
             f.write_all(json.as_bytes())?;
             f.sync_all()
         });
-        if let Err(e) = written.and_then(|()| fs::rename(&tmp, &self.settings_file)) {
+        if let Err(e) = written.and_then(|()| rename_retrying(&tmp, &self.settings_file)) {
             let _ = fs::remove_file(&tmp);
             return Err(fail(e));
         }

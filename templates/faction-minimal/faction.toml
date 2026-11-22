@@ -1,0 +1,13 @@
+#:schema https://gamiseus.github.io/schemas/faction.schema.json
+# Example Mod: the smallest faction.
+# Example Army takes over the Allied side. Everything left out stays as in the game.
+# Change first: id (it is stored in saves; never change it after a release), name, replaces.
+# Check it with:  qm faction check .
+# Wiki: Part 3, The smallest faction: https://gamiseus.github.io/wiki/faction-mods/#the-smallest-faction
+# Try next: [names], [[weapons]], [units.<unit>]; each has its own template.
+
+schema = 1
+id = "example_army"          # lowercase letters, digits, underscores; stored in saves
+name = "Example Army"
+replaces = "allied"          # or "axis"
+side_name = "Example"        # optional: the word the game uses for the side

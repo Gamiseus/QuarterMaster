@@ -1,0 +1,11 @@
+name = "Copy patches"
+part = 5
+order = 2
+section = "Copy patches"
+summary = "A file of your functions added to the end of a game file, so they live in its scope."
+open = "extra_functions.lua"
+try_next = ["Call exampleExtraFunction from a pattern patch in the same file."]
+[[examples]]
+section = "Copy patches"
+block = 1
+file = "qm.toml"

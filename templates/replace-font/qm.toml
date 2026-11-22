@@ -1,0 +1,10 @@
+#:schema https://gamiseus.github.io/schemas/qm.schema.json
+# Example Mod: a replaced font.
+# A font in assets/fonts/ takes the place of the game's font with the same name. The game's
+# fonts are impact.ttf and korean.ttf. No font comes with this example: fonts have licences,
+# so use one you may share. See README.md.
+# Change first: add your font as assets/fonts/impact.ttf.
+# Wiki: Part 2, Folders: https://gamiseus.github.io/wiki/replacing-art-and-sound/#folders
+
+[manifest]
+version = "1.0.0"

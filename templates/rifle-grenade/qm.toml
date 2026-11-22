@@ -1,0 +1,28 @@
+#:schema https://gamiseus.github.io/schemas/qm.schema.json
+# Example Mod: a rifle grenade.
+# rifle_grenade.lua registers an explosion and a rifle grenade (kind = "rifle") with
+# QM.Explosions and QM.Ordnance: the riflemen's second skill fires it, and so does the Axis.
+# mod.json lists "ordnance" in qm_features, which also makes QuarterMaster add the hooks
+# ordnance needs (QuarterMaster 2.2.0 or newer).
+# Change first: the explosion's numbers, then who fires it.
+# Wiki: Part 5, Rifle grenades: https://gamiseus.github.io/wiki/adding-your-own-lua-files/#rifle-grenades
+# Try next: a fourth skill that fires it (skill slot 4).
+
+[manifest]
+version = "1.0.0"
+
+[[patches]]
+[patches.module]
+id = "example_mod:rifle_grenade_module"
+source = "rifle_grenade.lua"
+name = "includes/example_mod_rifle_grenade"
+before = "main.lua"
+
+# Load it once the game's own files are loaded: the grenade is registered then.
+[[patches]]
+[patches.pattern]
+id = "example_mod:rifle_grenade_require"
+target = "main.lua"
+pattern = 'require "includes/directives"'
+position = "after"
+payload = 'ExampleMod = require "includes/example_mod_rifle_grenade"'

@@ -126,6 +126,15 @@ function createProfile(req: NewProfile): ModProfile {
 export const handlers: Handlers = {
   profiles_list: () => summaries(),
   profile_preview_switch: (args) => previewSwitch(String(args.id)),
+  // The mods the profile's slot was last played with that the profile does not load.
+  profile_save_check: (args) => {
+    const p = profileDoc(args.id);
+    const slot = saves.find((s) => s.profile.id === (p.linked_save_profile_id ?? "default"));
+    const missing = Object.entries(slot?.profile.active_mods_fingerprint ?? {})
+      .filter((e): e is [string, string] => e[1] !== undefined && !p.enabled_mods.includes(e[0]))
+      .sort((a, b) => a[0].localeCompare(b[0]));
+    return { is_safe: missing.length === 0, missing_mods_from_save: missing, is_tainting_vanilla_save: false, warning_message: null };
+  },
   modpack_export: (args) => {
     const p = profileDoc(args.profileId);
     return runMockJob("modpack_export", `Exporting ${p.name}`, () => ({ output: `${p.name}.qmpack` }));

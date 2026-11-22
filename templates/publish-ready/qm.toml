@@ -1,0 +1,16 @@
+#:schema https://gamiseus.github.io/schemas/qm.schema.json
+# Example Mod: ready to publish.
+# [publish] asks the QuarterMaster site and the launcher's Browse tab to list the mod; the game
+# ignores it. update_keys in mod.json tells the launcher where updates come from.
+# Change first: your-name/your-repo here and in mod.json, and the summary.
+# Wiki: Part 11, Listing a mod in the launcher's Browse tab:
+#   https://gamiseus.github.io/wiki/packaging-and-publishing/#listing-a-mod-in-the-launchers-browse-tab
+
+[manifest]
+version = "1.0.0"
+
+[publish]
+repository = "your-name/your-repo"
+asset = "ExampleMod.zip"
+summary = "One line shown in the mod list."
+image = "preview.png"

@@ -1,0 +1,31 @@
+#:schema https://gamiseus.github.io/schemas/faction.schema.json
+# Example Mod: faction classes.
+# The rifleman class gets a new name, description, start weapon, three upgrade tiers, a bonus
+# and a badge (icons/rifle.png, a placeholder). The skills keep their effects; only their names
+# and text change.
+# Change first: name and description; then unlocks and bonus.
+# Wiki: Part 3, Classes: https://gamiseus.github.io/wiki/faction-mods/#classes-classesslot-allied-side
+
+schema = 1
+id = "example_army"
+name = "Example Army"
+replaces = "allied"
+
+[classes.rifle]
+name = "Rifleman"
+description = "Medium to long range with the Example Rifle."
+start_weapon = "m1"                        # given on promotion to this class
+unlocks = ["m1", "example_smg", "bar"]     # weapon upgrade tiers 1 to 3
+bonus = { speed = 0, skill = 5 }           # replaces the vanilla bonus for this class
+skills = ["Smoke, ...", "Frag, ...", "Charge, ..."]   # names and text only
+icon = "icons/rifle.png"                   # class badge
+
+# The Example SMG unlocked above is a weapon of this faction, as in the template
+# faction-weapons (its art is in weapons/; swap it for yours).
+[[weapons]]
+tag = "example_smg"
+based_on = "m3"
+name = "Example SMG"
+top_sprite = "weapons/example_smg_top.png"
+side_sprite = "weapons/example_smg_side.png"
+sound = "weapons/example_smg"

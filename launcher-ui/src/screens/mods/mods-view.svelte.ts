@@ -12,9 +12,9 @@ export const modsView = $state({
   showChips: null as FilterChip[] | null,
 });
 
+/** The tab state is set at once; the screen changes once the Mod Engine has no unsaved edits left. */
 function showMods(): void {
-  app.mode = "launcher";
-  app.page = "mods";
+  void app.goTo("launcher", "mods");
 }
 
 /** Opens the Browse tab, optionally searching for `text`. */

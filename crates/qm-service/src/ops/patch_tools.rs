@@ -1331,6 +1331,35 @@ fn glue_entry(p: &ModProfile, id: &str) -> Option<GluePatchEntry> {
 /// How many places `anchor` matches in `text`, by the engine's own pattern matcher. The line
 /// matches only its own text, as in a new copy's anchor and a text rung (D59).
 fn count_matches(target: &str, text: &str, anchor: &str) -> usize {
+    let t = probe_table(target, anchor);
+    t.apply_patches_offline(target, text)
+        .ok()
+        .and_then(|(_, _, recs)| recs.first().map(|r| r.matched_count))
+        .unwrap_or(0)
+}
+
+/// How many places in `text` the `anchor` lines match as a pattern, and the first line
+/// (1-based) of each, by the engine's own matching (indentation aside).
+pub(crate) fn match_places(target: &str, text: &str, anchor: &str) -> (usize, Vec<usize>) {
+    let t = probe_table(target, anchor);
+    let prep = t.prepare();
+    let Ok(traced) = t.apply_prepared_traced(&prep, target, text) else {
+        return (0, Vec::new());
+    };
+    let count = traced.records.first().map_or(0, |r| r.matched_count);
+    let mut seen = std::collections::BTreeSet::new();
+    let starts = traced
+        .trace
+        .lines
+        .iter()
+        .enumerate()
+        .filter_map(|(i, o)| o.edit().filter(|e| seen.insert(*e)).map(|_| i + 1))
+        .collect();
+    (count, starts)
+}
+
+/// A table holding one probe: a pattern patch that writes the anchor back over itself.
+fn probe_table(target: &str, anchor: &str) -> PatchTable {
     let mut t = PatchTable::default();
     t.targets.insert(target.to_string());
     let probe = Patch::Pattern(PatternPatch {
@@ -1362,10 +1391,7 @@ fn count_matches(target: &str, text: &str, anchor: &str) -> usize {
         },
     });
     t.patches.push((probe, 0, PathBuf::new()));
-    t.apply_patches_offline(target, text)
-        .ok()
-        .and_then(|(_, _, recs)| recs.first().map(|r| r.matched_count))
-        .unwrap_or(0)
+    t
 }
 
 fn to_u32(n: usize) -> u32 {

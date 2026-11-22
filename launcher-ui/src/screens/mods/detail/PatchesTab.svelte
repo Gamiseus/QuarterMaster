@@ -11,14 +11,17 @@
   import { mods } from "../../../lib/stores/mods.svelte";
   import { patches } from "../../../lib/stores/patches.svelte";
   import { openPatch } from "../mods-view.svelte";
+  import { engine } from "../../../lib/stores/engine.svelte";
   import { resolver } from "../../../lib/stores/resolver.svelte";
 
   interface Props {
     modId: string;
     canMutate: boolean;
+    /** A workspace mod: each patch can open in the Mod Engine's Patch Studio. */
+    workspaceMod?: { id: string; name: string; version: string } | null;
   }
 
-  let { modId, canMutate }: Props = $props();
+  let { modId, canMutate, workspaceMod = null }: Props = $props();
 
   const STATE: Record<PatchState, { label: string; tone: "ok" | "warn" | "danger" | "neutral" }> = {
     applied: { label: "Applied", tone: "ok" },
@@ -161,6 +164,16 @@
           {#each changedBy(simOverrides, modId, p.patch_id, p) as m (m)}<Badge tone="info">Changed by {modName(m)}</Badge>{/each}
           {#if p.target_file}
             <Button size="sm" variant="ghost" aria-label={`Show ${nameOf(p)} in patch view`} onclick={() => openPatch(p.patch_id)}>Show</Button>
+          {/if}
+          {#if workspaceMod}
+            <Button
+              size="sm"
+              variant="ghost"
+              aria-label={`Edit ${nameOf(p)} in the Mod Engine`}
+              onclick={() => workspaceMod && engine.openPatch(workspaceMod, p.patch_id).catch(() => {})}
+            >
+              Edit
+            </Button>
           {/if}
           <Switch
             checked={overrides[p.patch_id] ?? p.state !== "disabled"}

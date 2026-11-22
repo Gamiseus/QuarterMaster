@@ -1,0 +1,35 @@
+#:schema https://gamiseus.github.io/schemas/faction.schema.json
+# Example Mod: faction grenades.
+# The faction's soldiers throw the Example Grenade wherever they would throw a frag, and the
+# light infantry's second skill throws it too (in a Campaign battle). It goes off with a bigger frag blast.
+# They fire the Example Rifle Grenade wherever they would fire the game's rifle grenade.
+# mod.json lists "ordnance" in qm_features (QuarterMaster 2.2.0 or newer).
+# Change first: the explosion's numbers; then the grenade's image in grenades/.
+# Wiki: Part 3, Ordnance: https://gamiseus.github.io/wiki/faction-mods/#ordnance-ordnance-and-explosions
+
+schema = 1
+id = "example_army"
+name = "Example Army"
+replaces = "allied"
+
+[[explosions]]
+id = "big_frag"
+based_on = "frag"                       # the frag grenade's numbers, then these
+frag_radius = 150
+frag_damage = 75
+
+[[ordnance]]
+id = "example_grenade"
+sprite = "grenades/example_grenade.png"
+explosion = "big_frag"
+range = 1000                            # the farthest a soldier throws it
+cooldown = 120                          # seconds before the skill is ready again
+# spin = 0                              # no turning: it flies pointing the way it was thrown
+skill = { class = "light", slot = 2 }   # the light infantry's second skill throws it
+replaces_frag = true                    # and the faction's soldiers throw it for frags
+
+[[ordnance]]
+id = "example_rifle_grenade"
+kind = "rifle"                          # fired from a rifle, as the game's rifle grenade
+sprite = "grenades/example_rifle_grenade.png"
+replaces_rifle_grenade = true           # the faction's soldiers fire it for rifle grenades

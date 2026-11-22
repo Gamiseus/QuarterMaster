@@ -95,8 +95,27 @@
 
     "sprites": {
       "type": "object",
-      "description": "Any other game image to replace while the faction is active: global name = image file.",
-      "additionalProperties": { "$ref": "#/definitions/path" }
+      "description": "Any other game image to replace while the faction is active: global name = image file, or a table with the file, the size it is shown at and where it sits.",
+      "additionalProperties": {
+        "oneOf": [
+          { "$ref": "#/definitions/path" },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "description": "The image file (or none, to size the game's own image), one of size, scale and like, and where it sits (offset, rotate, flip). Needs \"faction_sprite_sizes\" in qm_features.",
+            "properties": {
+              "file": { "$ref": "#/definitions/path" },
+              "size": { "type": "array", "items": { "type": "number", "exclusiveMinimum": 0 }, "minItems": 2, "maxItems": 2, "description": "[width, height] in the game's pixels." },
+              "scale": { "type": "number", "exclusiveMinimum": 0, "description": "A fraction of the file's own pixel size." },
+              "like": { "type": "string", "description": "Another image global: shown at the size that one is shown at." },
+              "offset": { "type": "array", "items": { "type": "number" }, "minItems": 2, "maxItems": 2, "description": "[x, y] game pixels to move the image, right and down, inside the place the game draws it." },
+              "rotate": { "type": "number", "description": "Degrees to turn the image about its middle, clockwise." },
+              "flip": { "type": "string", "enum": ["x", "y", "xy"], "description": "Mirror the image about its middle: x left-right, y up-down, xy both." },
+              "draw_size": { "type": "array", "items": { "type": "number", "exclusiveMinimum": 0 }, "minItems": 2, "maxItems": 2, "description": "[width, height] game pixels to draw the picture at inside its place, while the game's code still sees the original's size." }
+            }
+          }
+        ]
+      }
     },
 
     "sounds": {
@@ -106,6 +125,36 @@
     },
 
     "vehicles": { "type": "array", "items": { "$ref": "#/definitions/vehicle" } },
+
+    "explosions": {
+      "type": "array",
+      "description": "Explosions on the game's own, with numbers changed. An [[ordnance]] entry names one by its id.",
+      "items": { "$ref": "#/definitions/explosion" }
+    },
+
+    "ordnance": {
+      "type": "array",
+      "description": "The faction's ordnance: grenades, rifle grenades, mortars, artillery, air strikes and supply drops, with their own explosions, on a class skill or in place of the game's own.",
+      "items": { "$ref": "#/definitions/ordnance" }
+    },
+    "skills": {
+      "type": "array",
+      "description": "Class skills changed, replaced with another, moved to another level, removed or added.",
+      "items": { "$ref": "#/definitions/skill_entry" }
+    },
+
+    "ranks": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "The rank names shown on the faction's soldiers. Needs \"ranks\" in qm_features.",
+      "properties": {
+        "soldier": { "type": "array", "items": { "type": "string", "minLength": 1 }, "maxItems": 4, "description": "Ranks 0 to 3 (the game's Private, Private First Class, Corporal, Sergeant)." },
+        "officer": { "type": "array", "items": { "type": "string", "minLength": 1 }, "maxItems": 4, "description": "An officer's ranks 0 to 3 (the game's Second Lieutenant, First Lieutenant, Captain, Major)." },
+        "recruit": { "type": "string", "minLength": 1, "description": "A soldier with no rank yet (the game's Recruit). The first soldier rank unless set." },
+        "cadet": { "type": "string", "minLength": 1, "description": "An officer with no rank yet (the game's Cadet). The first officer rank unless set." },
+        "sarge": { "type": "string", "minLength": 1, "description": "The Sarge's title: his name, and the word in the game's lines and texts about him. The Allies' only." }
+      }
+    },
 
     "hooks": {
       "type": "object",
@@ -128,6 +177,23 @@
 
     "spec": {
       "enum": ["rifle", "light", "gunner", "medic", "comms", "officer", "engy", "scout", "sniper", "commando", "sapper", "intel"]
+    },
+    "skill_entry": {
+      "type": "object",
+      "required": ["class", "slot"],
+      "additionalProperties": false,
+      "properties": {
+        "class": { "$ref": "#/definitions/spec" },
+        "slot": { "type": "integer", "minimum": 1, "description": "1 to 3: one of the class's own skills; 4 and up: new skills above them." },
+        "name": { "type": "string", "description": "Its mouse-over text, before the description." },
+        "description": { "type": "string", "description": "Its mouse-over text, after the name." },
+        "icon": { "$ref": "#/definitions/path", "description": "Its icon." },
+        "cooldown": { "type": "number", "minimum": 0, "description": "Seconds before it is ready again." },
+        "unlock": { "type": "integer", "minimum": 1, "description": "The skill level it comes with (its slot, or 3 for a new skill, unless set)." },
+        "game": { "type": ["integer", "string"], "description": "A game skill: 2 (the class's own skill 2) or \"light:3\" (any class's)." },
+        "ordnance": { "type": "string", "description": "An [[ordnance]] id of this faction, thrown, fired or called in." },
+        "remove": { "type": "boolean", "description": "The class has no skill in this slot." }
+      }
     },
 
     "pool": { "enum": ["allied", "allied_sniper", "grunt", "para", "resistance", "smg", "axis", "axis_crew"] },
@@ -267,11 +333,79 @@
         "debris": { "$ref": "#/definitions/path", "description": "Name prefix: vehicles/t34/debris loads debris1.png, ..." },
         "parts": {
           "type": "object",
-          "description": "Other sprites, by the part of the game name after the tag (SecondTurret1 = ...).",
+          "description": "Other sprites, by the part of the game name after the tag: SecondTurret = ... on the halfTrack replaces halfTrackSecondTurret.",
           "additionalProperties": { "$ref": "#/definitions/path" }
         },
         "call_signs": { "$ref": "#/definitions/name_list", "description": "Call signs this vehicle gets when it spawns (Allied vehicles)." },
         "call_signs_file": { "$ref": "#/definitions/path" }
+      }
+    },
+    "explosion_preset": {
+      "enum": ["frag", "contact", "at_grenade", "rifle_grenade", "mortar", "faust", "artillery", "heavy_mortar", "bomb", "strafe",
+        "mineExplosion", "contactExplosion", "atGrenadeExplosion", "rifleGrenadeExplosion", "mortarExplosion", "faustExplosion",
+        "artyExplosion", "hvyExplosion", "bombExplosion", "flakExplosion"],
+      "description": "One of the game's explosions, by name or by the game's tag."
+    },
+    "local_id": { "type": "string", "pattern": "^[a-z0-9_]+$" },
+    "explosion": {
+      "type": "object",
+      "required": ["id"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/definitions/local_id", "description": "Its name in this faction." },
+        "based_on": { "$ref": "#/definitions/explosion_preset", "description": "The explosion whose numbers it starts from (frag when left out)." },
+        "size": { "type": "number", "minimum": 0, "description": "How big it is drawn." },
+        "at_radius": { "type": "number", "minimum": 0, "description": "Reach against vehicles." },
+        "at_damage": { "type": "number", "minimum": 0, "description": "Damage to vehicles." },
+        "blast_radius": { "type": "number", "minimum": 0, "description": "Reach of the blast." },
+        "blast_damage": { "type": "number", "minimum": 0, "description": "Damage of the blast." },
+        "demo_radius": { "type": "number", "minimum": 0, "description": "Reach against buildings." },
+        "frag_radius": { "type": "number", "minimum": 0, "description": "Reach of the fragments." },
+        "frag_damage": { "type": "number", "minimum": 0, "description": "Damage of the fragments." },
+        "morale_hit": { "type": "number", "minimum": 0, "description": "Morale lost nearby." },
+        "stun_range": { "type": "number", "minimum": 0, "description": "Reach of the stun." },
+        "stun_time": { "type": "number", "minimum": 0, "description": "Longest stun, in seconds." },
+        "crater": { "type": "number", "minimum": 0, "description": "Crater size; 0 for none." }
+      }
+    },
+    "ordnance": {
+      "type": "object",
+      "required": ["id"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/definitions/local_id", "description": "Its name in this faction." },
+        "kind": { "enum": ["thrown", "rifle", "mortar", "artillery", "airstrike", "drop"], "description": "thrown: a hand grenade, as the frag (the default); rifle: fired from a rifle that takes rifle grenades, as the game's rifle grenade; mortar: a soldier's mortar rounds; artillery: a barrage called on a spot; airstrike: a plane's bombs or strafing on a spot; drop: a supply crate by parachute." },
+        "name": { "type": "string", "description": "Shown on a fourth skill's button." },
+        "description": { "type": "string", "description": "Shown on a fourth skill's button, after the name." },
+        "sprite": { "$ref": "#/definitions/path", "description": "The image it flies as. Required for a thrown or rifle grenade; a mortar round or a shell shows only its blast." },
+        "shots": { "type": "integer", "minimum": 1, "description": "A mortar's rounds each time (6), a barrage's shells (5), an air strike's hits (1) or the items in a drop's crate (3)." },
+        "plane": { "$ref": "#/definitions/path", "description": "An air strike or a drop: the plane that flies over (the game's unless set)." },
+        "contents": { "type": "array", "items": { "type": "string" }, "description": "A drop: the game's loot names its crate holds, such as loot_medPack or loot_ration (the game's own mix unless set)." },
+        "spread": { "type": "number", "minimum": 0, "description": "How far each round or shell lands from the last (150 for a mortar, 250 for artillery)." },
+        "explosion": { "type": "string", "description": "An explosion of this faction by id, or one of the game's (frag when left out; rifle_grenade for a rifle grenade)." },
+        "range": { "type": "number", "minimum": 0, "description": "The farthest a soldier throws or fires it (1000, as the game's)." },
+        "cooldown": { "type": "number", "minimum": 0, "description": "Seconds before the class skill is ready again (120; 180 for a rifle grenade)." },
+        "tension": { "type": "number", "minimum": 0, "description": "The battle's tension after the blast (40; a rifle grenade leaves it unless set)." },
+        "skill": {
+          "type": "object",
+          "required": ["class", "slot"],
+          "additionalProperties": false,
+          "description": "The class skill that throws it instead of what it did.",
+          "properties": {
+            "class": { "$ref": "#/definitions/spec" },
+            "slot": { "type": "integer", "minimum": 1, "description": "1 to 3: one of the class's own skills; 4 and up: new skills above them." },
+            "unlock": { "type": "integer", "minimum": 1, "description": "The skill level it comes with (its slot, or 3 for a new skill, unless set)." },
+            "icon": { "$ref": "#/definitions/path", "description": "The skill's icon (a game skill's own, or the sprite for a new one, unless set)." }
+          }
+        },
+        "spin": { "type": "number", "minimum": 0, "description": "A thrown grenade: how fast it turns in the air (the frag's is 0.1 to 1 at random). 0 flies pointing the way it was thrown." },
+        "replaces_frag": { "type": "boolean", "description": "Soldiers of this faction's side throw it wherever they would throw a frag." },
+        "replaces_rifle_grenade": { "type": "boolean", "description": "A rifle grenade: soldiers of this faction's side fire it wherever they would fire the game's." },
+        "replaces_mortar": { "type": "boolean", "description": "A mortar: the faction's mortar men fire it (on the Allied side, the rifle class's third skill too)." },
+        "replaces_artillery": { "type": "boolean", "description": "Artillery: the faction's side's barrages land with its explosion." },
+        "replaces_bombing": { "type": "boolean", "description": "An air strike: the faction's side's bombing runs drop its explosion." },
+        "replaces_strafing": { "type": "boolean", "description": "An air strike: every hit of the faction's side's strafing runs is its explosion." },
+        "replaces_drop": { "type": "boolean", "description": "A drop: the Allies' supply crates hold its contents." }
       }
     }
   }

@@ -10,7 +10,7 @@ use zip::{ZipArchive, ZipWriter};
 use qm_core::handshake::{CrashReport, PatchOutcomeStatus};
 use qm_core::patch::table::PatchTable;
 use qm_schema::{
-    sha256_hex, DiagnosticSeverity, ManifestDiagnostic, ModManifest, ModSettingsStore,
+    sha256_hex, DiagnosticSeverity, ManifestDiagnostic, ModSettingsStore,
     ReleaseModEntry, SecurityScanReport,
 };
 
@@ -370,1364 +370,6 @@ impl QuarterMasterPaths {
     }
 }
 
-/// Data model for QuarterMaster modding templates with inline documentation and interactive preview.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TemplateDefinition {
-    pub id: &'static str,
-    pub name: &'static str,
-    pub category: &'static str,
-    pub descriptor: &'static str,
-    pub provider: &'static str,
-    pub description: &'static str,
-    pub preview_code: &'static str,
-}
-
-/// Starter `faction.toml` for the `faction_mod` template. `custom_faction` and `Custom Faction`
-/// are replaced with the new mod's id and name.
-pub const FACTION_TEMPLATE: &str = r##"# faction.toml — a faction mod for QuarterMaster (schema 1)
-# Guide: the modding wiki, Part 3: https://gamiseus.github.io/wiki/faction-mods/
-# For completion and error checking in your editor, point the first line at QuarterMaster's
-# schemas/faction.schema.json (write a copy with `qm schema --out <folder>`), for example:
-#:schema ./faction.schema.json
-#
-# Every section below is optional except the first five lines. Anything you leave out stays
-# vanilla. Check your work any time with `qm faction check <this folder>` or Mod Tools > Lint.
-
-schema = 1
-id = "custom_faction"
-name = "Custom Faction"
-replaces = "allied"          # "allied" or "axis"
-side_name = "Custom"
-
-# --- Unit art --------------------------------------------------------------------------------
-# One PNG per frame, named by frame: idle.png, aim.png, fire.png, reload1.png ... reload10.png.
-# Allied units: base, sarge, para, french. Axis units: base, officer, volks.
-[units.base]
-folder = "units/base"
-
-[units.sarge]
-folder = "units/sarge"
-copy_from = "base"           # frames the sergeant lacks use the base soldier's
-
-# --- Weapons ---------------------------------------------------------------------------------
-# A reskin keeps the vanilla tag, so everything in the game that checks for it still works.
-# [[weapons]]
-# reskin = "m1"
-# description = "Mosin-Nagant M91/30. Bolt-action service rifle."
-# top_sprite = "weapons/mosin_top.png"
-# side_sprite = "weapons/mosin_side.png"
-# sound = "weapons/mosin"    # mosin1.wav, mosin2.wav, ...
-# stats = { action = "bolt", ammo = 5, maxAmmo = 5, range = 480, damage = 110 }
-
-# A new weapon has its own tag and copies a vanilla weapon's stats first.
-# [[weapons]]
-# tag = "pps43"
-# based_on = "m3"
-# name = "PPS-43"
-# top_sprite = "weapons/pps43_top.png"
-# side_sprite = "weapons/pps43_side.png"
-# sound = "weapons/pps43"
-# stats = { maxAmmo = 35 }
-# loot_side = "allied"       # also drops as loot
-
-# Advanced: hand out one weapon wherever the game hands out another.
-# [spawn_swap]
-# tommy = "ppsh41"
-
-# Random weapon pools: allied, allied_sniper, grunt, para, resistance, smg, axis, axis_crew.
-# [pools.grunt]
-# add = ["pps43"]
-# remove = ["springfield"]
-
-# --- Classes (Allied side) -------------------------------------------------------------------
-# Slots: rifle, light, gunner, medic, comms, officer, engy, scout, sniper, commando, sapper, intel.
-# [classes.rifle]
-# name = "Rifleman"
-# description = "Medium to long range with the Mosin."
-# start_weapon = "m1"
-# unlocks = ["svt40", "ppsh41", "pps43"]     # weapon upgrade tiers 1 to 3
-# bonus = { speed = 0, skill = 5 }           # replaces the vanilla bonus
-# skills = ["Smoke, ...", "Frag, ...", "Charge, ..."]
-# icon = "icons/rifle.png"
-
-# --- Names, voices, text -----------------------------------------------------------------------
-[names]
-last_file = "names/last.txt"
-# first_file = "names/first.txt"
-# format = "full"            # "Pyotr Ivanov" instead of "P. Ivanov"; needs first names
-# vehicles = ["Za Rodinu"]
-
-# [voices]
-# folder = "voices"          # contact1.wav, alliedHurt1.wav, pinned1.wav ... (vanilla names)
-# map = { hurt = "alliedHurt" }
-
-# [text]
-# mouseOverLightSpec = "Scout, fast movers with medium range capability"
-
-# Any other game image or sound, by its global name.
-# [sprites]
-# parachuteAllied = "misc/parachute.png"
-# [sounds]
-# airStrike1 = "misc/il2.wav"
-
-# --- Vehicles ----------------------------------------------------------------------------------
-# [[vehicles]]
-# reskin = "sherman"
-# name = "T-34/76"
-# body = "vehicles/t34/body.png"
-# turret = "vehicles/t34/turret.png"
-# husk = "vehicles/t34/husk.png"
-# debris = "vehicles/t34/debris"
-# call_signs = ["Za Stalina", "Moskva"]
-
-# --- Code, for anything the file can't express ---------------------------------------------------
-# [hooks]
-# lua = "hooks.lua"          # returns { on_enable = fn, on_soldier_created = fn, on_weapon_created = fn }
-"##;
-
-/// Built-in production-grade modding templates covering all 5 practical categories in Mud and Blood.
-pub const BUILTIN_TEMPLATES: &[TemplateDefinition] = &[
-    // ========================================================================
-    // Category 1: Menu Frameworks & Options Pages
-    // ========================================================================
-    TemplateDefinition {
-        id: "gmenu_settings",
-        name: "GMenu Settings Page",
-        category: "Menu Frameworks & Options Pages",
-        descriptor: "Custom Menu — Full GMenu settings page with all control types",
-        provider: "GMenu + GCore",
-        description: "Complete options page covering all control types (toggle checkboxes, integer/float sliders, multi-choice dropdowns, text fields, keybind inputs, action buttons), nested subcategories, and real-time onChange callbacks.",
-        preview_code: r##"-- ============================================================================
--- config.lua — GMenu Configuration Definition & Options Page
--- Framework: GMenu + GCore (Mud and Blood Modding Framework)
---
--- This file defines a complete, production-grade configuration menu.
--- GMenu automatically registers these controls, persists changes to disk,
--- and updates in-game variables via real-time onChange callbacks.
--- ============================================================================
-
-local M = {
-  id = "custom_mod",
-  name = "Custom Mod Settings",
-  description = "Complete options menu demonstrating all GMenu control types.",
-  category = "Gameplay Overhauls",
-}
-
--- ----------------------------------------------------------------------------
--- State Variables (Initialized with Defaults)
--- ----------------------------------------------------------------------------
-local modState = {
-  enabled = true,
-  squadLimit = 8,
-  damageMultiplier = 1.25,
-  tracerStyle = "Realistic",
-  squadCallsign = "Baker Company",
-  quickDeployKey = "h",
-}
-
--- ----------------------------------------------------------------------------
--- Options Definition
--- ----------------------------------------------------------------------------
-M.options = {
-  -- Category Header: General Settings
-  {
-    type = "separator",
-    label = "--- General Mod Options ---",
-  },
-
-  -- 1. Toggle Checkbox: Master Enable
-  {
-    id = "master_enable",
-    label = "Enable Custom Mod Functionality",
-    type = "checkbox",
-    default = 1,
-    description = "Activates or deactivates the custom mod systems in-game.",
-    get = function() return modState.enabled and 1 or 0 end,
-    set = function(val)
-      modState.enabled = (val == 1)
-      print(string.format("[CustomMod] Master enable toggled: %s", tostring(modState.enabled)))
-    end,
-  },
-
-  -- 2. Integer Slider: Squad Capacity
-  {
-    id = "squad_capacity",
-    label = "Maximum Squad Size",
-    type = "slider",
-    min = 4,
-    max = 12,
-    step = 1,
-    default = 8,
-    description = "Specifies the active squad troop limit on the trench line.",
-    get = function() return modState.squadLimit end,
-    set = function(val)
-      modState.squadLimit = math.floor(val)
-      if player then player.custom_squad_cap = modState.squadLimit end
-    end,
-  },
-
-  -- 3. Float Slider: Ballistic Damage Multiplier
-  {
-    id = "dmg_mult",
-    label = "Bullet Damage Scaling",
-    type = "slider",
-    min = 0.50,
-    max = 2.50,
-    step = 0.05,
-    default = 1.25,
-    description = "Scales bullet and shrapnel lethality for both friendly and enemy forces.",
-    get = function() return modState.damageMultiplier end,
-    set = function(val) modState.damageMultiplier = val end,
-  },
-
-  -- 4. Multi-Choice Cycler / Dropdown: Bullet Tracers
-  {
-    id = "tracer_preset",
-    label = "Tracer Visual Style",
-    type = "cycle",
-    options = { "Default", "Realistic", "HighVisibility", "Disabled" },
-    labels = {
-      "Default (Vanilla)",
-      "Realistic (Dim Red/Green)",
-      "High Visibility (Bright Amber)",
-      "Disabled (No Tracers)",
-    },
-    default = "Realistic",
-    description = "Configures projectile trail visibility and coloration.",
-    get = function() return modState.tracerStyle end,
-    set = function(val) modState.tracerStyle = val end,
-  },
-
-  -- 5. Text Field / Subcategory Selection: Squad Callsign
-  {
-    id = "callsign_input",
-    label = "Squad Unit Callsign",
-    type = "cycle",
-    options = { "Baker Company", "Easy Company", "Fox Platoon", "Iron Rangers" },
-    labels = { "Baker Company", "Easy Company", "Fox Platoon", "Iron Rangers" },
-    default = "Baker Company",
-    description = "Unit designation displayed on battlefield victory reports.",
-    get = function() return modState.squadCallsign end,
-    set = function(val) modState.squadCallsign = val end,
-  },
-
-  -- 6. Keybind Input: Quick Command Key
-  {
-    id = "tactical_keybind",
-    label = "Tactical Quick-Halt Key",
-    type = "cycle",
-    options = { "h", "space", "t", "x", "z" },
-    labels = { "H (Halt)", "Spacebar (Hold Line)", "T (Take Cover)", "X (Retreat)", "Z (Prone)" },
-    default = "h",
-    description = "Direct keyboard shortcut to issue squad-wide stance commands.",
-    get = function() return modState.quickDeployKey end,
-    set = function(val) modState.quickDeployKey = val end,
-  },
-
-  -- 7. Action Button: Restore Defaults
-  {
-    id = "reset_defaults_btn",
-    label = "Reset All Settings to Defaults",
-    type = "button",
-    description = "Restores all mod parameters back to factory vanilla defaults.",
-    action = function()
-      modState.enabled = true
-      modState.squadLimit = 8
-      modState.damageMultiplier = 1.25
-      modState.tracerStyle = "Realistic"
-      modState.squadCallsign = "Baker Company"
-      modState.quickDeployKey = "h"
-      print("[CustomMod] Restored factory default settings.")
-    end,
-  },
-}
-
-return M
-"##,
-    },
-    TemplateDefinition {
-        id: "custom_hud_overlay",
-        name: "Custom HUD & In-Game UI Overlay",
-        category: "Menu Frameworks & Options Pages",
-        descriptor: "HUD Overlay — Custom canvas status panels and squad telemetry",
-        provider: "QuarterMaster",
-        description: "Drawing custom status panels, squad overlays, or telemetry on the Love2D canvas via drawFiles.lua / gfx.lua hooks.",
-        preview_code: r##"-- ============================================================================
--- custom_hud.lua — Custom HUD & In-Game UI Overlay
--- Target Engine: LÖVE 2D 11.4 / Mud and Blood 0.5.3b
--- Hook Target: includes/drawFiles.lua:drawState0()
---
--- This module draws custom telemetry panels, squad health bars, and
--- dynamic combat meters onto Love2D's 1280x720 canvas rendering pipeline.
--- ============================================================================
-
-local HUD = {
-  visible = true,
-  scale = 1.0,
-  hudFont = nil,
-}
-
--- ----------------------------------------------------------------------------
--- Initialization & Canvas Font Setup
--- ----------------------------------------------------------------------------
-function HUD.init()
-  if love and love.graphics then
-    -- Load standard or custom bitmap font for military HUD rendering
-    HUD.hudFont = love.graphics.getFont()
-  end
-  print("[CustomHUD] HUD Overlay module initialized.")
-end
-
--- ----------------------------------------------------------------------------
--- Main Render Routine (Hooked into drawFiles.lua drawState0)
--- ----------------------------------------------------------------------------
-function HUD.draw()
-  if not HUD.visible or not love or not love.graphics then return end
-
-  local lg = love.graphics
-  lg.push("all")
-
-  -- 1. Draw Squad Status Box in Top-Left Corner
-  local boxX, boxY = 16, 16
-  local boxW, boxH = 260, 96
-
-  -- Semi-transparent tactical dark slate background
-  lg.setColor(0.08, 0.10, 0.12, 0.82)
-  lg.rectangle("fill", boxX, boxY, boxW, boxH, 4, 4)
-
-  -- Brass/olive military border outline
-  lg.setColor(0.68, 0.60, 0.42, 0.90)
-  lg.setLineWidth(1.5)
-  lg.rectangle("line", boxX, boxY, boxW, boxH, 4, 4)
-
-  -- Telemetry Header
-  lg.setColor(1.0, 0.95, 0.80, 1.0)
-  lg.print("SQUAD TELEMETRY", boxX + 10, boxY + 8)
-
-  -- 2. Inspect Active Squad Data from Global Engine State
-  local totalTroops = 0
-  local avgMorale = 0
-  local casualties = (player and player.casualties) or 0
-  local currentWave = (classic and classic.wave) or 1
-
-  if dude and type(dude) == "table" then
-    local count = 0
-    local moraleSum = 0
-    for _, d in pairs(dude) do
-      if d and d.team == "allied" and d.hp and d.hp > 0 then
-        count = count + 1
-        moraleSum = moraleSum + (d.morale or 100)
-      end
-    end
-    totalTroops = count
-    if count > 0 then avgMorale = math.floor(moraleSum / count) end
-  end
-
-  -- Display Squad Metrics
-  lg.setColor(0.85, 0.85, 0.85, 1.0)
-  lg.print(string.format("Troops on Line: %d", totalTroops), boxX + 10, boxY + 30)
-  lg.print(string.format("Avg Morale: %d%%", avgMorale), boxX + 10, boxY + 48)
-  lg.print(string.format("Wave: %d  |  Casualties: %d", currentWave, casualties), boxX + 10, boxY + 66)
-
-  -- 3. Draw Morale Gauge Bar
-  local barX = boxX + 140
-  local barY = boxY + 49
-  local barW, barH = 100, 12
-
-  lg.setColor(0.2, 0.2, 0.2, 1.0)
-  lg.rectangle("fill", barX, barY, barW, barH)
-
-  -- Color-code gauge: Green (>70%), Amber (30-70%), Red (<30%)
-  if avgMorale >= 70 then
-    lg.setColor(0.25, 0.80, 0.35, 1.0)
-  elseif avgMorale >= 30 then
-    lg.setColor(0.90, 0.75, 0.20, 1.0)
-  else
-    lg.setColor(0.90, 0.20, 0.20, 1.0)
-  end
-  lg.rectangle("fill", barX, barY, math.floor(barW * (math.min(100, avgMorale) / 100)), barH)
-
-  lg.setColor(0.4, 0.4, 0.4, 1.0)
-  lg.rectangle("line", barX, barY, barW, barH)
-
-  lg.pop()
-end
-
--- Toggle HUD visibility with hotkey
-function HUD.toggle()
-  HUD.visible = not HUD.visible
-  print(string.format("[CustomHUD] HUD visibility: %s", tostring(HUD.visible)))
-end
-
-return HUD
-"##,
-    },
-
-    // ========================================================================
-    // Category 2: Sprite & Graphics Replacements
-    // ========================================================================
-    TemplateDefinition {
-        id: "sprite_replacer",
-        name: "Sprite & Texture Replacer",
-        category: "Sprite & Graphics Replacements",
-        descriptor: "Sprite Replacer — Override soldier, vehicle, and weapon graphics",
-        provider: "QuarterMaster",
-        description: "Replacing soldier sprites, vehicle textures, weapon icons, and blood/debris graphics by mounting custom image files and patching sprite loaders in gfx.lua.",
-        preview_code: r##"-- ============================================================================
--- sprite_replacer.lua — Sprite & Texture Replacement Pipeline
--- Target Engine: LÖVE 2D 11.4 / Mud and Blood 0.5.3b
--- Hook Target: includes/gfx.lua
---
--- Replaces soldier animations, vehicle hulls, weapon sprites, and blood/debris
--- textures by mounting mod assets directly into Love2D's virtual filesystem.
--- ============================================================================
-
-local Sprites = {
-  customTextures = {},
-  textureRoot = "assets/sprites/",
-}
-
--- ----------------------------------------------------------------------------
--- Texture Registry Map (Mapping Vanilla Texture Identifiers to Mod Assets)
--- ----------------------------------------------------------------------------
-local TEXTURE_MAP = {
-  -- Soldier infantry sprites
-  ["soldier1_idle"]     = "assets/sprites/us_infantry_idle.png",
-  ["soldier1_run"]      = "assets/sprites/us_infantry_run.png",
-  ["soldier1_shoot"]    = "assets/sprites/us_infantry_shoot.png",
-  ["soldier1_dead"]     = "assets/sprites/us_infantry_dead.png",
-
-  -- Vehicle textures
-  ["panzer4_body"]      = "assets/sprites/panzer4_hull_camo.png",
-  ["panzer4_turret"]    = "assets/sprites/panzer4_turret_camo.png",
-
-  -- Weapon icons
-  ["weapon_garand"]     = "assets/sprites/icons/garand_hd.png",
-  ["weapon_thompson"]   = "assets/sprites/icons/thompson_hd.png",
-
-  -- Blood & environmental debris
-  ["blood_splat1"]      = "assets/sprites/fx/blood_splat_detailed.png",
-}
-
--- ----------------------------------------------------------------------------
--- Initialization & Custom Loader Hook
--- ----------------------------------------------------------------------------
-function Sprites.init()
-  if not love or not love.graphics then return end
-
-  print("[SpriteReplacer] Loading custom high-definition sprite assets...")
-  for vanillaKey, filePath in pairs(TEXTURE_MAP) do
-    if love.filesystem and love.filesystem.getInfo and love.filesystem.getInfo(filePath) then
-      local ok, img = pcall(love.graphics.newImage, filePath)
-      if ok and img then
-        Sprites.customTextures[vanillaKey] = img
-        print(string.format("[SpriteReplacer] Successfully loaded replacement for '%s'", vanillaKey))
-      else
-        print(string.format("[SpriteReplacer] Failed to load image asset: %s", filePath))
-      end
-    end
-  end
-end
-
--- ----------------------------------------------------------------------------
--- Texture Retrieval Helper (Falls Back to Vanilla if Mod Asset Absent)
--- ----------------------------------------------------------------------------
-function Sprites.getTexture(key, fallbackImage)
-  if Sprites.customTextures[key] then
-    return Sprites.customTextures[key]
-  end
-  return fallbackImage
-end
-
-return Sprites
-"##,
-    },
-    TemplateDefinition {
-        id: "custom_particle_fx",
-        name: "Custom Particle Effect",
-        category: "Sprite & Graphics Replacements",
-        descriptor: "Particle Effects — Custom explosion, smoke, and flash particles",
-        provider: "QuarterMaster",
-        description: "Adding or overriding particle systems for explosions, muzzle flashes, and smoke in particlesSystem.lua.",
-        preview_code: r##"-- ============================================================================
--- custom_particles.lua — Custom Particle System & Shockwave Effects
--- Target Engine: LÖVE 2D 11.4 / Mud and Blood 0.5.3b
--- Hook Target: includes/particlesSystem.lua:addParticle()
---
--- Injects custom explosion particles, white phosphorus smoke, and muzzle flash
--- systems into the core particle physics simulation loop.
--- ============================================================================
-
-local Particles = {
-  activeEmitters = {},
-}
-
--- ----------------------------------------------------------------------------
--- Custom Particle Definition Registry
--- ----------------------------------------------------------------------------
-local PARTICLE_TYPES = {
-  ["heavy_flak_burst"] = {
-    lifetime = 1.4,
-    speedMin = 40,
-    speedMax = 180,
-    colorStart = { 1.0, 0.70, 0.15, 1.0 },
-    colorEnd = { 0.20, 0.20, 0.20, 0.0 },
-    sizeStart = 6.0,
-    sizeEnd = 24.0,
-    drag = 0.92,
-  },
-  ["white_phosphorus"] = {
-    lifetime = 4.5,
-    speedMin = 15,
-    speedMax = 60,
-    colorStart = { 0.95, 0.98, 1.00, 0.90 },
-    colorEnd = { 0.70, 0.70, 0.75, 0.0 },
-    sizeStart = 10.0,
-    sizeEnd = 48.0,
-    drag = 0.97,
-  },
-  ["heavy_muzzle_smoke"] = {
-    lifetime = 0.8,
-    speedMin = 20,
-    speedMax = 50,
-    colorStart = { 0.80, 0.78, 0.72, 0.75 },
-    colorEnd = { 0.40, 0.40, 0.40, 0.0 },
-    sizeStart = 3.0,
-    sizeEnd = 16.0,
-    drag = 0.90,
-  },
-}
-
--- ----------------------------------------------------------------------------
--- Particle Spawner Hook (Called from addParticle or weapon firing)
--- ----------------------------------------------------------------------------
-function Particles.spawnCustomParticle(x, y, effectType, count)
-  local def = PARTICLE_TYPES[effectType]
-  if not def then return false end
-
-  count = count or 12
-  for i = 1, count do
-    local angle = math.random() * math.pi * 2
-    local speed = def.speedMin + math.random() * (def.speedMax - def.speedMin)
-    local p = {
-      x = x,
-      y = y,
-      vx = math.cos(angle) * speed,
-      vy = math.sin(angle) * speed,
-      life = def.lifetime,
-      maxLife = def.lifetime,
-      def = def,
-    }
-    table.insert(Particles.activeEmitters, p)
-  end
-  return true
-end
-
--- ----------------------------------------------------------------------------
--- Simulation Tick Update (Hooked into love.update)
--- ----------------------------------------------------------------------------
-function Particles.update(dt)
-  for i = #Particles.activeEmitters, 1, -1 do
-    local p = Particles.activeEmitters[i]
-    p.life = p.life - dt
-    if p.life <= 0 then
-      table.remove(Particles.activeEmitters, i)
-    else
-      p.x = p.x + p.vx * dt
-      p.y = p.y + p.vy * dt
-      p.vx = p.vx * p.def.drag
-      p.vy = p.vy * p.def.drag
-    end
-  end
-end
-
--- ----------------------------------------------------------------------------
--- Particle Render Pass (Hooked into drawFiles.lua)
--- ----------------------------------------------------------------------------
-function Particles.draw()
-  if not love or not love.graphics then return end
-  local lg = love.graphics
-  lg.push("all")
-
-  for _, p in ipairs(Particles.activeEmitters) do
-    local progress = 1.0 - (p.life / p.maxLife)
-    local cs = p.def.colorStart
-    local ce = p.def.colorEnd
-    local r = cs[1] + (ce[1] - cs[1]) * progress
-    local g = cs[2] + (ce[2] - cs[2]) * progress
-    local b = cs[3] + (ce[3] - cs[3]) * progress
-    local a = cs[4] + (ce[4] - cs[4]) * progress
-    local sz = p.def.sizeStart + (p.def.sizeEnd - p.def.sizeStart) * progress
-
-    lg.setColor(r, g, b, a)
-    lg.circle("fill", p.x, p.y, sz)
-  end
-
-  lg.pop()
-end
-
-return Particles
-"##,
-    },
-
-    // ========================================================================
-    // Category 3: Audio & Music Replacements / Additions
-    // ========================================================================
-    TemplateDefinition {
-        id: "sound_replacer",
-        name: "Sound Effect Replacer",
-        category: "Audio & Music Replacements / Additions",
-        descriptor: "Sound Replacer — Custom weapon reports, explosions, and voice cues",
-        provider: "QuarterMaster",
-        description: "Overriding vanilla weapon reports, explosions, reload sounds, and soldier voice cues in audioAudit.lua using custom .wav/.ogg audio sources.",
-        preview_code: r##"-- ============================================================================
--- sound_replacer.lua — Weapon Report & Voice Cue Audio Replacement
--- Target Engine: LÖVE 2D 11.4 / Mud and Blood 0.5.3b
--- Hook Target: includes/audioAudit.lua and main.lua
---
--- Replaces vanilla gunfire, artillery explosions, reload sounds, and soldier
--- speech cues with high-fidelity .wav / .ogg sound samples.
--- ============================================================================
-
-local AudioMod = {
-  customSounds = {},
-  volume = 1.0,
-}
-
--- ----------------------------------------------------------------------------
--- Sound Mapping Configuration
--- ----------------------------------------------------------------------------
-local SOUND_MAP = {
-  -- Small arms weapon reports
-  ["garand_shot"]      = "assets/sounds/weapons/m1_garand_fire.wav",
-  ["garand_ping"]      = "assets/sounds/weapons/m1_garand_clip_ping.wav",
-  ["thompson_shot"]    = "assets/sounds/weapons/thompson_burst.wav",
-  ["mg42_loop"]        = "assets/sounds/weapons/mg42_buzzsaw.ogg",
-  ["springfield_shot"] = "assets/sounds/weapons/m1903_sniper_shot.wav",
-
-  -- Heavy artillery and mortar detonations
-  ["artillery_blast"]  = "assets/sounds/explosions/105mm_howitzer_impact.wav",
-  ["mortar_whistle"]   = "assets/sounds/explosions/81mm_mortar_incoming.wav",
-
-  -- Infantry voice cues
-  ["voice_grenade"]    = "assets/sounds/voices/us_shout_grenade.ogg",
-  ["voice_pinned"]     = "assets/sounds/voices/us_shout_pinned_down.ogg",
-}
-
--- ----------------------------------------------------------------------------
--- Audio Loader & Initialization
--- ----------------------------------------------------------------------------
-function AudioMod.init()
-  if not love or not love.audio then return end
-
-  print("[SoundReplacer] Preloading tactical audio sound effects...")
-  for soundKey, filePath in pairs(SOUND_MAP) do
-    if love.filesystem and love.filesystem.getInfo and love.filesystem.getInfo(filePath) then
-      local ok, src = pcall(love.audio.newSource, filePath, "static")
-      if ok and src then
-        AudioMod.customSounds[soundKey] = src
-        print(string.format("[SoundReplacer] Registered replacement for sound '%s'", soundKey))
-      end
-    end
-  end
-end
-
--- ----------------------------------------------------------------------------
--- Playback Hook with Spatial Distance Attenuation
--- ----------------------------------------------------------------------------
-function AudioMod.playSound(soundKey, posX, posY)
-  local src = AudioMod.customSounds[soundKey]
-  if not src then return false end
-
-  -- Clone source for polyphonic overlapping reports
-  local clone = src:clone()
-  if clone then
-    -- Apply slight random pitch variance (+/- 4%) for acoustic variety
-    local pitchVariance = 0.96 + math.random() * 0.08
-    clone:setPitch(pitchVariance)
-
-    -- Calculate distance attenuation relative to screen center (640, 360)
-    if posX and posY then
-      local dist = math.sqrt((posX - 640)^2 + (posY - 360)^2)
-      local distFactor = math.max(0.2, 1.0 - (dist / 1200))
-      clone:setVolume(AudioMod.volume * distFactor)
-    else
-      clone:setVolume(AudioMod.volume)
-    end
-
-    clone:play()
-    return true
-  end
-  return false
-end
-
-return AudioMod
-"##,
-    },
-    TemplateDefinition {
-        id: "custom_battle_music",
-        name: "Custom Battle Music & Ambient Audio",
-        category: "Audio & Music Replacements / Additions",
-        descriptor: "Battle Music — Streaming dynamic combat and ambient playlists",
-        provider: "QuarterMaster",
-        description: "Streaming background tracks, playlist rotations, and volume controls injected into the game's audio loop.",
-        preview_code: r##"-- ============================================================================
--- battle_music.lua — Dynamic Combat & Ambient Music Streaming Engine
--- Target Engine: LÖVE 2D 11.4 / Mud and Blood 0.5.3b
--- Hook Target: main.lua:love.update()
---
--- Provides dynamic combat playlist rotation that reacts to in-game battle
--- intensity (quiet lulls vs heavy artillery / infantry firefights).
--- ============================================================================
-
-local Jukebox = {
-  currentTrack = nil,
-  currentTrackName = "",
-  volume = 0.70,
-  fadeSpeed = 0.5,
-  state = "calm", -- "calm" | "combat" | "crisis"
-}
-
--- Playlist Track Tables (Streaming .ogg sources to preserve RAM)
-local PLAYLISTS = {
-  calm = {
-    "assets/music/ambient_trench_winds.ogg",
-    "assets/music/somme_melancholy.ogg",
-  },
-  combat = {
-    "assets/music/ardennes_advance.ogg",
-    "assets/music/barrage_cadence.ogg",
-  },
-  crisis = {
-    "assets/music/last_stand_overrun.ogg",
-  },
-}
-
--- ----------------------------------------------------------------------------
--- Jukebox Initialization
--- ----------------------------------------------------------------------------
-function Jukebox.init()
-  print("[BattleMusic] Dynamic battle music jukebox initialized.")
-  Jukebox.evaluateBattleIntensity()
-end
-
--- ----------------------------------------------------------------------------
--- Dynamic Combat Intensity Evaluator (Hooked into love.update)
--- ----------------------------------------------------------------------------
-function Jukebox.evaluateBattleIntensity()
-  local activeEnemies = 0
-  local alliedSuppressed = 0
-
-  if dude and type(dude) == "table" then
-    for _, d in pairs(dude) do
-      if d and d.hp and d.hp > 0 then
-        if d.team == "german" then
-          activeEnemies = activeEnemies + 1
-        elseif d.team == "allied" and (d.pinned or (d.morale and d.morale < 40)) then
-          alliedSuppressed = alliedSuppressed + 1
-        end
-      end
-    end
-  end
-
-  local nextState = "calm"
-  if alliedSuppressed >= 2 or activeEnemies >= 12 then
-    nextState = "crisis"
-  elseif activeEnemies >= 4 then
-    nextState = "combat"
-  end
-
-  if nextState ~= Jukebox.state then
-    Jukebox.transitionTo(nextState)
-  end
-end
-
--- ----------------------------------------------------------------------------
--- Smooth Track Transition
--- ----------------------------------------------------------------------------
-function Jukebox.transitionTo(newState)
-  Jukebox.state = newState
-  local trackList = PLAYLISTS[newState] or PLAYLISTS.calm
-  local nextPath = trackList[math.random(#trackList)]
-
-  if nextPath and love and love.audio and love.filesystem.getInfo(nextPath) then
-    if Jukebox.currentTrack then
-      Jukebox.currentTrack:stop()
-    end
-    local ok, src = pcall(love.audio.newSource, nextPath, "stream")
-    if ok and src then
-      src:setLooping(true)
-      src:setVolume(Jukebox.volume)
-      src:play()
-      Jukebox.currentTrack = src
-      Jukebox.currentTrackName = nextPath
-      print(string.format("[BattleMusic] Transitioned to '%s' mode: %s", newState, nextPath))
-    end
-  end
-end
-
-return Jukebox
-"##,
-    },
-
-    // ========================================================================
-    // Category 4: New Content & Gameplay Mechanics
-    // ========================================================================
-    TemplateDefinition {
-        id: "custom_weapon",
-        name: "Custom Weapon Definition",
-        category: "New Content & Gameplay Mechanics",
-        descriptor: "Custom Weapon — Complete weapon definition with ROF, recoil, and ammo",
-        provider: "QuarterMaster",
-        description: "Complete weapon configuration (damage, range, rate of fire, capacity, jam chance, sound tag, recoil, and unlock progression in weapon trees).",
-        preview_code: r##"-- ============================================================================
--- custom_weapon.lua — Custom Firearm Definition & Ballistic Specification
--- Target Engine: LÖVE 2D 11.4 / Mud and Blood 0.5.3b
--- Hook Target: includes/urb_engine.lua:weaponCreator()
---
--- Defines a complete, authentic weapon specification with ballistic curves,
--- reload timings, jam probabilities, sound triggers, and recoil forces.
--- ============================================================================
-
-local WeaponMod = {}
-
--- ----------------------------------------------------------------------------
--- Weapon Specification: Browning Auto-5 Semi-Automatic Combat Shotgun
--- ----------------------------------------------------------------------------
-function WeaponMod.registerWeapon(weapon, tag)
-  if tag ~= "browning_auto5" then return false end
-
-  -- Primary Firearm Identity
-  weapon.name           = "Browning Auto-5"
-  weapon.tag            = "browning_auto5"
-  weapon.country        = "Allied"
-  weapon.caliber        = "12 Gauge Buckshot (00)"
-
-  -- Ballistics & Damage Modeling
-  weapon.minDmg         = 28
-  weapon.maxDmg         = 72
-  weapon.critChance     = 0.22      -- 22% critical hit chance at point-blank
-  weapon.pellets        = 8         -- 8 individual buckshot projectiles per shell
-  weapon.range          = 320       -- Effective range in battlefield canvas pixels
-  weapon.falloffStart   = 140       -- Distance where buckshot begins spread dispersal
-  weapon.spreadAngle    = 0.18      -- Spread dispersion in radians
-
-  -- Mechanics, Action & Timing
-  weapon.action         = "semi_auto"
-  weapon.capacity       = 5         -- 5-round tubular magazine
-  weapon.rof            = 0.42      -- Seconds between shots (142 RPM)
-  weapon.reloadTime     = 3.20      -- Seconds for full tube reload
-  weapon.reloadPerShell = 0.65      -- Incremental shell reload time
-  weapon.recoilForce    = 14.0      -- Soldier aim disruption force
-  weapon.jamChance      = 0.015     -- 1.5% baseline jam rate in muddy conditions
-
-  -- Sound and Visual FX Anchors
-  weapon.soundFire      = "shotgun_blast"
-  weapon.soundReload    = "shotgun_shell_insert"
-  weapon.soundJam       = "weapon_click_jam"
-  weapon.muzzleFlash    = "heavy_flash"
-  weapon.ejectCasing    = "casing_12ga_red"
-
-  -- Unlock Progression & Tactical Point Cost
-  weapon.unlockedByDefault = false
-  weapon.tpCost            = 35
-  weapon.requiredRank      = "Corporal"
-
-  return true
-end
-
-return WeaponMod
-"##,
-    },
-    TemplateDefinition {
-        id: "custom_soldier_class",
-        name: "Custom Soldier Class & Archetype",
-        category: "New Content & Gameplay Mechanics",
-        descriptor: "Soldier Archetype — Custom loadout, stats, traits, and squad logic",
-        provider: "QuarterMaster",
-        description: "Custom loadout, starting stats (morale, hp, discipline), specialization traits, and squad assignment logic.",
-        preview_code: r##"-- ============================================================================
--- custom_soldier.lua — Soldier Class Archetype & Loadout Configuration
--- Target Engine: LÖVE 2D 11.4 / Mud and Blood 0.5.3b
--- Hook Target: includes/urb_engine.lua:createAlliedSoldier()
---
--- Implements the Combat Engineer archetype with specialized attributes,
--- demolition kit, obstacle clearance perks, and trench fortification aura.
--- ============================================================================
-
-local SoldierMod = {}
-
--- ----------------------------------------------------------------------------
--- Soldier Archetype Definition: Combat Engineer
--- ----------------------------------------------------------------------------
-function SoldierMod.applyArchetype(dude, soldierClass, x, y)
-  if soldierClass ~= "combat_engineer" then return false end
-
-  -- Baseline Vital Statistics & Discipline
-  dude.role             = "combat_engineer"
-  dude.title            = "Combat Engineer"
-  dude.hp               = 115       -- High baseline durability
-  dude.maxHp            = 115
-  dude.morale           = 85        -- High mental composure under shellfire
-  dude.discipline       = 78
-  dude.experience       = 0
-  dude.speed            = 58        -- Encumbered by heavy gear / tools
-
-  -- Initial Tactical Weapon Loadout
-  dude.primaryWeapon    = "m1_carbine"
-  dude.secondaryWeapon  = "colt_1911"
-  dude.ammo             = 90
-  dude.grenades         = 2         -- Mk 2 Fragmentation grenades
-  dude.smokeGrenades    = 3         -- Smoke screen canisters for trench crossing
-
-  -- Archetype Specialization Equipment & Traits
-  dude.hasWireCutters   = true      -- Breaches barbed wire 3x faster
-  dude.hasMineDetector  = true      -- Detects Teller and S-mines in 180px radius
-  dude.hasSatchelCharge = true      -- Heavy demolition charge against enemy pillboxes
-  dude.satchelCooldown  = 45.0
-
-  -- Passive Aura Boosts
-  dude.fortifySpeedMult = 1.65      -- 65% faster trench digging and sandbag placement
-  dude.auraSuppressionResist = 0.20 -- Nearby allies gain 20% suppression resistance
-
-  print(string.format("[SoldierArchetype] Spawned Combat Engineer (ID: %s) at (%d, %d)", tostring(dude.id), x, y))
-  return true
-end
-
-return SoldierMod
-"##,
-    },
-    TemplateDefinition {
-        id: "custom_battle_condition",
-        name: "Custom Battle Condition (BC Mod)",
-        category: "New Content & Gameplay Mechanics",
-        descriptor: "Battle Condition — Weather, artillery barrages, and combat rules",
-        provider: "QuarterMaster",
-        description: "Creating weather effects, special rules, artillery barrage conditions, or night fighting modifiers hooked into bcChecks.lua.",
-        preview_code: r##"-- ============================================================================
--- custom_bc.lua — Battle Condition (BC) Rules & Environmental Modifiers
--- Target Engine: LÖVE 2D 11.4 / Mud and Blood 0.5.3b
--- Hook Target: includes/bcChecks.lua:affectBc()
---
--- Introduces "Torrential Mud & Night Infiltration": Heavy rain creates deep
--- mud that slows troops, increases gun jams, and restricts vision distance.
--- ============================================================================
-
-local BattleCondition = {
-  id = "torrential_mud_storm",
-  name = "Torrential Mud & Fog",
-  active = false,
-}
-
--- ----------------------------------------------------------------------------
--- Environmental Modifier Parameters
--- ----------------------------------------------------------------------------
-local MODIFIERS = {
-  visibilityRadius    = 380,   -- Reduces maximum spotting distance (vanilla ~800px)
-  movementSpeedMult   = 0.72,  -- 28% movement speed penalty across muddy terrain
-  jamChanceMultiplier = 1.85,  -- 85% higher weapon jam probability due to mud
-  artilleryScatter    = 1.40,  -- 40% wider artillery dispersion radius
-  airSupportAllowed   = false, -- Planes cannot navigate heavy storm clouds
-}
-
--- ----------------------------------------------------------------------------
--- Activation Hook (Called when BC roll selects this condition)
--- ----------------------------------------------------------------------------
-function BattleCondition.activate()
-  BattleCondition.active = true
-
-  -- Apply environmental rules to game state
-  if bc then
-    bc.currentWeather = "storm"
-    bc.fogDensity     = 0.65
-    bc.mudActive      = true
-  end
-
-  print("[BattleCondition] Activated condition: Torrential Mud & Fog")
-end
-
--- ----------------------------------------------------------------------------
--- Real-time Battlefield Check (Hooked into bcChecks.lua)
--- ----------------------------------------------------------------------------
-function BattleCondition.affect(targetDude)
-  if not BattleCondition.active or not targetDude then return end
-
-  -- Apply movement sluggishness
-  if targetDude.speed then
-    targetDude.effectiveSpeed = targetDude.speed * MODIFIERS.movementSpeedMult
-  end
-
-  -- Apply reduced visibility arc
-  if targetDude.sightRange then
-    targetDude.sightRange = math.min(targetDude.sightRange, MODIFIERS.visibilityRadius)
-  end
-end
-
-return BattleCondition
-"##,
-    },
-    TemplateDefinition {
-        id: "custom_reinforcement_card",
-        name: "Custom Reinforcement Call-In",
-        category: "New Content & Gameplay Mechanics",
-        descriptor: "Reinforcement Call-In — Tactical point abilities and squad summons",
-        provider: "QuarterMaster",
-        description: "New call-in card in trenchSkill (tactical point cost, cooldown, spawn behavior, air support or specialized squads).",
-        preview_code: r##"-- ============================================================================
--- custom_callin.lua — Tactical Reinforcement Call-In Ability
--- Target Engine: LÖVE 2D 11.4 / Mud and Blood 0.5.3b
--- Hook Target: includes/trench.lua:trenchSkillReset()
---
--- Adds a new tactical call-in card: "Typhoon Close Air Support Rocket Strike"
--- with Tactical Point costs, cooldown timers, and strike vector physics.
--- ============================================================================
-
-local Reinforcement = {
-  id = "callin_typhoon_strike",
-  name = "Typhoon Rocket Strike",
-  description = "Call in an RAF Hawker Typhoon for an AP rocket barrage on coordinates.",
-  tpCost = 150,
-  cooldown = 90.0,
-  currentCooldown = 0.0,
-  usesRemaining = 3,
-}
-
--- ----------------------------------------------------------------------------
--- Card Registration (Hooked into trench.lua trenchSkillReset)
--- ----------------------------------------------------------------------------
-function Reinforcement.registerCard()
-  if not trenchSkill then return false end
-
-  table.insert(trenchSkill, {
-    id = Reinforcement.id,
-    name = Reinforcement.name,
-    cost = Reinforcement.tpCost,
-    cooldown = Reinforcement.cooldown,
-    icon = "assets/sprites/icons/card_typhoon.png",
-    onActivate = function(targetX, targetY)
-      return Reinforcement.executeStrike(targetX, targetY)
-    end,
-  })
-
-  print("[ReinforcementCard] Registered Typhoon Rocket Strike call-in card.")
-  return true
-end
-
--- ----------------------------------------------------------------------------
--- Strike Execution Routine
--- ----------------------------------------------------------------------------
-function Reinforcement.executeStrike(targetX, targetY)
-  if Reinforcement.currentCooldown > 0 or Reinforcement.usesRemaining <= 0 then
-    return false
-  end
-
-  -- Deduct Tactical Points
-  if player and player.tp and player.tp >= Reinforcement.tpCost then
-    player.tp = player.tp - Reinforcement.tpCost
-  else
-    return false
-  end
-
-  Reinforcement.currentCooldown = Reinforcement.cooldown
-  Reinforcement.usesRemaining = Reinforcement.usesRemaining - 1
-
-  -- Trigger Off-Screen Aircraft Sound
-  if love and love.audio then
-    print(string.format("[AirSupport] Typhoon diving on target coordinates (%d, %d)", targetX, targetY))
-  end
-
-  -- Spawn rocket impact shockwaves across target corridor
-  for i = 1, 8 do
-    local impactX = targetX + (math.random(-60, 60))
-    local impactY = targetY + (i * 25) - 100
-  end
-
-  return true
-end
-
-return Reinforcement
-"##,
-    },
-    TemplateDefinition {
-        id: "custom_map_structure",
-        name: "Custom Map Structure & Fortification",
-        category: "New Content & Gameplay Mechanics",
-        descriptor: "Map Structure — Bunkers, fortifications, and trench emplacements",
-        provider: "QuarterMaster",
-        description: "Adding bunkers, trench fortifications, barbed wire, and defensive emplacements into mapBuild.lua.",
-        preview_code: r##"-- ============================================================================
--- map_structure.lua — Defensive Fortification & Map Structure Definition
--- Target Engine: LÖVE 2D 11.4 / Mud and Blood 0.5.3b
--- Hook Target: includes/mapBuild.lua and mapBuild_1.lua
---
--- Adds reinforced concrete pillboxes, revetted trench props, and barbed wire
--- obstacles with structural durability, collision bounds, and cover values.
--- ============================================================================
-
-local Structures = {}
-
--- ----------------------------------------------------------------------------
--- Structure Blueprint: Reinforced Concrete Machine Gun Bunker
--- ----------------------------------------------------------------------------
-function Structures.createConcretePillbox(x, y, rotation)
-  local pillbox = {
-    id            = string.format("pillbox_%d_%d", x, y),
-    type          = "heavy_concrete_bunker",
-    x             = x,
-    y             = y,
-    width         = 84,
-    height        = 56,
-    rotation      = rotation or 0,
-
-    -- Structural Integrity & Blast Resistance
-    hp            = 850,
-    maxHp         = 850,
-    armorRating   = 4,       -- Immune to small arms; requires 75mm+ HE or satchels
-    destroyed     = false,
-
-    -- Cover & Concealment Multipliers for Occupants
-    coverValue    = 0.90,    -- 90% incoming projectile mitigation
-    garrisonMax   = 3,       -- Accommodates up to 3 soldiers (gunner + loader + NCO)
-    garrisonList  = {},
-
-    -- Firing Slit Field of Fire (in radians)
-    firingArcMin  = -0.65,
-    firingArcMax  =  0.65,
-  }
-
-  -- Register Pillbox into World Buildings Table
-  if building and type(building) == "table" then
-    table.insert(building, pillbox)
-  end
-
-  print(string.format("[MapStructure] Spawned Concrete Pillbox at (%d, %d)", x, y))
-  return pillbox
-end
-
-return Structures
-"##,
-    },
-
-    // ========================================================================
-    // Category 5: Core Code Patching & Engine Hooking
-    // ========================================================================
-    TemplateDefinition {
-        id: "single_anchor_patch",
-        name: "Code Patch (Single Anchor)",
-        category: "Core Code Patching & Engine Hooking",
-        descriptor: "Single Anchor Patch — Clean, surgical qm.toml code replacement",
-        provider: "QuarterMaster",
-        description: "Clean, minimal qm.toml replacement targeting base game logic.",
-        preview_code: r##"# ============================================================================
-# qm.toml — Single Anchor Code Patch Specification
-# Mod: Surgical Logic Replacement Example
-#
-# This template demonstrates the cleanest, most reliable way to patch vanilla
-# Mud and Blood routines using QuarterMaster's exact pattern matcher.
-# ============================================================================
-
-[manifest]
-version = "1.0.0"
-priority = 50
-
-# ----------------------------------------------------------------------------
-# Patch 1: Surgical Hook into main.lua Initialization
-# Target: includes/directives.lua require line
-# Position: "after" ensures vanilla dependencies load before our logic runs.
-# ----------------------------------------------------------------------------
-[[patches]]
-[patches.pattern]
-target = "main.lua"
-pattern = 'require "includes/directives"'
-position = "after"
-payload = '''
--- [Mod] Minimal single-anchor initialization hook
-print("[SingleAnchorMod] Core logic initialized successfully after directives.")
-'''
-
-# ----------------------------------------------------------------------------
-# Patch 2: Selective Value Override (e.g. adjust classic wave delay timer)
-# Target: includes/mnb2.lua
-# Position: "replace" swaps the exact target line cleanly.
-# ----------------------------------------------------------------------------
-[[patches]]
-[patches.pattern]
-target = "includes/mnb2.lua"
-pattern = 'classic.waveCooldown = 15'
-position = "replace"
-payload = '''
-classic.waveCooldown = 20 -- Scaled tactical preparation interval
-'''
-"##,
-    },
-    TemplateDefinition {
-        id: "multi_file_engine_hook",
-        name: "Multi-File Engine Hook",
-        category: "Core Code Patching & Engine Hooking",
-        descriptor: "Multi-File Engine Hook — Game loop interception across core files",
-        provider: "GCore",
-        description: "Intercepting game tick updates (main.lua / urb_engine.lua) to run persistent mod logic without modifying core engine loops destructively.",
-        preview_code: r##"# ============================================================================
-# qm.toml — Multi-File Engine Hook Specification
-# Mod: Persistent Non-Destructive Game Tick & Event Interceptor
-#
-# Intercepts game update ticks, rendering passes, and AI loops across
-# multiple vanilla source files without destructive file overwriting.
-# ============================================================================
-
-[manifest]
-version = "1.0.0"
-priority = 50
-
-# ----------------------------------------------------------------------------
-# Step 1: Register Standalone Lua Module via virtual includes/
-# ----------------------------------------------------------------------------
-[[patches]]
-[patches.module]
-source = "engine_interceptor.lua"
-before = "main.lua"
-name = "includes/engine_interceptor"
-
-# ----------------------------------------------------------------------------
-# Step 2: Hook main.lua Initialization
-# ----------------------------------------------------------------------------
-[[patches]]
-[patches.pattern]
-target = "main.lua"
-pattern = 'require "includes/directives"'
-position = "after"
-payload = '''
-engine_interceptor = require "includes/engine_interceptor"
-engine_interceptor.init()
-'''
-
-# ----------------------------------------------------------------------------
-# Step 3: Intercept Game Tick (main.lua:love.update)
-# ----------------------------------------------------------------------------
-[[patches]]
-[patches.pattern]
-target = "main.lua"
-pattern = 'function love.update(dt)'
-position = "after"
-payload = '''
-  if engine_interceptor and engine_interceptor.onTick then
-    engine_interceptor.onTick(dt)
-  end
-'''
-
-# ----------------------------------------------------------------------------
-# Step 4: Intercept Combat Resolution (includes/urb_engine.lua)
-# ----------------------------------------------------------------------------
-[[patches]]
-[patches.pattern]
-target = "includes/urb_engine.lua"
-pattern = 'function checkHit(dude, bullet)'
-position = "before"
-payload = '''
-  -- Pre-hit calculation callback hook
-  if engine_interceptor and engine_interceptor.onCheckHit then
-    engine_interceptor.onCheckHit(dude, bullet)
-  end
-'''
-"##,
-    },
-    TemplateDefinition {
-        id: "asset_file_injection",
-        name: "New Game File & Asset Injection",
-        category: "Core Code Patching & Engine Hooking",
-        descriptor: "Asset & Module Injection — Virtual filesystem mounting and new Lua modules",
-        provider: "QuarterMaster",
-        description: "Adding brand new Lua modules or resource directories directly into Love2D's virtual filesystem.",
-        preview_code: r##"# ============================================================================
-# qm.toml — New Game File & Virtual Asset Injection
-# Mod: Standalone Lua Module & Asset Mount Template
-#
-# Demonstrates mounting brand new directories and Lua modules into Love2D's
-# virtual filesystem, allowing custom textures, audio, and scripts to be loaded.
-# ============================================================================
-
-[manifest]
-version = "1.0.0"
-priority = 45
-
-# ----------------------------------------------------------------------------
-# Module 1: Core Custom Logic Module
-# ----------------------------------------------------------------------------
-[[patches]]
-[patches.module]
-source = "custom_module.lua"
-before = "main.lua"
-name = "includes/custom_module"
-
-# ----------------------------------------------------------------------------
-# Module 2: Secondary Utility Subsystem
-# ----------------------------------------------------------------------------
-[[patches]]
-[patches.module]
-source = "utils_subsystem.lua"
-before = "main.lua"
-name = "includes/utils_subsystem"
-
-# ----------------------------------------------------------------------------
-# Pattern Patch: Mount Mod Asset Directory to Love2D Virtual Filesystem
-# ----------------------------------------------------------------------------
-[[patches]]
-[patches.pattern]
-target = "main.lua"
-pattern = 'function love.load()'
-position = "after"
-payload = '''
-  -- Mount mod asset directory to Love2D virtual filesystem
-  if love and love.filesystem and love.filesystem.mount then
-    local modDir = "MnB-Mods/CustomAssetMod"
-    local mountPoint = "assets/custom"
-    local ok = love.filesystem.mount(modDir, mountPoint)
-    print(string.format("[AssetInjection] Mounted '%s' -> '%s' (Status: %s)", modDir, mountPoint, tostring(ok)))
-  end
-'''
-"##,
-    },
-    TemplateDefinition {
-        id: "faction_mod",
-        name: "Faction Mod",
-        category: "Factions",
-        descriptor: "Faction Mod — An army that takes over the Allied or German side",
-        provider: "QuarterMaster",
-        description: "A faction.toml with every section, plus folders for unit frames, weapons, voices, vehicles and names. QuarterMaster checks it and applies it in game; no Lua needed.",
-        preview_code: FACTION_TEMPLATE,
-    },
-    TemplateDefinition {
-        id: "empty",
-        name: "Minimal Patch Mod",
-        category: "Core Code Patching & Engine Hooking",
-        descriptor: "Minimal Patch Mod — Clean mod.json and qm.toml starter",
-        provider: "QuarterMaster",
-        description: "Clean mod.json + qm.toml starter without external framework dependencies.",
-        preview_code: r##"# ============================================================================
-# qm.toml — Minimal Patch Starter Mod
-# Mod: Clean Starting Template
-#
-# Provides a minimal mod.json and qm.toml structure without external dependencies.
-# ============================================================================
-
-[manifest]
-version = "1.0.0"
-priority = 50
-
-# Add your [[patches]] blocks below:
-[[patches]]
-[patches.pattern]
-target = "main.lua"
-pattern = 'require "includes/directives"'
-position = "after"
-payload = '''
--- [Mod] Minimal pattern patch initialization
-print("[Mod] Initialized successfully!")
-'''
-"##,
-    },
-];
-
 /// Seconds the self-update swap/rollback scripts wait for the old launcher exe to unlock
 /// before giving up and restarting the current launcher unchanged.
 const SWAP_WAIT_MAX_TRIES: u32 = 60;
@@ -1742,11 +384,26 @@ const STAGED_CLI: &str = "qm-new.exe";
 const OLD_CLI: &str = "qm.old.exe";
 
 impl QuarterMasterPaths {
-    /// Discovers built-in and installed mod templates (e.g., `GCore/templates/`, `GMenu/templates/`).
+    /// The mod templates (`crate::templates`) and the templates installed mods carry in a
+    /// `templates/` folder.
     pub fn discover_mod_templates(&self) -> Vec<serde_json::Value> {
-        let mut templates: Vec<serde_json::Value> = BUILTIN_TEMPLATES
+        let mut templates: Vec<serde_json::Value> = crate::templates::templates()
             .iter()
-            .map(|t| serde_json::to_value(t).unwrap_or_default())
+            .map(|t| {
+                serde_json::json!({
+                    "id": t.id,
+                    "name": t.name,
+                    "category": format!("Wiki part {}", t.part),
+                    "descriptor": format!("{} — {}", t.name, t.summary),
+                    "provider": "QuarterMaster",
+                    "description": t.summary,
+                    "preview_code": crate::templates::render(&t.id, &crate::templates::TemplateNames::example())
+                        .ok()
+                        .and_then(|files| files.into_iter().find(|(p, _)| *p == t.open))
+                        .map(|(_, b)| String::from_utf8_lossy(&b).into_owned())
+                        .unwrap_or_default(),
+                })
+            })
             .collect();
 
         for m in self.list_installed_mods() {
@@ -2558,6 +1215,90 @@ pub fn submenu_diagnostic(mod_dir: &Path, qm_features: &[String]) -> Option<Mani
     ))
 }
 
+/// Warnings when the mod's Lua uses a QuarterMaster Lua API and `mod.json` does not list its
+/// feature name: `QM.Events` needs `events` (2.1.0); `QM.Ordnance` and `QM.Explosions` need
+/// `ordnance` (2.2.0), which also adds the hooks they work through. Also the 2.2.0 parts of
+/// `faction.toml` and the `qm.toml` sprite places (`sprite_transforms`).
+pub fn lua_feature_diagnostics(mod_dir: &Path, qm_features: &[String]) -> Vec<ManifestDiagnostic> {
+    let lua: Vec<String> = walkdir::WalkDir::new(mod_dir)
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_type().is_file())
+        .filter(|e| e.path().extension().is_some_and(|x| x.eq_ignore_ascii_case("lua")))
+        .filter_map(|e| fs::read_to_string(e.path()).ok())
+        .collect();
+    let uses = |api: &str| lua.iter().any(|t| t.contains(api));
+    let listed = |f: &str| qm_features.iter().any(|x| x == f);
+    let mut out = Vec::new();
+    if uses("QM.Events") && !listed("events") {
+        out.push(ManifestDiagnostic::warning(
+            "The mod's Lua uses QM.Events. Add \"events\" to \"qm_features\" in mod.json: a QuarterMaster older than 2.1.0 has no events, and the mod would load without its handlers.".to_string(),
+        ));
+    }
+    // A faction's [[ordnance]] and [[explosions]] need the feature too.
+    let faction_ordnance = fs::read_to_string(mod_dir.join("faction.toml")).is_ok_and(|t| {
+        t.lines().any(|l| matches!(l.trim(), "[[ordnance]]" | "[[explosions]]"))
+    });
+    if faction_ordnance && !listed("ordnance") {
+        out.push(ManifestDiagnostic::warning(
+            "faction.toml has [[ordnance]] or [[explosions]]. Add \"ordnance\" to \"qm_features\" in mod.json: a QuarterMaster older than 2.2.0 cannot read them and would leave the whole faction out.".to_string(),
+        ));
+    }
+    // A faction's [[skills]] need "skills" (or "ordnance").
+    let faction_skills = fs::read_to_string(mod_dir.join("faction.toml"))
+        .is_ok_and(|t| t.lines().any(|l| l.trim() == "[[skills]]"));
+    if faction_skills && !listed("skills") && !listed("ordnance") {
+        out.push(ManifestDiagnostic::warning(
+            "faction.toml has [[skills]]. Add \"skills\" to \"qm_features\" in mod.json: QuarterMaster adds the hooks class skills work through only for a mod that lists it, and one older than 2.2.0 cannot read them and would leave the whole faction out.".to_string(),
+        ));
+    }
+    // A faction's [ranks], and [sprites] entries with a size.
+    let faction: Option<toml::Value> = fs::read_to_string(mod_dir.join("faction.toml"))
+        .ok()
+        .and_then(|t| toml::from_str(&t).ok());
+    if faction.as_ref().is_some_and(|f| f.get("ranks").is_some()) && !listed("ranks") {
+        out.push(ManifestDiagnostic::warning(
+            "faction.toml has [ranks]. Add \"ranks\" to \"qm_features\" in mod.json: a QuarterMaster older than 2.2.0 cannot read it and would leave the whole faction out.".to_string(),
+        ));
+    }
+    let sized = faction
+        .as_ref()
+        .and_then(|f| f.get("sprites"))
+        .and_then(|s| s.as_table())
+        .is_some_and(|t| t.values().any(|v| v.is_table()));
+    if sized && !listed("faction_sprite_sizes") {
+        out.push(ManifestDiagnostic::warning(
+            "faction.toml has a [sprites] entry with a size or a place. Add \"faction_sprite_sizes\" to \"qm_features\" in mod.json: a QuarterMaster older than 2.2.0 cannot read it and would leave the whole faction out.".to_string(),
+        ));
+    }
+    // qm.toml [sprites.<name>] rules that move, turn or mirror an image.
+    let placed = fs::read_to_string(mod_dir.join("qm.toml"))
+        .ok()
+        .and_then(|t| toml::from_str::<toml::Value>(&t).ok())
+        .and_then(|q| q.get("sprites").and_then(|s| s.as_table()).cloned())
+        .is_some_and(|t| {
+            t.values().filter_map(|v| v.as_table()).any(|r| {
+                ["offset", "rotate", "flip", "draw_size"].iter().any(|k| r.contains_key(*k))
+            })
+        });
+    if placed && !listed("sprite_transforms") {
+        out.push(ManifestDiagnostic::warning(
+            "qm.toml has a [sprites] rule with offset, rotate, flip or draw_size. Add \"sprite_transforms\" to \"qm_features\" in mod.json: a QuarterMaster older than 2.2.0 would ignore them and draw the image out of place.".to_string(),
+        ));
+    }
+    if uses("QM.Skills") && !listed("skills") && !listed("ordnance") {
+        out.push(ManifestDiagnostic::warning(
+            "The mod's Lua uses QM.Skills. Add \"skills\" to \"qm_features\" in mod.json: QuarterMaster adds the hooks a fourth skill works through only for a mod that lists it, and one older than 2.2.0 has no fourth skill.".to_string(),
+        ));
+    }
+    if (uses("QM.Ordnance") || uses("QM.Explosions")) && !listed("ordnance") {
+        out.push(ManifestDiagnostic::warning(
+            "The mod's Lua uses QM.Ordnance or QM.Explosions. Add \"ordnance\" to \"qm_features\" in mod.json: QuarterMaster adds the hooks ordnance works through only for a mod that lists it, and one older than 2.2.0 has no ordnance.".to_string(),
+        ));
+    }
+    out
+}
+
 /// 1. Validates `mod.json` schema & version ranges
 /// 2. Parses `qm.toml` and verifies all `[[patches.module]]` / `[[patches.copy]]` source files exist
 /// 3. Dry-runs every patch against `vanilla_files` to verify 0 broken anchors
@@ -2570,6 +1311,7 @@ pub fn lint_mod_directory(
     let mut diagnostics = installed.manifest.validate();
     diagnostics.extend(short_form_diagnostic(mod_dir, &installed.manifest.qm_features));
     diagnostics.extend(submenu_diagnostic(mod_dir, &installed.manifest.qm_features));
+    diagnostics.extend(lua_feature_diagnostics(mod_dir, &installed.manifest.qm_features));
 
     // Load patches via a temporary parent structure or directly parse `qm.toml`
     let temp = tempfile::Builder::new()
@@ -2644,54 +1386,6 @@ pub fn lint_mod_directory(
     })
 }
 
-/// A starting point `qm new` can write: its name, the older names it also answers to, and one
-/// line saying what it gives you.
-pub struct ModStarter {
-    pub id: &'static str,
-    pub aliases: &'static [&'static str],
-    pub summary: &'static str,
-}
-
-/// The templates `qm new` knows. Every one is checked against the game by `qm lint` in the
-/// tests, so a new mod starts from files that load.
-pub const MOD_STARTERS: &[ModStarter] = &[
-    ModStarter {
-        id: "empty",
-        aliases: &[],
-        summary: "mod.json and a qm.toml with no patches yet",
-    },
-    ModStarter {
-        id: "patch",
-        aliases: &["single_anchor_patch"],
-        summary: "one commented pattern patch on main.lua",
-    },
-    ModStarter {
-        id: "module",
-        aliases: &["multi_file_engine_hook", "gameplay_patch"],
-        summary: "your own Lua file, loaded with the game and called every frame",
-    },
-    ModStarter {
-        id: "settings",
-        aliases: &["gmenu_settings", "gmenu_config"],
-        summary: "a Lua file plus config.toml: two options and a keybind in the game's menus",
-    },
-    ModStarter {
-        id: "assets",
-        aliases: &[
-            "sprite_replacer",
-            "sound_replacer",
-            "custom_battle_music",
-            "asset_file_injection",
-        ],
-        summary: "an assets/ folder for replacement sounds, music, sprites and fonts; no code",
-    },
-    ModStarter {
-        id: "faction",
-        aliases: &["faction_mod"],
-        summary: "a commented faction.toml with every section, and its folders",
-    },
-];
-
 /// Templates from before the built-in menu, asset loading and factions. They hooked game
 /// functions by name and no longer match the game, so they are not written any more.
 const RETIRED_STARTERS: &[&str] = &[
@@ -2704,190 +1398,8 @@ const RETIRED_STARTERS: &[&str] = &[
     "custom_map_structure",
 ];
 
-const SITE_SCHEMAS: &str = "https://gamiseus.github.io/schemas";
-
-const STARTER_QM_HEAD: &str = r#"#:schema https://gamiseus.github.io/schemas/qm.schema.json
-# __NAME__: changes to the game's code.
-# Every key is explained in the modding wiki: https://gamiseus.github.io/wiki/
-# Check this file against the game with:  qm lint .
-
-[manifest]
-version = "1.0.0"
-"#;
-
-const STARTER_EMPTY: &str = r#"
-# No patches yet. A patch finds a line of a game file and puts code before it, after it or in
-# its place. Take the # off the lines below for a first one:
-#
-# [[patches]]
-# [patches.pattern]
-# id = "__ID__:hello"
-# target = "main.lua"
-# pattern = 'require "includes/directives"'
-# position = "after"
-# payload = 'print("[__NAME__] loaded")'
-"#;
-
-const STARTER_PATCH: &str = r#"
-# A pattern patch. `target` is the game file, `pattern` the line to find (spaces at the start
-# and end are ignored; * matches any text), `position` is "before", "after" or "at" (replace),
-# and `payload` is the code to put there. Give every patch an `id` that starts with your mod id.
-[[patches]]
-[patches.pattern]
-id = "__ID__:hello"
-name = "Say hello"
-target = "main.lua"
-pattern = 'require "includes/directives"'
-position = "after"
-payload = '''
-print("[__NAME__] loaded")
-'''
-
-# From QuarterMaster 2.0.0 the two header lines can be one, [[pattern]], when mod.json lists
-# "short_patches" under "qm_features". The wiki has both forms side by side.
-#
-# To see the game's code: turn on Debug mode in the launcher (Settings, Launch), start the
-# game once and press Ctrl+Shift+D. Every Lua file is written to Mods/qm/game-dump.
-"#;
-
-const STARTER_MODULE: &str = r#"
-# 1. Register your Lua file under a name the game can require.
-[[patches]]
-[patches.module]
-id = "__ID__:module"
-source = "__FILE__.lua"
-name = "includes/__FILE__"
-before = "main.lua"
-
-# 2. Load it once the game's own files are loaded.
-[[patches]]
-[patches.pattern]
-id = "__ID__:require"
-name = "Load __NAME__"
-target = "main.lua"
-pattern = 'require "includes/directives"'
-position = "after"
-payload = '__GLOBAL__ = require "includes/__FILE__"'
-
-# 3. Call it every frame.
-[[patches]]
-[patches.pattern]
-id = "__ID__:update"
-name = "Run __NAME__ every frame"
-target = "main.lua"
-pattern = 'function love.update(dt)'
-position = "after"
-payload = '''
-if __GLOBAL__ and __GLOBAL__.update then __GLOBAL__.update(dt) end
-'''
-match_indent = true
-"#;
-
-const STARTER_MODULE_LUA: &str = r#"-- __NAME__: your own code. qm.toml registers this file, loads it and calls update every frame.
-local __GLOBAL__ = {}
-_G.__GLOBAL__ = __GLOBAL__      -- reachable from patches, keybinds and other mods
-
-local seconds = 0
-
-function __GLOBAL__.update(dt)
-  -- Runs every frame. `dt` is the time since the last frame, in seconds.
-  seconds = seconds + dt
-end
-
-print("[__NAME__] loaded")
-
-return __GLOBAL__
-"#;
-
-const STARTER_SETTINGS_LUA: &str = r#"-- __NAME__: reads the options from config.toml and answers its keybind.
-local __GLOBAL__ = {}
-_G.__GLOBAL__ = __GLOBAL__      -- reachable from patches, keybinds and other mods
-
--- An option's current value. Options are stored per mod under QM.settings.
-local function option(name)
-  local mine = QM and QM.settings and QM.settings["__ID__"]
-  return mine and mine[name]
-end
-
-function __GLOBAL__.update(dt)
-  if not option("enabled") then return end
-  -- Your per-frame code. option("strength") is 1, 2 or 3.
-end
-
--- Called by the keybind in config.toml (on_trigger).
-function __GLOBAL__.onAction()
-  print("[__NAME__] key pressed; strength is " .. tostring(option("strength")))
-end
-
-return __GLOBAL__
-"#;
-
-const STARTER_CONFIG: &str = r#"# __NAME__: options and keybinds, shown in the game under Mod Operations and Keybinds.
-# The modding wiki, Part 6, lists every key: https://gamiseus.github.io/wiki/
-
-name = "__NAME__"
-
-[[options]]
-id = "enabled"
-label = "Enable __NAME__"
-type = "checkbox"
-default = true
-description = "Turns __NAME__ on or off."
-
-[[options]]
-id = "strength"
-label = "Strength"
-type = "cycle"
-options = [1, 2, 3]
-labels = ["Low", "Medium", "High"]
-default = 2
-description = "An example of a setting with several values."
-
-[[keybinds]]
-id = "__KEY___action"
-name = "__NAME__ action"
-category = "__NAME__"
-tab = "__NAME__"
-default = "f6"
-description = "An example key. Players can rebind it on the Keybinds screen."
-on_trigger = "__GLOBAL__.onAction"
-"#;
-
-const STARTER_ASSETS_README: &str = r#"
-## How this mod works
-
-This mod has no code. Put a file in `assets/` under the same folder and name the game uses,
-and it replaces the game's file while the mod is on:
-
-- `assets/sounds/...` and `assets/music/...`: `.wav`, `.ogg` or `.mp3`
-- `assets/sprites/...` and `assets/ui/...`: `.png` or `.jpg`
-- `assets/fonts/...`: `.ttf` or `.otf`
-
-To find the names: turn on Debug mode in the launcher (Settings, Launch), start the game once
-and press Ctrl+Shift+D. The launcher's Patches tab (Assets) then shows what your mod replaces.
-The modding wiki, Part 2, has the rules for numbered sounds and image sizes.
-"#;
-
-/// A Lua identifier from a mod's name: `Field Radio` gives `FieldRadio`.
-fn lua_global(mod_name: &str) -> String {
-    let mut out = String::new();
-    let mut upper = true;
-    for c in mod_name.chars() {
-        if c.is_ascii_alphanumeric() {
-            out.push(if upper { c.to_ascii_uppercase() } else { c });
-            upper = false;
-        } else {
-            upper = true;
-        }
-    }
-    if out.chars().next().is_none_or(|c| c.is_ascii_digit()) {
-        out.insert_str(0, "Mod");
-    }
-    out
-}
-
-/// Creates a new mod folder named after `mod_name` inside `parent_dir`, from one of
-/// `MOD_STARTERS` (by its id or an older alias).
+/// Creates a new mod folder named after `mod_name` inside `parent_dir` from a template of the
+/// catalog (`crate::templates`), by its id or an older `qm new` name.
 pub fn scaffold_new_mod(
     parent_dir: &Path,
     mod_id: &str,
@@ -2895,23 +1407,10 @@ pub fn scaffold_new_mod(
     author: &str,
     template: &str,
 ) -> Result<PathBuf, String> {
-    let clean_id: String = mod_id
-        .chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() || c == '_' || c == '-' {
-                c.to_ascii_lowercase()
-            } else {
-                '_'
-            }
-        })
-        .collect();
-    if clean_id.is_empty() {
-        return Err("Mod ID cannot be empty".to_string());
-    }
     let known = || {
-        MOD_STARTERS
+        crate::templates::templates()
             .iter()
-            .map(|s| s.id)
+            .map(|t| t.id.clone())
             .collect::<Vec<_>>()
             .join(", ")
     };
@@ -2921,108 +1420,10 @@ pub fn scaffold_new_mod(
             known()
         ));
     }
-    let starter = MOD_STARTERS
-        .iter()
-        .find(|s| s.id == template || s.aliases.contains(&template))
+    let info = crate::templates::find(template)
         .ok_or_else(|| format!("Unknown template '{template}'. Templates: {}.", known()))?;
-
-    let folder: String = mod_name
-        .chars()
-        .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-'))
-        .collect();
-    if folder.is_empty() {
-        return Err("The mod's name needs at least one letter or digit.".to_string());
-    }
-    let mod_dir = parent_dir.join(&folder);
-    if mod_dir.exists() {
-        return Err(format!("Directory {} already exists", mod_dir.display()));
-    }
-    fs::create_dir_all(&mod_dir)
-        .map_err(|e| format!("Failed to create {}: {e}", mod_dir.display()))?;
-
-    let is_faction = starter.id == "faction";
-    let file = clean_id.replace('-', "_");
-    let global = lua_global(mod_name);
-    let fill = |text: &str| {
-        text.replace("__NAME__", mod_name)
-            .replace("__ID__", &clean_id)
-            .replace("__FILE__", &file)
-            .replace("__KEY__", &file)
-            .replace("__GLOBAL__", &global)
-    };
-    let write = |name: &str, text: String| {
-        fs::write(mod_dir.join(name), text).map_err(|e| format!("Failed to write {name}: {e}"))
-    };
-
-    let mut manifest = ModManifest::new(clean_id.clone(), mod_name.to_string(), "1.0.0".to_string());
-    manifest.schema_url = Some(format!("{SITE_SCHEMAS}/mod.schema.json"));
-    manifest.authors = vec![author.to_string()];
-    manifest.description = format!("{mod_name} for Mud and Blood.");
-    manifest.category = Some(
-        match starter.id {
-            "assets" => "Audio",
-            "faction" => "Content",
-            _ => "Gameplay",
-        }
-        .to_string(),
-    );
-    manifest.tags = vec![if is_faction { "Faction" } else { "Gameplay" }.to_string()];
-    write(
-        "mod.json",
-        serde_json::to_string_pretty(&manifest).map_err(|e| e.to_string())?,
-    )?;
-
-    let mut readme_extra = String::new();
-    match starter.id {
-        "empty" => write("qm.toml", fill(&format!("{STARTER_QM_HEAD}{STARTER_EMPTY}")))?,
-        "patch" => write("qm.toml", fill(&format!("{STARTER_QM_HEAD}{STARTER_PATCH}")))?,
-        "module" => {
-            write("qm.toml", fill(&format!("{STARTER_QM_HEAD}{STARTER_MODULE}")))?;
-            write(&format!("{file}.lua"), fill(STARTER_MODULE_LUA))?;
-        }
-        "settings" => {
-            write("qm.toml", fill(&format!("{STARTER_QM_HEAD}{STARTER_MODULE}")))?;
-            write(&format!("{file}.lua"), fill(STARTER_SETTINGS_LUA))?;
-            write("config.toml", fill(STARTER_CONFIG))?;
-        }
-        "assets" => {
-            for sub in ["sounds", "music", "sprites", "ui", "fonts"] {
-                fs::create_dir_all(mod_dir.join("assets").join(sub))
-                    .map_err(|e| format!("Failed to create assets/{sub}: {e}"))?;
-            }
-            readme_extra = STARTER_ASSETS_README.to_string();
-        }
-        _ => {
-            let faction_toml = FACTION_TEMPLATE
-                .replace("custom_faction", &file)
-                .replace("Custom Faction", mod_name);
-            write("faction.toml", faction_toml)?;
-            write(
-                "faction.schema.json",
-                qm_schema::faction::FACTION_JSON_SCHEMA.to_string(),
-            )?;
-            for sub in ["units/base", "units/sarge", "weapons", "voices", "vehicles", "names"] {
-                let _ = fs::create_dir_all(mod_dir.join(sub));
-            }
-            fs::write(
-                mod_dir.join("names").join("last.txt"),
-                "# One last name per line. Lines starting with # are ignored.\nIvanov\nPetrov\nSmirnov\n",
-            )
-            .map_err(|e| e.to_string())?;
-        }
-    }
-
-    let check = if is_faction {
-        "qm faction check ."
-    } else {
-        "qm lint ."
-    };
-    let readme = format!(
-        "# {mod_name}\n\n{mod_name} for Mud and Blood. Needs [QuarterMaster](https://github.com/Gamiseus/QuarterMaster).\n{readme_extra}\n## Working on it\n\n- Check it against the game: `{check}`\n- Try it: put this folder in your workspace mods folder and switch the launcher to Workspace, or run `qm import .` to copy it into the library.\n- Release it: raise `version` in `mod.json`, then `qm pack .`\n- The modding wiki: https://gamiseus.github.io/wiki/\n"
-    );
-    write("README.md", readme)?;
-
-    Ok(mod_dir)
+    let names = crate::templates::TemplateNames::new(mod_id, mod_name, author)?;
+    crate::templates::create(parent_dir, &info.id, &names)
 }
 
 /// Packages a mod folder into `<FolderName>.zip` and returns its `ReleaseModEntry` (with SHA-256 digest).
@@ -3392,6 +1793,62 @@ label = "Flag"
         assert!(submenu_diagnostic(tmp.path(), &[]).is_none());
     }
 
+    #[test]
+    fn lint_warns_when_a_lua_api_is_used_without_its_feature_name() {
+        let tmp = tempfile::tempdir().unwrap();
+        fs::write(tmp.path().join("events.lua"), "QM.Events.on(\"battle_start\", function() end)\n").unwrap();
+        let d = lua_feature_diagnostics(tmp.path(), &[]);
+        assert_eq!(d.len(), 1);
+        assert!(d[0].message.contains("\"events\""), "{}", d[0].message);
+        assert!(lua_feature_diagnostics(tmp.path(), &["events".to_string()]).is_empty());
+        fs::write(tmp.path().join("grenade.lua"), "QM.Ordnance.register({ id = \"x\" })\n").unwrap();
+        let d = lua_feature_diagnostics(tmp.path(), &["events".to_string()]);
+        assert_eq!(d.len(), 1);
+        assert!(d[0].message.contains("\"ordnance\""), "{}", d[0].message);
+        assert!(lua_feature_diagnostics(tmp.path(), &["events".to_string(), "ordnance".to_string()]).is_empty());
+        // A faction's ordnance.
+        let f = tempfile::tempdir().unwrap();
+        fs::write(f.path().join("faction.toml"), "schema = 1\n\n[[ordnance]]\nid = \"g\"\n").unwrap();
+        let d = lua_feature_diagnostics(f.path(), &[]);
+        assert!(d.len() == 1 && d[0].message.contains("faction.toml has [[ordnance]]"), "{d:?}");
+        assert!(lua_feature_diagnostics(f.path(), &["ordnance".to_string()]).is_empty());
+        // A faction's skills.
+        let k = tempfile::tempdir().unwrap();
+        fs::write(k.path().join("faction.toml"), "schema = 1\n\n[[skills]]\nclass = \"rifle\"\nslot = 1\n").unwrap();
+        let d = lua_feature_diagnostics(k.path(), &[]);
+        assert!(d.len() == 1 && d[0].message.contains("faction.toml has [[skills]]"), "{d:?}");
+        assert!(lua_feature_diagnostics(k.path(), &["skills".to_string()]).is_empty());
+        // A faction's rank names and sized sprites.
+        let r = tempfile::tempdir().unwrap();
+        fs::write(
+            r.path().join("faction.toml"),
+            "schema = 1
+
+[ranks]
+soldier = [\"A\"]
+
+[sprites]
+rank_1 = { file = \"r.png\", size = [18, 22] }
+flag = \"f.png\"
+",
+        )
+        .unwrap();
+        let d = lua_feature_diagnostics(r.path(), &[]);
+        assert!(d.len() == 2, "{d:?}");
+        assert!(d.iter().any(|m| m.message.contains("faction.toml has [ranks]")), "{d:?}");
+        assert!(d.iter().any(|m| m.message.contains("\"faction_sprite_sizes\"")), "{d:?}");
+        let both = ["ranks".to_string(), "faction_sprite_sizes".to_string()];
+        assert!(lua_feature_diagnostics(r.path(), &both).is_empty());
+        // qm.toml sprite rules: a size alone needs nothing; a place needs sprite_transforms.
+        let p = tempfile::tempdir().unwrap();
+        fs::write(p.path().join("qm.toml"), "[sprites.top_m1]\nsize = [40, 12]\n").unwrap();
+        assert!(lua_feature_diagnostics(p.path(), &[]).is_empty());
+        fs::write(p.path().join("qm.toml"), "[sprites.top_m1]\nsize = [40, 12]\ndraw_size = [44, 12]\n").unwrap();
+        let d = lua_feature_diagnostics(p.path(), &[]);
+        assert!(d.len() == 1 && d[0].message.contains("\"sprite_transforms\""), "{d:?}");
+        assert!(lua_feature_diagnostics(p.path(), &["sprite_transforms".to_string()]).is_empty());
+    }
+
     /// A folder with a launcher, its loader and (when given) a staged pair, as an update finds it.
     #[cfg(windows)]
     struct SwapDir {
@@ -3685,59 +2142,14 @@ label = "Flag"
     }
 
     #[test]
-    fn test_all_14_mod_templates_defined_and_discoverable() {
-        assert!(BUILTIN_TEMPLATES.len() >= 14);
-        let categories: std::collections::HashSet<&str> =
-            BUILTIN_TEMPLATES.iter().map(|t| t.category).collect();
-        assert!(categories.contains("Menu Frameworks & Options Pages"));
-        assert!(categories.contains("Sprite & Graphics Replacements"));
-        assert!(categories.contains("Audio & Music Replacements / Additions"));
-        assert!(categories.contains("New Content & Gameplay Mechanics"));
-        assert!(categories.contains("Core Code Patching & Engine Hooking"));
-
-        for t in BUILTIN_TEMPLATES {
-            assert!(!t.id.is_empty());
-            assert!(!t.name.is_empty());
-            assert!(t.descriptor.contains(" — "));
-            assert!(t.preview_code.contains("-- ") || t.preview_code.contains("# "));
-            assert!(!t.preview_code.contains(&format!("{}: {}", "TODO", "write mod")));
-        }
-    }
-
-    #[test]
-    fn every_starter_scaffolds_and_old_names_still_work() {
+    fn qm_new_writes_catalog_templates_and_old_names_still_work() {
         let temp = tempfile::tempdir().unwrap();
-        for (i, s) in MOD_STARTERS.iter().enumerate() {
-            let dir = scaffold_new_mod(temp.path(), &format!("test-mod-{i}"), &format!("Test Mod {i}"), "Tester", s.id).unwrap();
-            assert!(dir.join("mod.json").is_file() && dir.join("README.md").is_file(), "{}", s.id);
-            let manifest = ModManifest::from_path(&dir.join("mod.json")).unwrap();
-            assert!(manifest.relationships.requires.is_empty(), "{}: a new mod requires nothing", s.id);
-            match s.id {
-                "faction" => assert!(dir.join("faction.toml").is_file() && !dir.join("assets").exists()),
-                "assets" => assert!(dir.join("assets").join("sounds").is_dir() && !dir.join("qm.toml").exists()),
-                _ => {
-                    // The patch file reads, with the ids and the Lua file the template names.
-                    let text = fs::read_to_string(dir.join("qm.toml")).unwrap();
-                    let parsed: qm_core::patch::PatchFile = toml::from_str(&text).unwrap();
-                    assert!(!text.contains("__"), "{}: a placeholder was left in", s.id);
-                    for p in &parsed.patches {
-                        assert!(p.id().is_some_and(|id| id.starts_with(&format!("test-mod-{i}:"))), "{}", s.id);
-                    }
-                    if matches!(s.id, "module" | "settings") {
-                        let lua = fs::read_to_string(dir.join(format!("test_mod_{i}.lua"))).unwrap();
-                        assert!(lua.contains(&format!("_G.TestMod{i} = TestMod{i}")), "{lua}");
-                    }
-                    assert!(short_form_diagnostic(&dir, &[]).is_none());
-                }
-            }
-            if s.id == "settings" {
-                let cfg = qm_schema::ModConfigSchema::from_mod_dir(&dir).unwrap().unwrap();
-                assert_eq!(cfg.options.len(), 2);
-            }
-            for (n, alias) in s.aliases.iter().enumerate() {
-                let dir = scaffold_new_mod(temp.path(), "alias", &format!("Alias{i}x{n}"), "Tester", alias).unwrap();
-                assert!(dir.join("mod.json").is_file(), "{alias}");
-            }
+        for (i, old) in ["empty", "patch", "module", "settings", "assets", "faction", "faction_mod", "gmenu_settings"].iter().enumerate() {
+            let dir = scaffold_new_mod(temp.path(), &format!("test-mod-{i}"), &format!("Test Mod {i}"), "Tester", old).unwrap();
+            assert!(dir.join("mod.json").is_file() && dir.join("README.md").is_file(), "{old}");
+            let manifest = qm_schema::ModManifest::from_path(&dir.join("mod.json")).unwrap();
+            assert_eq!(manifest.id, format!("test-mod-{i}"), "{old}");
+            assert_eq!(manifest.authors, vec!["Tester".to_string()], "{old}");
         }
         // A removed template and a mistyped one say what to use instead.
         let gone = scaffold_new_mod(temp.path(), "x", "Gone", "T", "custom_weapon").unwrap_err();
@@ -3747,33 +2159,14 @@ label = "Flag"
     }
 
     #[test]
-    fn faction_template_scaffolds_a_valid_faction() {
+    fn the_faction_template_scaffolds_a_valid_faction() {
         let temp = tempfile::tempdir().unwrap();
-        let dir = scaffold_new_mod(temp.path(), "eastern-front", "Eastern Front", "Tester", "faction_mod").unwrap();
+        let dir = scaffold_new_mod(temp.path(), "eastern-front", "Eastern Front", "Tester", "faction").unwrap();
         let report = qm_schema::faction::load_faction(&dir);
         assert!(!report.has_errors(), "{:?}", report.diagnostics);
         let f = report.faction.unwrap();
         assert_eq!(f.id, "eastern_front");
         assert_eq!(f.name, "Eastern Front");
-        assert_eq!(f.names.unwrap().soldiers.unwrap().last, vec!["Ivanov", "Petrov", "Smirnov"]);
-        // The commented-out examples are valid too once uncommented; only their files are missing.
-        let key = regex_lite::Regex::new(r"^# (\[|[A-Za-z_]+ = )").unwrap();
-        let uncommented: String = FACTION_TEMPLATE
-            .lines()
-            .map(|l| if key.is_match(l) { &l[2..] } else { l })
-            .collect::<Vec<_>>()
-            .join("
-");
-        let report = qm_schema::faction::check_faction(&uncommented, &dir);
-        let unexpected: Vec<_> = report
-            .diagnostics
-            .iter()
-            .filter(|d| d.severity == qm_schema::DiagnosticSeverity::Error)
-            .filter(|d| !d.message.contains("not found in the mod folder") && !d.message.contains("no wav/ogg/mp3 files") && !d.message.contains("no png/jpg/jpeg/bmp files"))
-            .collect();
-        assert!(unexpected.is_empty(), "{unexpected:?}");
-        let lint = lint_mod_directory(&dir, &HashMap::new()).unwrap();
-        assert!(lint.diagnostics.iter().any(|d| d.message.starts_with("faction.toml:")));
     }
 
     #[test]

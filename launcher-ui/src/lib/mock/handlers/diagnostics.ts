@@ -182,7 +182,7 @@ function trialOutcome(c: TrialChanges): RunEntry["outcome"] {
 }
 
 /** Like `game_launch_trial`: backs up the save, runs the game for a moment and logs a test run with `__qmMockInit.trialOutcome`. */
-function launchTrial(req: TrialRequest): GameStatus {
+export function launchTrial(req: TrialRequest): GameStatus {
   if (isGameBusy()) fail("game_running", "The game is already running.");
   const p = activeProfile();
   const empty = req.changes.pause_fixes.length + req.changes.disable_patches.length + req.changes.disable_mods.length === 0;

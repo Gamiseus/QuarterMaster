@@ -1,0 +1,13 @@
+{
+  "$schema": "https://gamiseus.github.io/schemas/mod.schema.json",
+  "schema_version": 1,
+  "id": "example_mod",
+  "name": "Example Mod",
+  "version": "1.0.0",
+  "authors": [
+    "Your Name"
+  ],
+  "description": "One of the game's images replaced, at four times its resolution. No code.",
+  "category": "Visuals",
+  "game_version": ">=0.5.3"
+}

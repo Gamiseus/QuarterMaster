@@ -73,6 +73,12 @@ do
       return ROTATED[name] == true and origInfo ~= nil and not exists(name) and exists(name .. ".prev")
     end
 
+    -- QM.Events: a save file read into the game, or written by it.
+    local function tellEvents(what, name)
+      local events = ROTATED[name] and _G.QM and _G.QM.Events
+      if events and type(events[what]) == "function" then pcall(events[what], name) end
+    end
+
     if origInfo then
       fs.getInfo = function(name, ...)
         local info = origInfo(name, ...)
@@ -89,6 +95,7 @@ do
       if exists(name) then
         save, why = read(name)
         if save then
+          tellEvents("loading", name)
           return function() return save end
         end
         if move(name, name .. ".damaged") then
@@ -105,6 +112,7 @@ do
           if older then
             print("[QM] Save guard: using " .. other .. " in its place")
             guard.used[#guard.used + 1] = { file = name, from = other, why = why }
+            tellEvents("loading", name)
             return function() return older end
           end
           print("[QM] Save guard: " .. other .. " could not be loaded either: " .. tostring(whyNot))
@@ -130,7 +138,9 @@ do
           if ok and type(all) == "string" then pcall(origWrite, name .. ".prev", all) end
         end
       end
-      return origWrite(name, ...)
+      local ok, err = origWrite(name, ...)
+      if ok then tellEvents("saved", name) end
+      return ok, err
     end
   end
 end

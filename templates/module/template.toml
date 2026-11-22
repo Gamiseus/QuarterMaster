@@ -1,0 +1,16 @@
+name = "Your own Lua file"
+part = 5
+order = 1
+section = "Module patches"
+summary = "Your own Lua file, loaded with the game and called every frame."
+open = "example.lua"
+aliases = ["module", "multi_file_engine_hook", "gameplay_patch"]
+try_next = ["Put your code in ExampleMod.update.", "Add a setting or a keybind for it (templates options, keybind)."]
+[[examples]]
+section = "Module patches"
+block = 1
+file = "example.lua"
+[[examples]]
+section = "Module patches"
+block = 2
+file = "qm.toml"

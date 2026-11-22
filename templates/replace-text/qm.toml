@@ -1,0 +1,10 @@
+#:schema https://gamiseus.github.io/schemas/qm.schema.json
+# Example Mod: a replaced game text.
+# assets/text/weaponText_m1.txt sets the game's text variable weaponText_m1: the M1 Garand's
+# description on the squad screen.
+# Change first: the text in assets/text/weaponText_m1.txt.
+# Wiki: Part 2, Text files: https://gamiseus.github.io/wiki/replacing-art-and-sound/#text-files
+# Try next: the names are the variables in the game's includes/localisation.lua.
+
+[manifest]
+version = "1.0.0"

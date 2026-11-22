@@ -1,0 +1,13 @@
+{
+  "$schema": "https://gamiseus.github.io/schemas/mod.schema.json",
+  "schema_version": 1,
+  "id": "example_mod",
+  "name": "Example Mod",
+  "version": "1.0.0",
+  "authors": ["Your Name"],
+  "description": "A mod that names the QuarterMaster it needs, and an at patch that keeps lines other mods need.",
+  "category": "Gameplay",
+  "game_version": ">=0.5.3",
+  "min_qm": "1.8.0",
+  "qm_features": ["anchors", "apply_as"]
+}

@@ -1,0 +1,28 @@
+#:schema https://gamiseus.github.io/schemas/qm.schema.json
+# Example Mod: wrapping a game function.
+# wrap.lua is loaded with the game and wraps floatyText, the game's function for the text
+# that floats above a soldier: every such text is also printed to the log.
+# Change first: what the wrapper does.
+# Wiki: Part 5, Wrapping a game function: https://gamiseus.github.io/wiki/adding-your-own-lua-files/#wrapping-a-game-function
+
+[manifest]
+version = "1.0.0"
+
+[[patches]]
+[patches.module]
+id = "example_mod:wrap_module"
+source = "wrap.lua"
+name = "includes/example_mod_wrap"
+before = "main.lua"
+
+# Load it after the game's files, then install the wrapper.
+[[patches]]
+[patches.pattern]
+id = "example_mod:wrap_require"
+target = "main.lua"
+pattern = 'require "includes/directives"'
+position = "after"
+payload = '''
+ExampleMod = require "includes/example_mod_wrap"
+ExampleMod.install()
+'''

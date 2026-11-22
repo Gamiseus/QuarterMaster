@@ -67,6 +67,7 @@
   --qm-sidebar-w-open: 184px;
   --qm-detail-w: 360px;
   --qm-dialog-lg: 760px;
+  --qm-dialog-xl: 1080px;
   --qm-log-h: 320px;
   /* Readable line length for text-heavy content (about 75 characters at 14 px). */
   --qm-measure: 680px;

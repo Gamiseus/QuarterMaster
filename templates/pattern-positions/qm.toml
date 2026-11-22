@@ -1,0 +1,40 @@
+#:schema https://gamiseus.github.io/schemas/qm.schema.json
+# Example Mod: before, after and at.
+# Three patches on main.lua: one puts a line after the game's "loading Save" message, one
+# replaces that message (position "at"), and one finds two lines in a row.
+# match_indent indents the payload like the line it matched.
+# Change first: the payloads.
+# Wiki: Part 4, The three positions: https://gamiseus.github.io/wiki/changing-game-code/#the-three-positions
+
+[manifest]
+version = "1.0.0"
+
+[[patches]]
+[patches.pattern]
+id = "example_mod:after_load"
+target = "main.lua"
+pattern = 'print("loading Save")'
+position = "after"
+payload = 'print("[Example Mod] a save was found")'
+match_indent = true
+
+[[patches]]
+[patches.pattern]
+id = "example_mod:replace_log"
+target = "main.lua"
+pattern = 'print("loading Save")'
+position = "at"
+payload = 'print("loading Save (Example Mod is active)")'
+match_indent = true
+
+[[patches]]
+[patches.pattern]
+id = "example_mod:new_profile_note"
+target = "main.lua"
+pattern = '''
+player = {}
+newProfile(player)
+'''
+position = "after"
+payload = 'print("[Example Mod] started a new profile")'
+match_indent = true

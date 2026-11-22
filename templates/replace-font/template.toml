@@ -1,0 +1,7 @@
+name = "Replace a font"
+part = 2
+order = 8
+section = "Folders"
+summary = "How to replace one of the game's fonts: the file to drop in assets/fonts/."
+open = "README.md"
+try_next = ["Drop a font file named like the game's (impact.ttf) into assets/fonts/."]

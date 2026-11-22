@@ -816,7 +816,8 @@ return "traced"
 
     /// Declared save content (Phase E D87): a weapon of a mod that is not loaded becomes the
     /// base weapon its mod.json names (or the K98 when that is no game weapon); a weapon of
-    /// a loaded mod, and one no mod declared, stay as they are.
+    /// a loaded mod stays, and so does one no mod declared while the game has its art; a
+    /// soldier's weapon with no art (the game would stop drawing it) becomes the K98.
     #[test]
     fn a_weapon_of_a_mod_that_is_off_becomes_its_declared_base() {
         use crate::handshake::{LaunchConfig, SaveContent};
@@ -848,10 +849,11 @@ package.loaded.qm = {{ save_info = [=====[{info}]=====] }}
 {prelude}
 weaponCreator = function(t, tag) t.tag = tag; t.rebuilt = true end
 updateProfile = function(p) end
+top_unknown_rifle = {{ type = "image" }}
 local gun = function(tag) return {{ tag = tag, maxAmmo = 5, magSprite = 1 }} end
 player = {{
-  unlock = {{ rifle = {{ "k98", "example_rifle", "loaded_rifle", "unknown_rifle", "odd_gun" }} }},
-  squad = {{ gun("example_rifle"), gun("loaded_rifle"), gun("unknown_rifle"), gun("odd_gun") }},
+  unlock = {{ rifle = {{ "k98", "example_rifle", "loaded_rifle", "unknown_rifle", "odd_gun", "artless_gun" }} }},
+  squad = {{ gun("example_rifle"), gun("loaded_rifle"), gun("unknown_rifle"), gun("odd_gun"), gun("artless_gun") }},
 }}
 player.squad[1].primarySwap = "example_rifle"
 player.squad[2].primarySwap = "loaded_rifle"
@@ -860,9 +862,11 @@ local s = player.squad
 assert(s[1].tag == "g43" and s[1].rebuilt, "a declared weapon of a mod that is off")
 assert(s[1].primarySwap == "g43")
 assert(s[2].tag == "loaded_rifle" and not s[2].rebuilt and s[2].primarySwap == "loaded_rifle", "a loaded mod's weapon")
-assert(s[3].tag == "unknown_rifle" and not s[3].rebuilt, "a weapon no mod declared")
+assert(s[3].tag == "unknown_rifle" and not s[3].rebuilt, "a weapon no mod declared, with its art")
 assert(s[4].tag == "k98" and s[4].rebuilt, "a base that is no game weapon falls back to the K98")
-assert(table.concat(player.unlock.rifle, ",") == "k98,g43,loaded_rifle,unknown_rifle,k98", table.concat(player.unlock.rifle, ","))
+assert(s[5].tag == "k98" and s[5].rebuilt, "a weapon with no art becomes the K98")
+-- An unlock is built when it is used, so an artless tag there is left to the game's builder.
+assert(table.concat(player.unlock.rifle, ",") == "k98,g43,loaded_rifle,unknown_rifle,k98,artless_gun", table.concat(player.unlock.rifle, ","))
 assert(player.qmFactionWeaponBases == nil)
 return "ok"
 "#,
@@ -946,6 +950,45 @@ return "ok"
         assert_eq!(c.run_chunk("prelude_steam", &chunk), Ok(Some("ok".into())));
     }
 
+    /// Mods load: nothing reaches the player's Steam stats, achievements or leaderboards,
+    /// including the calls the game itself never makes (`resetAllStats`).
+    #[test]
+    fn the_prelude_blocks_every_steam_stat_write() {
+        let Some(c) = compiler() else {
+            eprintln!("lua51.dll not found; skipped");
+            return;
+        };
+        let stubs = r#"
+love = { audio = {}, graphics = {}, filesystem = {}, window = {} }
+love.audio.newSource = function(a) return { from = a } end
+love.graphics.newImage = function(a) return { from = a } end
+local reached = {}
+local function real(name) return function() reached[#reached + 1] = name; return true end end
+Steam = { userStats = {}, apps = {} }
+for _, n in ipairs({ "uploadLeaderboardScore", "findLeaderboard", "findOrCreateLeaderboard",
+  "setAchievement", "clearAchievement", "setStatInt", "setStatFloat", "storeStats",
+  "resetAllStats" }) do
+  Steam.userStats[n] = real(n)
+end
+function __test_reached() return reached end
+"#;
+        let game = r#"
+local answers = {}
+Steam.userStats.resetAllStats(true)
+Steam.userStats.setAchievement("ACH")
+Steam.userStats.setStatInt("kills", 1)
+Steam.userStats.storeStats()
+Steam.userStats.findOrCreateLeaderboard("board", 1, 1, function(r) answers[#answers + 1] = r.leaderboardFound end)
+Steam.userStats.uploadLeaderboardScore(1, 1, 5, nil, function(r) answers[#answers + 1] = r.success end)
+local reached = __test_reached()
+assert(#reached == 0, "reached Steam: " .. table.concat(reached, ", "))
+assert(answers[1] == false and answers[2] == false, "callbacks say no")
+return "ok"
+"#;
+        let chunk = format!("{stubs}\n{}\n{game}", crate::patch::loader::STEAM_SAFETY_PAYLOAD);
+        assert_eq!(c.run_chunk("prelude_steam_writes", &chunk), Ok(Some("ok".into())));
+    }
+
     /// QuarterMaster's startup code against a stub `love`: two mods replace one game sound,
     /// one adds a sound, a mod replaces a game image, and the winner list says whose file
     /// each slot ended up with (Phase E D77).
@@ -1022,6 +1065,7 @@ return "ok"
             size,
             scale,
             like: like.map(str::to_string),
+            ..Default::default()
         };
         rules.insert("top_big".to_string(), rule(Some([150.0, 100.0]), None, None));
         rules.insert("top_half".to_string(), rule(None, Some(0.5), None));
@@ -1031,12 +1075,40 @@ return "ok"
         rules.insert("both".to_string(), rule(Some([1.0, 1.0]), Some(2.0), None));
         rules.insert("zero".to_string(), rule(None, Some(0.0), None));
         rules.insert("itself".to_string(), rule(None, None, Some("itself")));
+        // Placed: moved, turned and mirrored inside the box; with a size, or alone.
+        rules.insert(
+            "side_m1".to_string(),
+            crate::patch::SpriteRule {
+                offset: Some([4.0, -2.0]),
+                rotate: Some(90.0),
+                flip: Some("x".to_string()),
+                ..Default::default()
+            },
+        );
+        rules.insert(
+            "bad_flip".to_string(),
+            crate::patch::SpriteRule { flip: Some("z".to_string()), ..Default::default() },
+        );
+        rules.insert("empty".to_string(), crate::patch::SpriteRule::default());
         let (table, warnings) = crate::patch::loader::sprite_rules_lua(&rules);
-        assert_eq!(warnings.len(), 4, "{warnings:?}");
+        assert_eq!(warnings.len(), 6, "{warnings:?}");
+        assert!(table.contains("side_m1 = { offset = { 4, -2 }, rotate = 90, flip = \"x\" }"), "{table}");
+        let mut drawn = std::collections::BTreeMap::new();
+        drawn.insert(
+            "a".to_string(),
+            crate::patch::SpriteRule { draw_size: Some([10.0, 5.0]), ..Default::default() },
+        );
+        drawn.insert(
+            "b".to_string(),
+            crate::patch::SpriteRule { draw_size: Some([0.0, 5.0]), ..Default::default() },
+        );
+        let (one, w) = crate::patch::loader::sprite_rules_lua(&drawn);
+        assert!(one.contains("a = { draw_size = { 10, 5 } }") && !one.contains("b ="), "{one}");
+        assert_eq!(w.len(), 1, "{w:?}");
         let (patch, _) = crate::patch::loader::build_sprite_rules_patch("moda", &rules, 0);
-        let patch = patch.expect("four rules are usable");
+        let patch = patch.expect("five rules are usable");
         assert_eq!(patch.id(), Some("moda_sprite_sizes"));
-        assert_eq!(patch.name(), Some("Sprite Sizes (4)"));
+        assert_eq!(patch.name(), Some("Sprite Sizes (5)"));
 
         let stubs = r#"
 -- Images as LÖVE makes them: userdata sharing one metatable whose __index holds the methods.
@@ -1062,6 +1134,15 @@ love.graphics.newImage = function(a)
 end
 drawn = nil
 love.graphics.draw = function(...) drawn = { n = select('#', ...), ... } end
+-- The transform stack, as a list of what was done.
+ops = {}
+local depth = 0
+love.graphics.push = function() depth = depth + 1; ops[#ops + 1] = "push" end
+love.graphics.pop = function() depth = depth - 1; ops[#ops + 1] = "pop" end
+for _, f in ipairs({ "translate", "rotate", "scale", "shear" }) do
+  love.graphics[f] = function(a, b) ops[#ops + 1] = string.format("%s %g %g", f, a or 0, b or 0) end
+end
+stackDepth = function() return depth end
 local printed = {}
 print = function(s) printed[#printed + 1] = tostring(s) end
 "#;
@@ -1104,12 +1185,21 @@ assert(drawn[5] == 0.5 and drawn[6] == 0.5, "sy follows sx when left out")
 local quad = newproxy()
 love.graphics.draw(top_m1, quad, 10, 20, 0, 2)
 assert(drawn[2] == quad and drawn[6] == 2, "a draw with a Quad is left alone")
+-- An image that does not exist (a mod that is off) is left out, with one warning.
+drawn = nil
+love.graphics.draw(nil, 1, 2)
+love.graphics.draw(nil, 3, 4)
+assert(drawn == nil, "nothing is drawn")
+local missing_warnings = 0
+for _, line in ipairs(printed) do if line:find("drew an image that does not exist", 1, true) then missing_warnings = missing_warnings + 1 end end
+assert(missing_warnings == 1, "warned once, not " .. missing_warnings)
 
--- Another shape: stretched to the original's box, with a warning.
+-- Another shape: stretched to the original's box, reported once the rules are known.
 assert(side_m1:getWidth() == 60 and side_m1:getHeight() == 30)
-local warned = false
-for _, line in ipairs(printed) do if line:find("side_m1", 1, true) and line:find("another shape", 1, true) then warned = true end end
-assert(warned, "a replacement of another shape is reported")
+local function warned()
+  for _, line in ipairs(printed) do if line:find("side_m1", 1, true) and line:find("another shape", 1, true) then return line end end
+end
+assert(not warned(), "not before the [sprites] rules are applied")
 
 -- The game loads the file again: the replacement comes back, at the same shown size.
 local again = love.graphics.newImage("sprites/top_m1.png")
@@ -1118,9 +1208,46 @@ assert(QM.Sprites.rawSize(again) == 400 and again:getWidth() == 100, "a reload k
 -- [sprites] rules, as the loader writes them.
 __qm_sprite_rules("moda", {table})
 __qm_apply_sprite_rules()
+-- side_m1's rule places it but gives no draw size: the other shape is still reported.
+assert(warned() and warned():find("draw_size", 1, true), "a replacement of another shape is reported")
 assert(top_big:getWidth() == 150 and top_big:getHeight() == 100, "size")
 assert(top_half:getWidth() == 200 and top_half:getHeight() == 100, "scale")
 assert(top_copy:getWidth() == 150 and top_copy:getHeight() == 100, "like takes the other's final size")
+
+-- Placed: side_m1 (shown at 60x30) moved 4 right and 2 up, turned 90 degrees, mirrored.
+assert(side_m1:getWidth() == 60 and side_m1:getHeight() == 30, "a place leaves the size alone")
+local t = QM.Sprites.transformOf(side_m1)
+assert(t and t.offset[1] == 4 and t.offset[2] == -2 and t.flip == "x" and math.abs(t.rotate - 90) < 1e-9, "the place is kept")
+ops = {{}}
+love.graphics.draw(side_m1, 100, 200, 0.5, 2, 2, 30, 15)
+local want = {{ "push", "translate 100 200", "rotate 0.5 0", "scale 2 2", "translate -30 -15",
+  "translate 34 13", string.format("rotate %g 0", math.pi / 2), "scale -1 1", "translate -30 -15", "pop" }}
+assert(#ops == #want, "the draw's transform, then the place: " .. table.concat(ops, ", "))
+for i, op in ipairs(want) do assert(ops[i] == op, "step " .. i .. ": " .. tostring(ops[i]) .. " ~= " .. op) end
+assert(drawn[1] == side_m1 and drawn[2] == 0 and drawn[3] == 0 and drawn[5] == 1 and drawn[6] == 0.5,
+  "drawn at its shown size inside the box")
+assert(stackDepth() == 0, "the stack is left as it was")
+-- The game loads the file again: the replacement keeps its place.
+local reloaded = love.graphics.newImage("sprites/side_m1.png")
+assert(QM.Sprites.transformOf(reloaded) and QM.Sprites.transformOf(reloaded).flip == "x", "a reload keeps the place")
+-- From code: a place alone, then none.
+assert(QM.Sprites.setTransform(top_copy, {{ offset = {{ 1, 2 }} }}))
+assert(QM.Sprites.transformOf(top_copy).offset[2] == 2 and top_copy:getWidth() == 150, "a place keeps the size")
+assert(QM.Sprites.setTransform(top_copy, nil) and QM.Sprites.transformOf(top_copy) == nil, "and comes off")
+assert(QM.Sprites.setTransform(plain, {{ rotate = 0 }}) and QM.Sprites.transformOf(plain) == nil, "no change is no place")
+assert(QM.Sprites.setTransform(plain, {{ offset = {{ 0 / 0, 1 }} }}) == false, "a place that is not a number is refused")
+-- A draw size: the box the game sees stays; the picture is drawn at 120x20 inside it.
+local bw, bh = plain:getWidth(), plain:getHeight()
+assert(QM.Sprites.setTransform(plain, {{ draw_size = {{ 120, 20 }} }}))
+assert(plain:getWidth() == bw and plain:getHeight() == bh, "a draw size leaves the box")
+assert(QM.Sprites.transformOf(plain).draw_size[1] == 120, "and is kept")
+ops = {{}}
+love.graphics.draw(plain, 0, 0)
+local rw, rh = QM.Sprites.rawSize(plain)
+assert(ops[6] == "translate 60 10" and ops[9] == "translate -60 -10", "turned about the drawn middle: " .. table.concat(ops, ", "))
+assert(math.abs(drawn[5] - 120 / rw) < 1e-12 and math.abs(drawn[6] - 20 / rh) < 1e-12, "drawn at the draw size")
+assert(QM.Sprites.setTransform(plain, {{ draw_size = {{ 0, 1 }} }}) == false, "a draw size of 0 is refused")
+assert(QM.Sprites.setTransform(plain, nil) and QM.Sprites.transformOf(plain) == nil and plain:getWidth() == bw, "and back")
 local missing = false
 for _, line in ipairs(printed) do if line:find("no_such_image", 1, true) then missing = true end end
 assert(missing, "a rule for an image the game does not have is reported")

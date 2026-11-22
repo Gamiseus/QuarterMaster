@@ -1,0 +1,11 @@
+name = "Ready to publish"
+part = 11
+order = 1
+section = "Listing a mod in the launcher's Browse tab"
+summary = "A mod with a README, a changelog, an update source and a [publish] table, ready for the Release view."
+open = "qm.toml"
+try_next = ["Open the Mod Engine's Release view to pack it.", "Put your repository in [publish] and in update_keys."]
+[[examples]]
+section = "2. Add a `[publish]` table"
+block = 1
+file = "qm.toml"

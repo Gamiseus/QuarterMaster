@@ -62,6 +62,17 @@ local function qm_neuter_steam()
     Steam.userStats.requestCurrentStats = function() return false end
     Steam.userStats.getStatInt = function() return false, 0 end
     Steam.userStats.getStatFloat = function() return false, 0.0 end
+    -- The game never calls these (its own calls are commented out); a mod could, and
+    -- resetAllStats(true) would wipe the player's real stats and achievements.
+    Steam.userStats.resetAllStats = function()
+      print("[QM] BLOCKED: Steam.userStats.resetAllStats")
+      return false
+    end
+    Steam.userStats.findOrCreateLeaderboard = function(n, s, d, cb)
+      print("[QM] BLOCKED: Steam.userStats.findOrCreateLeaderboard (" .. tostring(n) .. ")")
+      if cb then cb({ leaderboardFound = false, steamLeaderboard = 0 }, "Quartermaster: Disabled") end
+      return false
+    end
   end
   if Steam and Steam.apps then
     Steam.apps.isDlcInstalled = function() return false end
@@ -152,7 +163,8 @@ local orig_newImage = love and love.graphics and love.graphics.newImage or nil
 -- another size: `w`, `h` is the size it is shown at, `kx`, `ky` that size over its pixels.
 -- getWidth/getHeight then answer with the shown size, and love.graphics.draw scales the
 -- image to it, so code written for the old pixel size keeps working with a file of any
--- resolution.
+-- resolution. `tf`, when set, moves, turns and mirrors it inside the box it is drawn in:
+-- { dx, dy (shown pixels), rot (radians, clockwise), fx, fy (1, or -1 to mirror) }.
 local __qm_sprite = setmetatable({}, { __mode = "k" })
 local __qm_sprite_rule_set = {}
 local __qm_sprite_rule_order = {}
@@ -203,13 +215,14 @@ local function __qm_sprite_set(img, w, h)
   end
   local rw, rh = __qm_raw_size(img)
   if rw <= 0 or rh <= 0 then return false end
-  if w == rw and h == rh then
+  local tf = __qm_sprite[img] and __qm_sprite[img].tf or nil
+  if w == rw and h == rh and not tf then
     __qm_sprite[img] = nil
   else
     if not __qm_hook_image_type(img) then return false end
-    __qm_sprite[img] = { w = w, h = h, kx = w / rw, ky = h / rh }
+    __qm_sprite[img] = { w = w, h = h, kx = w / rw, ky = h / rh, tf = tf }
   end
-  -- When the game loads the file again, the new image is shown at the same size.
+  -- When the game loads the file again, the new image is shown at the same size and place.
   local info = __qm_obj_info[img]
   if info then
     local shown = __qm_sprite[img]
@@ -217,13 +230,75 @@ local function __qm_sprite_set(img, w, h)
       local ov = key and __qm_path_overrides[key]
       if ov then
         ov.shown_w, ov.shown_h = shown and shown.w or nil, shown and shown.h or nil
+        ov.tf = shown and shown.tf or nil
       end
     end
   end
   return true
 end
 
+-- Moves, turns and mirrors `img` inside its box, and draws it at dw x dh there (the box's
+-- size when not given): { dx, dy, rot, fx, fy, dw, dh }, or nil for none. The box, the size
+-- getWidth and getHeight answer, does not change.
+local function __qm_sprite_place(img, tf)
+  if not __qm_is_image(img) then return false end
+  local function finite(v) return type(v) == "number" and v == v and v ~= math.huge and v ~= -math.huge end
+  if tf ~= nil then
+    if type(tf) ~= "table" then return false end
+    for _, k in ipairs({ "dx", "dy", "rot", "fx", "fy" }) do
+      if not finite(tf[k]) then return false end
+    end
+    if (tf.dw == nil) ~= (tf.dh == nil) then return false end
+    if tf.dw ~= nil and not (finite(tf.dw) and finite(tf.dh) and tf.dw > 0 and tf.dh > 0) then return false end
+    if tf.dx == 0 and tf.dy == 0 and tf.rot == 0 and tf.fx == 1 and tf.fy == 1 and tf.dw == nil then tf = nil end
+  end
+  local s = __qm_sprite[img]
+  local w, h
+  if s then
+    w, h = s.w, s.h
+  else
+    if tf == nil then return true end
+    w, h = __qm_raw_size(img)
+  end
+  if s then s.tf = tf else
+    if not __qm_hook_image_type(img) then return false end
+    local rw, rh = __qm_raw_size(img)
+    __qm_sprite[img] = { w = w, h = h, kx = w / rw, ky = h / rh, tf = tf }
+  end
+  -- Size and place are kept together: set the size again so a reload keeps both.
+  return __qm_sprite_set(img, w, h)
+end
+
+-- A rule's offset, rotate, flip and draw_size as a place, or nil when it has none.
+local function __qm_rule_place(rule)
+  if rule.offset == nil and rule.rotate == nil and rule.flip == nil and rule.draw_size == nil then return nil end
+  local o = type(rule.offset) == "table" and rule.offset or { 0, 0 }
+  local flip = type(rule.flip) == "string" and rule.flip or ""
+  local d = type(rule.draw_size) == "table" and rule.draw_size or nil
+  return {
+    dx = tonumber(o[1]) or 0,
+    dy = tonumber(o[2]) or 0,
+    rot = math.rad(tonumber(rule.rotate) or 0),
+    fx = flip:find("x", 1, true) and -1 or 1,
+    fy = flip:find("y", 1, true) and -1 or 1,
+    dw = d and tonumber(d[1]) or nil,
+    dh = d and tonumber(d[2]) or nil,
+  }
+end
+
 -- A replacement takes the shown size of the image it replaces, whatever its resolution.
+-- A replacement of another shape is reported once the [sprites] rules are known, and only when
+-- no rule gives it a size or a draw size.
+local __qm_shape_notes = {}
+local __qm_sprite_rules_applied = false
+local function __qm_shape_note(name)
+  local msg = __qm_shape_notes[name]
+  __qm_shape_notes[name] = nil
+  local r = __qm_sprite_rule_set[name]
+  local covered = r ~= nil and (r.size ~= nil or r.scale ~= nil or r.like ~= nil or r.draw_size ~= nil)
+  if msg and not covered then print(msg) end
+end
+
 local function __qm_sprite_inherit(old, new, name)
   if not __qm_is_image(old) or not __qm_is_image(new) or old == new then return end
   local ow, oh = old:getWidth(), old:getHeight()
@@ -232,7 +307,9 @@ local function __qm_sprite_inherit(old, new, name)
   if __qm_sprite_set(new, ow, oh) then
     local stretch = (nw / nh) / (ow / oh)
     if stretch > 1.02 or stretch < 0.98 then
-      print(string.format("[QM] [WARN] '%s': the replacement is %dx%d and the original %dx%d, another shape. It is stretched to the original's size; set a size for it under [sprites] in qm.toml to choose.", tostring(name), nw, nh, ow, oh))
+      local key = tostring(name)
+      __qm_shape_notes[key] = string.format("[QM] [WARN] '%s': the replacement is %dx%d and the original %dx%d, another shape. It is stretched to the original's box; line it up with a draw_size under [sprites] in qm.toml (the Mod Engine's Sprites view writes it), or give it a size.", key, nw, nh, ow, oh)
+      if __qm_sprite_rules_applied then __qm_shape_note(key) end
     end
   end
 end
@@ -240,13 +317,42 @@ _G.__qm_sprite_inherit = __qm_sprite_inherit
 
 local __qm_raw_draw = love and love.graphics and love.graphics.draw or nil
 if __qm_raw_draw then
+  local G = love.graphics
   local function draw_sized(s, img, x, y, r, sx, sy, ox, oy, kx, ky)
     sx = sx or 1
     sy = sy or sx
-    -- The origin is given in shown pixels; LÖVE wants it in the image's own.
-    return __qm_raw_draw(img, x or 0, y or 0, r or 0, sx * s.kx, sy * s.ky, (ox or 0) / s.kx, (oy or 0) / s.ky, kx, ky)
+    local tf = s.tf
+    if not tf then
+      -- The origin is given in shown pixels; LÖVE wants it in the image's own.
+      return __qm_raw_draw(img, x or 0, y or 0, r or 0, sx * s.kx, sy * s.ky, (ox or 0) / s.kx, (oy or 0) / s.ky, kx, ky)
+    end
+    -- Placed: the draw's own transform, as LÖVE makes it, then the place inside the box.
+    G.push()
+    G.translate(x or 0, y or 0)
+    G.rotate(r or 0)
+    G.scale(sx, sy)
+    if (kx or 0) ~= 0 or (ky or 0) ~= 0 then G.shear(kx or 0, ky or 0) end
+    G.translate(-(ox or 0), -(oy or 0))
+    local w, h = tf.dw or s.w, tf.dh or s.h
+    G.translate(tf.dx + w / 2, tf.dy + h / 2)
+    G.rotate(tf.rot)
+    G.scale(tf.fx, tf.fy)
+    G.translate(-w / 2, -h / 2)
+    local ok, err = pcall(__qm_raw_draw, img, 0, 0, 0, s.kx * w / s.w, s.ky * h / s.h)
+    G.pop()
+    if not ok then error(err, 2) end
   end
+  local warned_missing = false
   love.graphics.draw = function(a, x, ...)
+    if a == nil then
+      -- An image the game expects is not there (a mod that is off, or a file that is
+      -- missing). Drawing nothing keeps the game running; the log says where once.
+      if not warned_missing then
+        warned_missing = true
+        print("[QM] [WARN] The game drew an image that does not exist (from a mod that is not loaded, or a missing file); it is left out. " .. (debug and debug.traceback and debug.traceback("", 2) or ""))
+      end
+      return
+    end
     local s = __qm_sprite[a]
     -- Only the plain form. A draw with a Quad or a Transform is left as it is.
     if s and type(x) ~= "userdata" then
@@ -271,7 +377,27 @@ _G.QM.Sprites = {
     if not __qm_is_image(other) then return false end
     return __qm_sprite_set(img, other:getWidth(), other:getHeight())
   end,
-  -- Back to its pixel size.
+  -- Move, turn, mirror and size it inside its box: { offset = { x, y }, rotate = degrees,
+  -- flip = "x" | "y" | "xy", draw_size = { w, h } }, as [sprites] takes them; nil for none.
+  setTransform = function(img, t)
+    if t == nil then return __qm_sprite_place(img, nil) end
+    if type(t) ~= "table" then return false end
+    return __qm_sprite_place(img, __qm_rule_place(t) or { dx = 0, dy = 0, rot = 0, fx = 1, fy = 1 })
+  end,
+  -- Its place inside its box, as setTransform takes it; nil when it has none.
+  transformOf = function(img)
+    local s = __qm_sprite[img]
+    local tf = s and s.tf
+    if not tf then return nil end
+    local flip = (tf.fx < 0 and "x" or "") .. (tf.fy < 0 and "y" or "")
+    return {
+      offset = { tf.dx, tf.dy },
+      rotate = math.deg(tf.rot),
+      flip = flip ~= "" and flip or nil,
+      draw_size = tf.dw and { tf.dw, tf.dh } or nil,
+    }
+  end,
+  -- Back to its pixel size, with no place.
   reset = function(img) __qm_sprite[img] = nil end,
   -- The image's real pixel size.
   rawSize = function(img) return __qm_raw_size(img) end,
@@ -284,7 +410,8 @@ _G.QM.Sprites = {
 }
 
 -- [sprites] rules from a mod's qm.toml: image global -> { size = {w, h} } | { scale = n }
--- | { like = "otherGlobal" }. A later mod's rule for the same image wins.
+-- | { like = "otherGlobal" }, and any of offset = {x, y}, rotate = degrees, flip = "x" | "y"
+-- | "xy", draw_size = {w, h}. A later mod's rule for the same image wins.
 _G.__qm_sprite_rules = function(mod_id, rules)
   if type(rules) ~= "table" then return end
   for name, rule in pairs(rules) do
@@ -312,7 +439,11 @@ local function __qm_apply_sprite_rule(name, rule)
   elseif rule.like then
     local other = rawget(_G, rule.like)
     ok = __qm_is_image(other) and __qm_sprite_set(img, other:getWidth(), other:getHeight())
+  else
+    ok = true
   end
+  local place = __qm_rule_place(rule)
+  if ok and place then ok = __qm_sprite_place(img, place) end
   if not ok then
     print(string.format("[QM] [WARN] [sprites] rule of '%s' for '%s' could not be applied.", tostring(rule.mod), tostring(name)))
   end
@@ -329,6 +460,11 @@ _G.__qm_apply_sprite_rules = function()
       end
     end
   end
+  __qm_sprite_rules_applied = true
+  local names = {}
+  for name in pairs(__qm_shape_notes) do names[#names + 1] = name end
+  table.sort(names)
+  for _, name in ipairs(names) do __qm_shape_note(name) end
 end
 
 local function __qm_load_ov_fd(ov)
@@ -395,7 +531,9 @@ if orig_newImage then
       if ov and ov_fd then
         local ok, img = pcall(orig_newImage, ov_fd, ...)
         if ok and img then
-          -- The game loaded this path again: the replacement keeps the size it was shown at.
+          -- The game loaded this path again: the replacement keeps the size and place it was
+          -- shown at.
+          if ov.tf then __qm_sprite_place(img, ov.tf) end
           if ov.shown_w then __qm_sprite_set(img, ov.shown_w, ov.shown_h) end
           -- Known by the game path it stands in for, like the file it replaces.
           __qm_obj_info[img] = {
@@ -880,7 +1018,9 @@ end
 -- vanilla unlocks back and turn weapons the game no longer knows into their base weapon, so the
 -- save loads instead of crashing on a missing sprite. Runs right after updateProfile.
 -- The same is done for the weapons a mod declares in mod.json (save_content) while that mod
--- is not loaded: each becomes the base weapon the mod names for it.
+-- is not loaded: each becomes the base weapon the mod names for it. In any save, a soldier's
+-- weapon the running game neither knows nor has art for (no top_<tag> image) becomes the K98:
+-- the game would stop at its first draw.
 local __qm_vanilla_weapon_tags = {}
 for _, t in ipairs({"m1", "g98", "k98", "springfield", "boysRifle", "pz39", "g33", "mas36", "m1Carbine", "matchGarand", "m1941", "t20", "t22", "scopedK98", "1917", "scopedGarand", "scopedSpringfield", "scopedEnfield", "g43", "scopedG43", "svt40", "vg15", "m1CarbinePara", "m2Carbine", "m2CarbineA1", "bren", "chauchat", "zb26", "m1919", "vicker", "mg42", "mg15", "mg34", "tommy", "stenMKVI", "sten", "bar", "johnson", "m3", "m38", "mp40", "mp41", "ppsh41", "stg44", "irstg44", "fg42", "shotgun", "slamShotgun"}) do
   __qm_vanilla_weapon_tags[t] = true
@@ -928,7 +1068,6 @@ _G.__qm_faction_save_cleanup = function(p)
   -- Declared weapon tags of the mods that are loaded.
   local loaded = type(info.loaded_weapons) == "table" and info.loaded_weapons or {}
   local had_faction = type(bases) == "table"
-  if not had_faction and next(declared) == nil then return end
   if not had_faction then bases = {} end
   local extra = rawget(_G, "__qm_factions_expected_weapons") or {}
   -- A weapon the running game builds under its own tag belongs to a mod that is loaded, also
@@ -947,21 +1086,31 @@ _G.__qm_faction_save_cleanup = function(p)
     return __qm_vanilla_weapon_tags[t] or extra[t] or loaded[t] or builds(t)
   end
   -- A save that used a faction has every weapon the running game does not know replaced;
-  -- any other save only the weapons a mod that is off declared.
+  -- any other save the weapons a mod that is off declared.
   local function gone(t) return not known(t) and (had_faction or declared[t] ~= nil) end
+  -- A soldier's weapon with no image of its own is replaced too: the game draws top_<tag>
+  -- for every soldier and would stop there. (A tag in an unlock list is built when it is
+  -- used, and the game's builder turns a tag it does not know into a K98.)
+  local function gone_weapon(t) return gone(t) or (not known(t) and rawget(_G, "top_" .. t) == nil) end
   local function base_of(t)
     local b = bases[t] or declared[t]
     if b and __qm_vanilla_weapon_tags[b] then return b end
     return "k98"
   end
   local fixed = 0
+  local fixed_tags, fixed_seen = {}, {}
   local seen = {}
   local function walk(t, depth)
     if depth > 12 or seen[t] then return end
     seen[t] = true
-    if type(t.tag) == "string" and t.maxAmmo ~= nil and t.magSprite ~= nil and gone(t.tag) then
-      if type(weaponCreator) == "function" and pcall(weaponCreator, t, base_of(t.tag)) then
+    if type(t.tag) == "string" and t.maxAmmo ~= nil and t.magSprite ~= nil and gone_weapon(t.tag) then
+      local was = t.tag
+      if type(weaponCreator) == "function" and pcall(weaponCreator, t, base_of(was)) then
         fixed = fixed + 1
+        if not fixed_seen[was] then
+          fixed_seen[was] = true
+          fixed_tags[#fixed_tags + 1] = was
+        end
       end
     end
     for _, key in ipairs({"primarySwap", "preScroungeGun"}) do
@@ -983,7 +1132,8 @@ _G.__qm_faction_save_cleanup = function(p)
     end
   end
   if fixed > 0 then
-    print("[QM] " .. fixed .. " weapon(s) from a faction or mod that is not enabled were changed to their base weapon.")
+    table.sort(fixed_tags)
+    print("[QM] " .. fixed .. " weapon(s) from a faction or mod that is not enabled were changed to their base weapon: " .. table.concat(fixed_tags, ", ") .. ".")
   end
   if had_faction and p.qmFaction == nil and next(extra) == nil then
     p.qmFactionWeaponBases = nil
@@ -1257,6 +1407,12 @@ do
   end
 end
 "#,
+    include_str!("events_runtime.lua"),
+    "\n",
+    include_str!("skills_runtime.lua"),
+    "\n",
+    include_str!("ordnance_runtime.lua"),
+    "\n",
     include_str!("save_guard.lua")
 );
 
@@ -1490,21 +1646,54 @@ pub fn sprite_rules_lua(
             continue;
         }
         let set = usize::from(rule.size.is_some()) + usize::from(rule.scale.is_some()) + usize::from(rule.like.is_some());
-        if set != 1 {
-            warnings.push(format!("[sprites.{name}] needs exactly one of size, scale and like; the rule is ignored"));
+        let placed = rule.offset.is_some() || rule.rotate.is_some() || rule.flip.is_some() || rule.draw_size.is_some();
+        if set > 1 || (set == 0 && !placed) {
+            warnings.push(format!(
+                "[sprites.{name}] needs one of size, scale and like, or a place (offset, rotate, flip, draw_size); the rule is ignored"
+            ));
             continue;
         }
         let good = |n: f64| n.is_finite() && n > 0.0;
-        let body = match (&rule.size, rule.scale, &rule.like) {
-            (Some([w, h]), _, _) if good(*w) && good(*h) => format!("size = {{ {w}, {h} }}"),
-            (_, Some(k), _) if good(k) => format!("scale = {k}"),
-            (_, _, Some(other)) if is_lua_name(other) && other != name => format!("like = \"{other}\""),
+        let mut parts: Vec<String> = Vec::new();
+        match (&rule.size, rule.scale, &rule.like) {
+            (Some([w, h]), _, _) if good(*w) && good(*h) => parts.push(format!("size = {{ {w}, {h} }}")),
+            (_, Some(k), _) if good(k) => parts.push(format!("scale = {k}")),
+            (_, _, Some(other)) if is_lua_name(other) && other != name => parts.push(format!("like = \"{other}\"")),
+            (None, None, None) => {}
             _ => {
                 warnings.push(format!("[sprites.{name}] has a value that cannot be used (sizes and scales are above 0, like names another image); the rule is ignored"));
                 continue;
             }
-        };
-        entries.push(format!("  {name} = {{ {body} }},"));
+        }
+        if let Some([x, y]) = rule.offset {
+            if !(x.is_finite() && y.is_finite()) {
+                warnings.push(format!("[sprites.{name}] has an offset that is not a number; the rule is ignored"));
+                continue;
+            }
+            parts.push(format!("offset = {{ {x}, {y} }}"));
+        }
+        if let Some(r) = rule.rotate {
+            if !r.is_finite() {
+                warnings.push(format!("[sprites.{name}] has a rotate that is not a number; the rule is ignored"));
+                continue;
+            }
+            parts.push(format!("rotate = {r}"));
+        }
+        if let Some(f) = &rule.flip {
+            if !matches!(f.as_str(), "x" | "y" | "xy") {
+                warnings.push(format!("[sprites.{name}] flip is \"x\", \"y\" or \"xy\"; the rule is ignored"));
+                continue;
+            }
+            parts.push(format!("flip = \"{f}\""));
+        }
+        if let Some([w, h]) = rule.draw_size {
+            if !(good(w) && good(h)) {
+                warnings.push(format!("[sprites.{name}] draw_size must be more than 0; the rule is ignored"));
+                continue;
+            }
+            parts.push(format!("draw_size = {{ {w}, {h} }}"));
+        }
+        entries.push(format!("  {name} = {{ {} }},", parts.join(", ")));
     }
     (format!("{{\n{}\n}}", entries.join("\n")), warnings)
 }
@@ -2311,6 +2500,7 @@ fn mod_meta(mod_id: &str, folder_name: &str, manifest: Option<&ModManifest>) -> 
             loader_index: 0,
             base: PathBuf::new(),
             overrides: m.overrides.clone(),
+            features: lower(&mut m.qm_features.iter()),
         },
         None => ModMeta {
             id: mod_id.to_lowercase(),
@@ -3304,10 +3494,115 @@ pub fn var_collisions(raw_patches: &[LoadedPatch]) -> Vec<VarCollision> {
     seen
 }
 
+/// A module name that more than one mod registers, as a warning. The game loads one file under
+/// a name (the last module registered), so the other mods' `require` gets that mod's code.
+pub fn module_collisions(raw_patches: &[LoadedPatch]) -> Vec<String> {
+    let mut by_name: Vec<(String, Vec<String>)> = Vec::new();
+    for (patch, _, path, _) in raw_patches {
+        let Patch::Module(m) = patch else { continue };
+        if m.disabled {
+            continue;
+        }
+        let mod_id = patch.mod_id().map_or_else(
+            || {
+                path.components()
+                    .next()
+                    .and_then(|c| c.as_os_str().to_str())
+                    .unwrap_or("unknown")
+                    .to_lowercase()
+            },
+            str::to_string,
+        );
+        match by_name.iter_mut().find(|(n, _)| *n == m.name) {
+            Some((_, mods)) => {
+                if !mods.contains(&mod_id) {
+                    mods.push(mod_id);
+                }
+            }
+            None => by_name.push((m.name.clone(), vec![mod_id])),
+        }
+    }
+    by_name
+        .into_iter()
+        .filter(|(_, mods)| mods.len() > 1)
+        .map(|(name, mods)| {
+            let last = mods.last().cloned().unwrap_or_default();
+            format!(
+                "module_name_shared: the module name '{name}' is registered by {}; the game loads one file under a name, so all of them get {last}'s. Give each mod's modules a name of its own, such as includes/<mod id>",
+                mods.join(", ")
+            )
+        })
+        .collect()
+}
+
 /// True for a top-level key of `qm.toml` that the game has no use for and that is no mistake:
 /// `[publish]` is read by the site builder.
 fn is_key_for_other_tools(key: &str) -> bool {
     key == "publish"
+}
+
+/// One problem in a patch file's text, for an editor: a byte range when the parser has one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PatchTextProblem {
+    pub span: Option<std::ops::Range<usize>>,
+    pub message: String,
+    /// False for a key the loader does not know: it is ignored, the file still loads.
+    pub is_error: bool,
+}
+
+/// What the loader would say about `content` as a patch file, without loading anything: the
+/// parse error (with its place), or the keys it would ignore.
+pub fn check_patch_text(content: &str) -> Vec<PatchTextProblem> {
+    let mut unknown: Vec<String> = Vec::new();
+    let parsed: std::result::Result<PatchFile, toml::de::Error> =
+        serde_ignored::deserialize(toml::Deserializer::new(content), |key: serde_ignored::Path| {
+            let key = key.to_string();
+            if !is_key_for_other_tools(&key) {
+                unknown.push(key);
+            }
+        });
+    match parsed {
+        Err(e) => {
+            let mut message = e.message().trim_end().to_string();
+            if message.contains("duplicate key") {
+                message.push_str(
+                    ". The same key is written twice in one patch: most often the line that starts the next patch ([[pattern]], or [[patches]] and [patches.<type>]) is missing above this line.",
+                );
+            }
+            vec![PatchTextProblem { span: e.span(), message, is_error: true }]
+        }
+        Ok(_) => unknown
+            .into_iter()
+            .map(|key| {
+                // The last part of the path is the key as written; its first place in the text.
+                let leaf = key.rsplit('.').next().unwrap_or(&key).to_string();
+                let span = find_key(content, &leaf).map(|at| at..at + leaf.len());
+                PatchTextProblem {
+                    span,
+                    message: format!("Unknown key `{key}`: the loader ignores it."),
+                    is_error: false,
+                }
+            })
+            .collect(),
+    }
+}
+
+/// The byte offset of `key` written as a TOML key at the start of a line (`key =` or `[key`).
+fn find_key(content: &str, key: &str) -> Option<usize> {
+    let mut offset = 0;
+    for line in content.split_inclusive('\n') {
+        let trimmed = line.trim_start();
+        let indent = line.len() - trimmed.len();
+        let bare = trimmed.trim_start_matches('[').trim_start_matches('"');
+        if let Some(rest) = bare.strip_prefix(key) {
+            let rest = rest.trim_start();
+            if rest.starts_with('=') || rest.starts_with(']') || rest.starts_with('"') || rest.starts_with('.') {
+                return Some(offset + indent + (trimmed.len() - bare.len()));
+            }
+        }
+        offset += line.len();
+    }
+    None
 }
 
 /// Parse TOML content into a PatchFile
@@ -4168,6 +4463,32 @@ payload = "-- hi"
     }
 
     #[test]
+    fn a_module_name_two_mods_register_is_named_with_both() {
+        let temp = TempDir::new().unwrap();
+        let mods = temp.path();
+        fs::create_dir_all(mods.join("qm")).unwrap();
+        for (dir, name) in [("a", "includes/example"), ("b", "includes/example"), ("c", "includes/c")] {
+            let m = mods.join(dir);
+            fs::create_dir_all(&m).unwrap();
+            fs::write(m.join("example.lua"), "return {}\n").unwrap();
+            fs::write(
+                m.join("qm.toml"),
+                format!(
+                    "[manifest]\nversion = \"1.0.0\"\n\n[[patches]]\n[patches.module]\nid = \"{dir}:module\"\n\
+                     source = \"example.lua\"\nname = \"{name}\"\nbefore = \"main.lua\"\n"
+                ),
+            )
+            .unwrap();
+        }
+
+        let raw = load_patches_new(mods).unwrap();
+        let shared = module_collisions(&raw);
+        assert_eq!(shared.len(), 1, "{shared:?}");
+        assert!(shared[0].contains("'includes/example'") && shared[0].contains("a, b"), "{}", shared[0]);
+        assert!(!shared[0].contains("includes/c'"), "{}", shared[0]);
+    }
+
+    #[test]
     fn get_parent_extracts_dir() {
         assert_eq!(get_parent("a/b/c.txt"), "a/b/");
         assert_eq!(get_parent("file.txt"), "");
@@ -4448,5 +4769,47 @@ payload = "-- hi"
         assert!(e.contains("'teleport'"), "{e}");
         let met = r#"{"id": "compat_z", "name": "Z", "version": "1.0.0", "qm_features": ["overrides"]}"#;
         assert!(before.with_extra_mod(met, &extra_toml).is_ok());
+    }
+}
+
+#[cfg(test)]
+mod check_patch_text_tests {
+    use super::check_patch_text;
+
+    #[test]
+    fn a_parse_error_has_its_place_and_unknown_keys_are_warnings() {
+        let bad = "[manifest]
+version = \"1.0.0\"
+
+[[pattern]]
+target = \"main.lua\"
+";
+        let p = check_patch_text(bad);
+        assert_eq!(p.len(), 1);
+        assert!(p[0].is_error && p[0].span.is_some(), "{p:?}");
+
+        let unknown = "[manifest]
+version = \"1.0.0\"
+
+[[pattern]]
+target = \"main.lua\"
+pattern = \"x\"
+position = \"after\"
+payload = \"y\"
+paylod = \"typo\"
+
+[publish]
+image = \"a.png\"
+";
+        let p = check_patch_text(unknown);
+        assert_eq!(p.len(), 1, "[publish] is not unknown: {p:?}");
+        assert!(!p[0].is_error && p[0].message.contains("paylod"));
+        let at = p[0].span.clone().unwrap();
+        assert_eq!(&unknown[at], "paylod");
+
+        let good = "[manifest]
+version = \"1.0.0\"
+";
+        assert!(check_patch_text(good).is_empty());
     }
 }

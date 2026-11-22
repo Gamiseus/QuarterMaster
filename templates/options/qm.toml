@@ -1,0 +1,21 @@
+#:schema https://gamiseus.github.io/schemas/qm.schema.json
+# Example Mod: loads options.lua, which reads the options in config.toml.
+# Wiki: Part 5, Module patches: https://gamiseus.github.io/wiki/adding-your-own-lua-files/#module-patches
+
+[manifest]
+version = "1.0.0"
+
+[[patches]]
+[patches.module]
+id = "example_mod:options_module"
+source = "options.lua"
+name = "includes/example_mod_options"
+before = "main.lua"
+
+[[patches]]
+[patches.pattern]
+id = "example_mod:options_require"
+target = "main.lua"
+pattern = 'require "includes/directives"'
+position = "after"
+payload = 'ExampleMod = require "includes/example_mod_options"'

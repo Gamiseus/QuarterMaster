@@ -581,6 +581,9 @@ fn json_schema_matches_vanilla_lists() {
         set(vanilla::POOLS.iter().map(|(t, _)| *t).collect())
     );
     assert_eq!(list("variant"), set(vanilla::ALL_VARIANTS.to_vec()));
+    let mut presets: Vec<&str> = vanilla::EXPLOSION_PRESETS.iter().map(|(n, _)| *n).collect();
+    presets.extend(vanilla::EXPLOSION_PRESETS.iter().map(|(_, t)| *t));
+    assert_eq!(list("explosion_preset"), set(presets));
     let mut vehicles: Vec<&str> = vanilla::vehicles(Side::Allied).to_vec();
     vehicles.extend(vanilla::vehicles(Side::Axis));
     assert_eq!(list("vanilla_vehicle"), set(vehicles));
@@ -611,4 +614,338 @@ fn one_faction_per_side() {
     );
     assert_eq!(skipped.len(), 2);
     assert!(skipped.iter().all(|s| s.contains("red_c")));
+}
+
+#[test]
+fn grenades_and_explosions() {
+    let dir = mod_with(&["weapons/limonka.png"]);
+    let ok = format!(
+        "{HEADER}\n[[explosions]]\nid = \"limonka_blast\"\nbased_on = \"frag\"\nfrag_radius = 150\nstun_time = 6\n\n\
+         [[ordnance]]\nid = \"limonka\"\nsprite = \"weapons/limonka.png\"\nexplosion = \"limonka_blast\"\nrange = 900\nspin = 0\n\
+         skill = {{ class = \"light\", slot = 2 }}\nreplaces_frag = true\n\n\
+         [[ordnance]]\nid = \"spare\"\nsprite = \"weapons/limonka.png\"\nexplosion = \"contact\"\n"
+    );
+    let r = check_faction(&ok, dir.path());
+    assert!(errors(&r).is_empty(), "{:?}", errors(&r));
+    let f = r.faction.unwrap();
+    assert_eq!(f.explosions[0].id, "red_army:limonka_blast");
+    assert_eq!(f.explosions[0].numbers.get("fragRadius"), Some(&150.0));
+    assert_eq!(f.explosions[0].numbers.get("stunTime"), Some(&6.0));
+    let g = &f.ordnance[0];
+    assert_eq!((g.id.as_str(), g.explosion.as_str()), ("red_army:limonka", "red_army:limonka_blast"));
+    assert_eq!((g.skill_class.as_deref(), g.skill_slot), (Some("light"), Some(2)));
+    assert!(g.replaces_frag);
+    assert_eq!(g.spin, Some(0.0));
+    assert_eq!(f.ordnance[1].explosion, "contactExplosion", "a preset by name is its game tag");
+    assert_eq!(f.ordnance[1].spin, None);
+
+    // spin is a thrown grenade's: never negative, left out for other kinds.
+    let spun = format!(
+        "{HEADER}\n[[ordnance]]\nid = \"neg\"\nsprite = \"weapons/limonka.png\"\nspin = -1\n\n\
+         [[ordnance]]\nid = \"rg\"\nkind = \"rifle\"\nsprite = \"weapons/limonka.png\"\nspin = 0\n"
+    );
+    let r = check_faction(&spun, dir.path());
+    assert!(errors(&r).iter().any(|m| m.contains("spin can't be negative")), "{:?}", errors(&r));
+    assert!(warnings(&r).iter().any(|m| m.contains("spin is for a thrown grenade")), "{:?}", warnings(&r));
+
+    let bad = format!(
+        "{HEADER}\n[[explosions]]\nid = \"Bad Id\"\n\n[[explosions]]\nid = \"x\"\nbased_on = \"nuke\"\n\n\
+         [[explosions]]\nid = \"y\"\nfrag_damage = -1\n\n\
+         [[ordnance]]\nid = \"a\"\nsprite = \"weapons/missing.png\"\n\n\
+         [[ordnance]]\nid = \"b\"\nsprite = \"weapons/limonka.png\"\nexplosion = \"nowhere\"\n\n\
+         [[ordnance]]\nid = \"c\"\nsprite = \"weapons/limonka.png\"\nskill = {{ class = \"wizard\", slot = 2 }}\n\n\
+         [[ordnance]]\nid = \"d\"\nsprite = \"weapons/limonka.png\"\nskill = {{ class = \"light\", slot = 0 }}\n\n\
+         [[ordnance]]\nid = \"e\"\nsprite = \"weapons/limonka.png\"\nreplaces_frag = true\n\n\
+         [[ordnance]]\nid = \"f\"\nsprite = \"weapons/limonka.png\"\nreplaces_frag = true\n\n\
+         [[ordnance]]\nid = \"e\"\nsprite = \"weapons/limonka.png\"\nrange = 0\n"
+    );
+    let e = errors(&check_faction(&bad, dir.path()));
+    let has = |s: &str| e.iter().any(|m| m.contains(s));
+    assert!(has("explosions[0] (Bad Id): id must use only"), "{e:?}");
+    assert!(has("based_on \"nuke\" is not one of the game's explosions"), "{e:?}");
+    assert!(has("frag_damage can't be negative"), "{e:?}");
+    assert!(has("weapons/missing.png\" not found"), "{e:?}");
+    assert!(has("explosion \"nowhere\" is not an explosion of this faction"), "{e:?}");
+    assert!(has("\"wizard\" is not a class"), "{e:?}");
+    assert!(has("slot must be 1 or more"), "{e:?}");
+
+    // A fourth skill: its own icon and the level it comes with.
+    let fourth = format!(
+        "{HEADER}\n[[ordnance]]\nid = \"g4\"\nname = \"Limonka\"\nsprite = \"weapons/limonka.png\"\n\
+         skill = {{ class = \"rifle\", slot = 4, unlock = 2, icon = \"weapons/limonka.png\" }}\n"
+    );
+    let r = check_faction(&fourth, dir.path());
+    assert!(errors(&r).is_empty(), "{:?}", errors(&r));
+    let g4 = &r.faction.unwrap().ordnance[0];
+    assert_eq!((g4.skill_slot, g4.skill_unlock), (Some(4), Some(2)));
+    assert_eq!(g4.skill_icon.as_deref(), Some("weapons/limonka.png"));
+    assert_eq!(g4.name.as_deref(), Some("Limonka"));
+    let bad4 = format!("{HEADER}\n[[ordnance]]\nid = \"g\"\nsprite = \"weapons/limonka.png\"\nskill = {{ class = \"rifle\", slot = 4, unlock = 0 }}\n");
+    assert!(errors(&check_faction(&bad4, dir.path())).iter().any(|m| m.contains("unlock must be 1 or more")));
+    // Any slot, any level: slot 7 at level 6, and the game's slot 2 at level 1 with its own icon.
+    let any = format!(
+        "{HEADER}\n[[ordnance]]\nid = \"g7\"\nsprite = \"weapons/limonka.png\"\nskill = {{ class = \"rifle\", slot = 7, unlock = 6 }}\n\n\
+         [[ordnance]]\nid = \"g2\"\nsprite = \"weapons/limonka.png\"\nskill = {{ class = \"rifle\", slot = 2, unlock = 1, icon = \"weapons/limonka.png\" }}\n"
+    );
+    let r = check_faction(&any, dir.path());
+    assert!(errors(&r).is_empty() && warnings(&r).is_empty(), "{:?} {:?}", errors(&r), warnings(&r));
+    let o = r.faction.unwrap().ordnance;
+    assert_eq!((o[0].skill_slot, o[0].skill_unlock), (Some(7), Some(6)));
+    assert_eq!((o[1].skill_unlock, o[1].skill_icon.as_deref()), (Some(1), Some("weapons/limonka.png")));
+    assert!(has("e already replaces the frag"), "{e:?}");
+    assert!(has("another [[ordnance]] entry has this id"), "{e:?}");
+
+    // Rifle grenades: the game's rifle grenade explosion unless set, and their own swap.
+    let rifle = format!(
+        "{HEADER}\n[[ordnance]]\nid = \"vog\"\nkind = \"rifle\"\nsprite = \"weapons/limonka.png\"\n\
+         skill = {{ class = \"rifle\", slot = 2 }}\nreplaces_rifle_grenade = true\n"
+    );
+    let r = check_faction(&rifle, dir.path());
+    assert!(errors(&r).is_empty(), "{:?}", errors(&r));
+    let rg = &r.faction.unwrap().ordnance[0];
+    assert_eq!((rg.kind.as_str(), rg.explosion.as_str()), ("rifle", "rifleGrenadeExplosion"));
+    assert!(rg.replaces_rifle_grenade && !rg.replaces_frag);
+    let thrown = format!("{HEADER}\n[[ordnance]]\nid = \"t\"\nsprite = \"weapons/limonka.png\"\n");
+    assert_eq!(check_faction(&thrown, dir.path()).faction.unwrap().ordnance[0].kind, "thrown");
+    let bad_rifle = format!(
+        "{HEADER}\n[[ordnance]]\nid = \"k\"\nkind = \"catapult\"\nsprite = \"weapons/limonka.png\"\n\n\
+         [[ordnance]]\nid = \"r1\"\nkind = \"rifle\"\nsprite = \"weapons/limonka.png\"\nreplaces_frag = true\n\n\
+         [[ordnance]]\nid = \"t1\"\nsprite = \"weapons/limonka.png\"\nreplaces_rifle_grenade = true\n\n\
+         [[ordnance]]\nid = \"r2\"\nkind = \"rifle\"\nsprite = \"weapons/limonka.png\"\nreplaces_rifle_grenade = true\n\n\
+         [[ordnance]]\nid = \"r3\"\nkind = \"rifle\"\nsprite = \"weapons/limonka.png\"\nreplaces_rifle_grenade = true\n"
+    );
+    let e = errors(&check_faction(&bad_rifle, dir.path()));
+    let has = |s: &str| e.iter().any(|m| m.contains(s));
+    assert!(has("kind must be \"thrown\""), "{e:?}");
+    assert!(has("replaces_frag is for kind = \"thrown\"; kind = \"rifle\""), "{e:?}");
+    assert!(has("replaces_rifle_grenade is for kind = \"rifle\"; kind = \"thrown\""), "{e:?}");
+    assert!(has("r2 already replaces the rifle grenade"), "{e:?}");
+
+    // Mortars and artillery: no sprite needed, the game's own explosion unless set, their
+    // rounds and spread, and their own swaps.
+    let heavy = format!(
+        "{HEADER}\n[[ordnance]]\nid = \"hvy\"\nkind = \"mortar\"\nshots = 4\nspread = 60\nreplaces_mortar = true\n\n\
+         [[ordnance]]\nid = \"katyusha\"\nkind = \"artillery\"\nshots = 12\nreplaces_artillery = true\n\n\
+         [[ordnance]]\nid = \"hvy2\"\nkind = \"mortar\"\nexplosion = \"heavy_mortar\"\n"
+    );
+    let r = check_faction(&heavy, dir.path());
+    assert!(errors(&r).is_empty(), "{:?}", errors(&r));
+    let gs = r.faction.unwrap().ordnance;
+    assert_eq!((gs[0].kind.as_str(), gs[0].explosion.as_str()), ("mortar", "mortarExplosion"));
+    assert_eq!((gs[0].shots, gs[0].spread, gs[0].sprite.as_deref()), (Some(4), Some(60.0), None));
+    assert!(gs[0].replaces_mortar && gs[1].replaces_artillery);
+    assert_eq!((gs[1].kind.as_str(), gs[1].explosion.as_str()), ("artillery", "artyExplosion"));
+    assert_eq!(gs[2].explosion, "hvyExplosion", "the heavy mortar preset");
+    let bad_heavy = format!(
+        "{HEADER}\n[[ordnance]]\nid = \"t\"\n\n\
+         [[ordnance]]\nid = \"m1\"\nkind = \"mortar\"\nshots = 0\nspread = -5\nreplaces_artillery = true\n\n\
+         [[ordnance]]\nid = \"m2\"\nkind = \"mortar\"\nreplaces_mortar = true\n\n\
+         [[ordnance]]\nid = \"m3\"\nkind = \"mortar\"\nreplaces_mortar = true\n"
+    );
+    let e = errors(&check_faction(&bad_heavy, dir.path()));
+    let has = |s: &str| e.iter().any(|m| m.contains(s));
+    assert!(has("a thrown grenade needs a sprite"), "{e:?}");
+    assert!(has("shots must be 1 or more"), "{e:?}");
+    assert!(has("spread can't be negative"), "{e:?}");
+    assert!(has("replaces_artillery is for kind = \"artillery\""), "{e:?}");
+    assert!(has("m2 already replaces the mortar"), "{e:?}");
+    let odd = format!("{HEADER}\n[[ordnance]]\nid = \"t\"\nsprite = \"weapons/limonka.png\"\nshots = 3\n");
+    assert!(warnings(&check_faction(&odd, dir.path())).iter().any(|m| m.contains("shots and spread are for a mortar")));
+
+    // Air strikes and drops: their own plane, a drop's contents and no explosion, the bombing
+    // and strafing swaps apart.
+    let air = format!(
+        "{HEADER}\n[[ordnance]]\nid = \"il2\"\nkind = \"airstrike\"\nplane = \"weapons/limonka.png\"\n\
+         replaces_bombing = true\n\n\
+         [[ordnance]]\nid = \"yak\"\nkind = \"airstrike\"\nexplosion = \"strafe\"\nreplaces_strafing = true\n\n\
+         [[ordnance]]\nid = \"lend_lease\"\nkind = \"drop\"\ncontents = [\"loot_ration\", \"loot_medPack\"]\n\
+         shots = 4\nreplaces_drop = true\n"
+    );
+    let r = check_faction(&air, dir.path());
+    assert!(errors(&r).is_empty() && warnings(&r).is_empty(), "{:?} {:?}", errors(&r), warnings(&r));
+    let gs = r.faction.unwrap().ordnance;
+    assert_eq!((gs[0].explosion.as_str(), gs[0].plane.as_deref()), ("bombExplosion", Some("weapons/limonka.png")));
+    assert!(gs[0].replaces_bombing && !gs[0].replaces_strafing);
+    assert_eq!(gs[1].explosion, "flakExplosion", "the strafe preset");
+    assert!(gs[1].replaces_strafing);
+    assert_eq!((gs[2].explosion.as_str(), gs[2].contents.len(), gs[2].shots), ("", 2, Some(4)));
+    assert!(gs[2].replaces_drop);
+    let bad_air = format!(
+        "{HEADER}\n[[ordnance]]\nid = \"d\"\nkind = \"drop\"\nexplosion = \"bomb\"\ncontents = [\"medkit\"]\nspread = 5\n\n\
+         [[ordnance]]\nid = \"t\"\nsprite = \"weapons/limonka.png\"\nplane = \"weapons/limonka.png\"\ncontents = [\"loot_ration\"]\n\n\
+         [[ordnance]]\nid = \"m\"\nkind = \"mortar\"\nreplaces_drop = true\n\n\
+         [[ordnance]]\nid = \"a1\"\nkind = \"airstrike\"\nreplaces_bombing = true\n\n\
+         [[ordnance]]\nid = \"a2\"\nkind = \"airstrike\"\nreplaces_bombing = true\n"
+    );
+    let r = check_faction(&bad_air, dir.path());
+    let (e, w) = (errors(&r), warnings(&r));
+    let has = |l: &[String], s: &str| l.iter().any(|m| m.contains(s));
+    assert!(has(&w, "a drop has no explosion"), "{w:?}");
+    assert!(has(&w, "\"medkit\" is not one of the game's loot names"), "{w:?}");
+    assert!(has(&w, "a drop lands on the spot"), "{w:?}");
+    assert!(has(&w, "plane is for an air strike or a drop"), "{w:?}");
+    assert!(has(&w, "contents are for a drop"), "{w:?}");
+    assert!(has(&e, "replaces_drop is for kind = \"drop\"; kind = \"mortar\" has replaces_mortar"), "{e:?}");
+    assert!(has(&e, "a1 already replaces the bombing runs"), "{e:?}");
+
+    // On the Axis side a class skill is never used: a warning.
+    let axis = "schema = 1\nid = \"axis_army\"\nname = \"Axis Army\"\nreplaces = \"axis\"\n\n\
+         [[ordnance]]\nid = \"g\"\nsprite = \"weapons/limonka.png\"\nskill = { class = \"light\", slot = 2 }\n";
+    let r = check_faction(axis, dir.path());
+    assert!(errors(&r).is_empty(), "{:?}", errors(&r));
+    assert!(warnings(&r).iter().any(|w| w.contains("never used")), "{:?}", warnings(&r));
+}
+
+#[test]
+fn skills_change_replace_move_remove_and_add() {
+    let dir = mod_with(&["weapons/limonka.png", "icons/flare.png"]);
+    let ok = format!(
+        "{HEADER}\n[[ordnance]]\nid = \"limonka\"\nsprite = \"weapons/limonka.png\"\n\n\
+         [[skills]]\nclass = \"rifle\"\nslot = 1\nname = \"Flare\"\ndescription = \"light up the night\"\nicon = \"icons/flare.png\"\ncooldown = 30\n\n\
+         [[skills]]\nclass = \"rifle\"\nslot = 3\ngame = \"light:3\"\n\n\
+         [[skills]]\nclass = \"light\"\nslot = 2\nremove = true\n\n\
+         [[skills]]\nclass = \"light\"\nslot = 3\nunlock = 1\n\n\
+         [[skills]]\nclass = \"medic\"\nslot = 4\ngame = 1\nunlock = 4\n\n\
+         [[skills]]\nclass = \"medic\"\nslot = 5\nordnance = \"limonka\"\nunlock = 5\n"
+    );
+    let r = check_faction(&ok, dir.path());
+    assert!(errors(&r).is_empty() && warnings(&r).is_empty(), "{:?} {:?}", errors(&r), warnings(&r));
+    let s = r.faction.unwrap().skills;
+    assert_eq!(s.len(), 6);
+    assert_eq!((s[0].name.as_deref(), s[0].icon.as_deref(), s[0].cooldown), (Some("Flare"), Some("icons/flare.png"), Some(30.0)));
+    assert_eq!((s[1].game_class.as_deref(), s[1].game_slot), (Some("light"), Some(3)));
+    assert!(s[2].remove);
+    assert_eq!(s[3].unlock, Some(1));
+    assert_eq!((s[4].game_class.as_deref(), s[4].game_slot, s[4].unlock), (Some("medic"), Some(1), Some(4)));
+    assert_eq!(s[5].ordnance.as_deref(), Some("red_army:limonka"));
+
+    let bad = format!(
+        "{HEADER}\n[[ordnance]]\nid = \"g\"\nsprite = \"weapons/limonka.png\"\nskill = {{ class = \"rifle\", slot = 2 }}\n\n\
+         [[skills]]\nclass = \"wizard\"\nslot = 1\n\n\
+         [[skills]]\nclass = \"rifle\"\nslot = 0\n\n\
+         [[skills]]\nclass = \"rifle\"\nslot = 2\nname = \"x\"\n\n\
+         [[skills]]\nclass = \"rifle\"\nslot = 4\n\n\
+         [[skills]]\nclass = \"rifle\"\nslot = 5\ngame = 1\nremove = true\n\n\
+         [[skills]]\nclass = \"rifle\"\nslot = 6\ngame = \"light:9\"\n\n\
+         [[skills]]\nclass = \"rifle\"\nslot = 7\nordnance = \"nowhere\"\n\n\
+         [[skills]]\nclass = \"rifle\"\nslot = 8\ngame = 1\nunlock = 0\n\n\
+         [[skills]]\nclass = \"rifle\"\nslot = 9\ngame = \"comms:1\"\n\n\
+         [[skills]]\nclass = \"rifle\"\nslot = 1\nremove = true\ncooldown = 5\n"
+    );
+    let r = check_faction(&bad, dir.path());
+    let (e, w) = (errors(&r), warnings(&r));
+    let has = |l: &[String], s: &str| l.iter().any(|m| m.contains(s));
+    assert!(has(&e, "\"wizard\" is not a class"), "{e:?}");
+    assert!(has(&e, "slot must be 1 or more"), "{e:?}");
+    assert!(has(&e, "already takes rifle skill 2"), "{e:?}");
+    assert!(has(&e, "skill 4 is a new skill; it needs game or ordnance"), "{e:?}");
+    assert!(has(&e, "game, ordnance and remove are one or the other"), "{e:?}");
+    assert!(has(&e, "a game skill is 1, 2 or 3"), "{e:?}");
+    assert!(has(&e, "\"nowhere\" is not an [[ordnance]] entry"), "{e:?}");
+    assert!(has(&e, "unlock must be 1 or more"), "{e:?}");
+    assert!(has(&w, "the radio operator's calls go through only for radio operators"), "{w:?}");
+    assert!(has(&w, "a removed skill shows nothing"), "{w:?}");
+}
+
+
+#[test]
+fn rank_names() {
+    let dir = mod_with(&[]);
+    let ok = format!(
+        "{HEADER}\n[ranks]\nsoldier = [\"Gvardeyets\", \"Gv. Yefreitor\", \"Gv. Ml. Serzhant\", \"Gv. Serzhant\"]\n\
+         officer = [\"Ml. Leytenant\"]\nrecruit = \"Prizyvnik\"\n"
+    );
+    let r = check_faction(&ok, dir.path());
+    assert!(errors(&r).is_empty(), "{:?}", errors(&r));
+    let ranks = r.faction.unwrap().ranks.unwrap();
+    assert_eq!(ranks.soldier.len(), 4);
+    assert_eq!(ranks.officer, vec!["Ml. Leytenant".to_string()]);
+    assert_eq!(ranks.recruit.as_deref(), Some("Prizyvnik"));
+    assert_eq!(ranks.cadet, None);
+    let none = check_faction(HEADER, dir.path());
+    assert!(none.faction.unwrap().ranks.is_none());
+
+    let bad = format!("{HEADER}\n[ranks]\nsoldier = [\"a\", \"b\", \"c\", \"d\", \"e\"]\nofficer = [\" \"]\ncadet = \"\"\n");
+    let e = errors(&check_faction(&bad, dir.path()));
+    let has = |s: &str| e.iter().any(|m| m.contains(s));
+    assert!(has("ranks.soldier: the game has four ranks"), "{e:?}");
+    assert!(has("ranks.officer: a rank name can't be empty"), "{e:?}");
+    assert!(has("ranks.cadet: a rank name can't be empty"), "{e:?}");
+    let unknown = format!("{HEADER}\n[ranks]\nprivate = \"x\"\n");
+    assert!(!errors(&check_faction(&unknown, dir.path())).is_empty(), "an unknown key is an error");
+}
+
+#[test]
+fn sprite_sizes() {
+    let dir = mod_with(&["misc/rank_1.png", "misc/flag.png"]);
+    let ok = format!(
+        "{HEADER}\n[sprites]\nflag = \"misc/flag.png\"\nrank_1 = {{ file = \"misc/rank_1.png\", size = [18, 22] }}\n\
+         spec_rifle = {{ scale = 0.5 }}\nrank_2 = {{ like = \"rank_1\" }}\nrank_3 = {{ file = \"misc/rank_1.png\" }}\n"
+    );
+    let r = check_faction(&ok, dir.path());
+    assert!(errors(&r).is_empty(), "{:?}", errors(&r));
+    let f = r.faction.unwrap();
+    assert_eq!(f.sprites.get("flag").map(String::as_str), Some("misc/flag.png"));
+    assert_eq!(f.sprites.get("rank_1").map(String::as_str), Some("misc/rank_1.png"));
+    assert_eq!(f.sprites.get("rank_3").map(String::as_str), Some("misc/rank_1.png"), "a table with only a file");
+    assert!(!f.sprites.contains_key("spec_rifle"), "a size alone replaces no file");
+    assert_eq!(f.sprite_sizes.get("rank_1").and_then(|s| s.size), Some([18.0, 22.0]));
+    assert_eq!(f.sprite_sizes.get("spec_rifle").and_then(|s| s.scale), Some(0.5));
+    assert_eq!(f.sprite_sizes.get("rank_2").and_then(|s| s.like.clone()).as_deref(), Some("rank_1"));
+    assert!(!f.sprite_sizes.contains_key("flag") && !f.sprite_sizes.contains_key("rank_3"));
+
+    let bad = format!(
+        "{HEADER}\n[sprites]\na = {{ size = [18, 22], scale = 2.0 }}\nb = {{}}\nc = {{ size = [0, 22] }}\n\
+         d = {{ like = \"d\" }}\ne = {{ file = \"misc/missing.png\", size = [1, 1] }}\n"
+    );
+    let e = errors(&check_faction(&bad, dir.path()));
+    let has = |s: &str| e.iter().any(|m| m.contains(s));
+    assert!(has("sprites.a: give one of size, scale and like"), "{e:?}");
+    assert!(has("sprites.b: needs a file, a size or a place"), "{e:?}");
+    assert!(has("sprites.c: sizes and scales must be more than 0"), "{e:?}");
+    assert!(has("sprites.d: like must name another image"), "{e:?}");
+    assert!(has("misc/missing.png"), "{e:?}");
+}
+
+#[test]
+fn sprite_places() {
+    let dir = mod_with(&["misc/rank_1.png"]);
+    let ok = format!(
+        "{HEADER}\n[sprites]\nrank_1 = {{ file = \"misc/rank_1.png\", offset = [3, -2], rotate = 90, flip = \"x\" }}\n\
+         spec_rifle = {{ scale = 0.5, rotate = -12.5 }}\nflag = {{ flip = \"xy\" }}\nrank_2 = {{ draw_size = [20, 24] }}\n"
+    );
+    let r = check_faction(&ok, dir.path());
+    assert!(errors(&r).is_empty(), "{:?}", errors(&r));
+    let f = r.faction.unwrap();
+    let one = f.sprite_sizes.get("rank_1").expect("a file with a place has a rule");
+    assert_eq!((one.offset, one.rotate, one.flip.as_deref(), one.size), (Some([3.0, -2.0]), Some(90.0), Some("x"), None));
+    assert_eq!(f.sprites.get("rank_1").map(String::as_str), Some("misc/rank_1.png"));
+    let rifle = f.sprite_sizes.get("spec_rifle").unwrap();
+    assert_eq!((rifle.scale, rifle.rotate), (Some(0.5), Some(-12.5)));
+    assert_eq!(f.sprite_sizes.get("flag").and_then(|s| s.flip.clone()).as_deref(), Some("xy"), "a place alone");
+    assert!(!f.sprites.contains_key("flag"));
+    assert_eq!(f.sprite_sizes.get("rank_2").and_then(|s| s.draw_size), Some([20.0, 24.0]), "a draw size alone");
+
+    let bad = format!("{HEADER}\n[sprites]\na = {{ flip = \"z\" }}\n");
+    let e = errors(&check_faction(&bad, dir.path()));
+    assert!(e.iter().any(|m| m.contains("sprites.a: flip is \"x\", \"y\" or \"xy\", not \"z\"")), "{e:?}");
+    for shape in ["offset = [1]", "rotate = \"left\"", "draw_size = [0, 4]"] {
+        let bad = format!("{HEADER}\n[sprites]\nb = {{ {shape} }}\n");
+        assert!(!errors(&check_faction(&bad, dir.path())).is_empty(), "{shape} is refused");
+    }
+}
+
+#[test]
+fn sarge_title() {
+    let dir = mod_with(&[]);
+    let ok = format!("{HEADER}\n[ranks]\nsarge = \"Starshina\"\n");
+    let r = check_faction(&ok, dir.path());
+    assert!(errors(&r).is_empty() && warnings(&r).is_empty(), "{:?} {:?}", errors(&r), warnings(&r));
+    assert_eq!(r.faction.unwrap().ranks.unwrap().sarge.as_deref(), Some("Starshina"));
+    let empty = format!("{HEADER}\n[ranks]\nsarge = \"\"\n");
+    assert!(errors(&check_faction(&empty, dir.path())).iter().any(|m| m.contains("ranks.sarge: a rank name can't be empty")));
+    let axis = "schema = 1\nid = \"heer\"\nname = \"Heer\"\nreplaces = \"axis\"\n\n[ranks]\nsarge = \"Feldwebel\"\n";
+    let r = check_faction(axis, dir.path());
+    assert!(warnings(&r).iter().any(|m| m.contains("the Sarge is the Allies'")), "{:?}", warnings(&r));
+    assert_eq!(r.faction.unwrap().ranks.unwrap().sarge, None);
 }

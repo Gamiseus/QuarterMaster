@@ -478,6 +478,32 @@ fn profile_dir_name(p_file: &Path) -> String {
 }
 
 /// Renames `file` to `<name>.unreadable-<n>` (the first free n) and returns the new path.
+/// The name a slot gets back when its sidecar is lost: the default slot's own name, else its id
+/// in words (`eastern-front` -> `Eastern Front`).
+fn recovered_slot_name(id: &str) -> String {
+    if id == "default" {
+        return "Primary Campaign & Classic Save".to_string();
+    }
+    let words: Vec<String> = id
+        .split(['-', '_', ' '])
+        .filter(|w| !w.is_empty())
+        .map(|w| {
+            let mut c = w.chars();
+            c.next().map(|f| f.to_uppercase().collect::<String>() + c.as_str()).unwrap_or_default()
+        })
+        .collect();
+    if words.is_empty() { id.to_string() } else { words.join(" ") }
+}
+
+/// A slot id that is a plain folder name inside `saves/`.
+fn is_slot_folder_name(id: &str) -> bool {
+    !id.is_empty()
+        && !id.starts_with('.')
+        && id != "."
+        && id != ".."
+        && !id.contains(['/', '\\', ':', '*', '?', '"', '<', '>', '|'])
+}
+
 fn set_aside(file: &Path) -> std::io::Result<PathBuf> {
     let name = file.file_name().map(|f| f.to_string_lossy().to_string()).unwrap_or_default();
     let mut n = 1;
@@ -1082,22 +1108,86 @@ impl QuarterMasterPaths {
 
     pub fn list_save_profiles(&self) -> Vec<SaveProfile> {
         let mut profiles = Vec::new();
+        let mut orphans = Vec::new();
         if let Ok(entries) = fs::read_dir(&self.saves_dir) {
             for entry in entries.filter_map(|e| e.ok()) {
-                let s_file = entry.path().join("save_profile.json");
-                if let Ok(raw) = fs::read_to_string(&s_file) {
-                    if let Ok(mut sp) = serde_json::from_str::<SaveProfile>(&raw) {
-                        sp.backups = list_backups_in_dir(&entry.path().join("backups"));
+                let dir = entry.path();
+                if !dir.is_dir() {
+                    continue;
+                }
+                let s_file = dir.join("save_profile.json");
+                let read = fs::read_to_string(&s_file)
+                    .ok()
+                    .and_then(|raw| serde_json::from_str::<SaveProfile>(&raw).ok());
+                match read {
+                    Some(mut sp) => {
+                        sp.backups = list_backups_in_dir(&dir.join("backups"));
                         // Older sidecars only had `is_vanilla_clean`.
                         sp.locked_vanilla |= sp.is_vanilla_clean;
                         sp.builtin = sp.id == VANILLA_ID;
                         profiles.push(sp);
                     }
+                    None => orphans.push(dir),
                 }
             }
         }
 
-        if profiles.is_empty() {
+        // A slot folder whose save_profile.json is missing or unreadable is still a slot, with
+        // the saves in it: a sidecar is made for it, and an unreadable one is kept beside it.
+        for dir in orphans {
+            let Some(id) = dir.file_name().and_then(|n| n.to_str()).map(str::to_string) else {
+                continue;
+            };
+            let is_slot = dir.join("active").is_dir() || dir.join("backups").is_dir();
+            if id == VANILLA_ID || id.starts_with('.') || !is_slot || profiles.iter().any(|s| s.id == id) {
+                continue;
+            }
+            let file = dir.join("save_profile.json");
+            if file.exists() && set_aside(&file).is_err() {
+                continue;
+            }
+            let mut name = recovered_slot_name(&id);
+            if profiles.iter().any(|s| s.name.eq_ignore_ascii_case(&name)) {
+                name = format!("{name} (recovered)");
+            }
+            let modded = fs::read(dir.join("active").join("saveMNB3.lua"))
+                .is_ok_and(|b| b.windows(8).any(|w| w == b"_qm_meta"));
+            let mut sp = SaveProfile {
+                id: id.clone(),
+                name,
+                is_vanilla_clean: false,
+                tags: SaveTags { modded, edited: false },
+                locked_vanilla: false,
+                builtin: false,
+                created_at: jiff::Zoned::now().to_string(),
+                last_played_at: None,
+                active_mods_fingerprint: HashMap::new(),
+                backups: Vec::new(),
+            };
+            if self.save_save_profile(&sp).is_ok() {
+                sp.backups = list_backups_in_dir(&dir.join("backups"));
+                // A slot that lost its saves but kept backups gets its newest backup back (into
+                // the slot only: the game may be running on the live folder).
+                let active = dir.join("active");
+                let has_save = ["saveMNB3.lua", "saveMNB2.lua", "saveMNBclassic.lua"]
+                    .iter()
+                    .any(|f| active.join(f).is_file());
+                if let (false, Some(newest)) = (has_save, sp.backups.first()) {
+                    let snap = dir.join("backups").join(&newest.id);
+                    for fname in SAVE_FILES {
+                        let src = snap.join(fname);
+                        if src.is_file() {
+                            let _ = fs::copy(&src, active.join(fname));
+                        }
+                    }
+                }
+                profiles.push(sp);
+            }
+        }
+
+        // The default profile links the `default` slot. It is made when the player has no slot
+        // of their own: in a new data folder the built-in Vanilla slot may be written first.
+        if !profiles.iter().any(|s| s.id != VANILLA_ID) {
             let now = jiff::Zoned::now().to_string();
             let default_save = SaveProfile {
                 id: "default".to_string(),
@@ -1126,10 +1216,6 @@ impl QuarterMasterPaths {
                 }
             }
             profiles.push(default_save);
-
-            let vanilla_save = builtin_vanilla_slot(None);
-            let _ = self.save_save_profile(&vanilla_save);
-            profiles.push(vanilla_save);
         }
         // The Vanilla slot is always the built-in one, locked as vanilla.
         let existing = profiles.iter().position(|s| s.id == VANILLA_ID);
@@ -1712,8 +1798,24 @@ impl QuarterMasterPaths {
 
         let is_tainting_vanilla_save =
             (sp.locked_vanilla || sp.is_vanilla_clean) && !profile.enabled_mods.is_empty();
+        // The mods the slot was last played with, and the ones its save is stamped with: a
+        // save made with a mod this profile does not load may need that mod's weapons and art.
+        let mut used: BTreeMap<String, String> = sp
+            .active_mods_fingerprint
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+        if let Some(meta) = self
+            .slot_save_file(&sp.id)
+            .and_then(|f| SaveSummary::from_path(&f).ok())
+            .and_then(|s| s.qm_meta)
+        {
+            for (id, ver) in meta.mods {
+                used.entry(id).or_insert(ver);
+            }
+        }
         let mut missing_mods = Vec::new();
-        for (mod_id, ver) in &sp.active_mods_fingerprint {
+        for (mod_id, ver) in &used {
             if !profile.enabled_mods.contains(mod_id) {
                 missing_mods.push((mod_id.clone(), ver.clone()));
             }
@@ -1760,10 +1862,33 @@ impl QuarterMasterPaths {
     ///
     /// A profile with no slot ("New slot on first launch") gets an empty slot named after it.
     /// Returns the new slot's name when one was created.
+    /// A profile linked to a slot that does not exist gets that slot, empty, under the same id.
     pub fn ensure_linked_slot(&self, profile_id: &str) -> Result<Option<String>, String> {
         let mut profile = self.get_profile(profile_id)?;
-        if !profile.linked_save_profile_id.trim().is_empty() {
-            return Ok(None);
+        let linked = profile.linked_save_profile_id.trim().to_string();
+        if !linked.is_empty() {
+            let slots = self.list_save_profiles();
+            if slots.iter().any(|s| s.id == linked) || !is_slot_folder_name(&linked) {
+                return Ok(None);
+            }
+            let mut name = recovered_slot_name(&linked);
+            if slots.iter().any(|s| s.name.eq_ignore_ascii_case(&name)) {
+                name = format!("{} ({})", name, profile.name);
+            }
+            let sp = SaveProfile {
+                id: linked,
+                name,
+                is_vanilla_clean: false,
+                tags: SaveTags::default(),
+                locked_vanilla: false,
+                builtin: false,
+                created_at: jiff::Zoned::now().to_string(),
+                last_played_at: None,
+                active_mods_fingerprint: HashMap::new(),
+                backups: Vec::new(),
+            };
+            self.save_save_profile(&sp)?;
+            return Ok(Some(sp.name));
         }
         let taken: Vec<String> = self.list_save_profiles().into_iter().map(|s| s.name.to_lowercase()).collect();
         let mut name = profile.name.clone();
@@ -2048,7 +2173,10 @@ impl QuarterMasterPaths {
         // strictly by the qm-service game-folder transactions (`deploy_profile_to_game`),
         // keeping the Steam game install completely vanilla during regular profile management.
 
-        // 4. Swap save profile if needed and sync per-profile `saveModSettings.lua`
+        // 4. Swap save profile if needed and sync per-profile `saveModSettings.lua`.
+        // Options changed in the game's Mod Settings menu were written to the save folder's
+        // copy only: keep them in the profile that last ran before its copy replaces them.
+        self.capture_live_mod_settings(&settings.active_profile_id);
         self.switch_save_profile_internal(
             &settings.active_save_profile_id,
             &profile.linked_save_profile_id,
@@ -2082,6 +2210,37 @@ impl QuarterMasterPaths {
             plan: load_order_plan,
             warnings,
         })
+    }
+
+    /// The game writes `saveModSettings.lua` in the save folder when options change in its
+    /// Mod Settings menu, while each profile keeps its own copy that activation copies in.
+    /// Copies the save folder's file into `profile_id`'s copy when it is newer and differs,
+    /// so options changed in the game are kept. A file that does not read as mod settings is
+    /// left alone. True when it copied.
+    pub fn capture_live_mod_settings(&self, profile_id: &str) -> bool {
+        let Some(live_dir) = self.load_settings().save_dir_path else {
+            return false;
+        };
+        let live = live_dir.join("saveModSettings.lua");
+        let profile_dir = self.profiles_dir.join(profile_id);
+        if profile_id.is_empty() || !profile_dir.is_dir() || !live.is_file() {
+            return false;
+        }
+        let own = profile_dir.join("saveModSettings.lua");
+        let modified = |p: &Path| fs::metadata(p).and_then(|m| m.modified()).ok();
+        let newer = match (modified(&live), modified(&own)) {
+            (Some(l), Some(o)) => l > o,
+            (Some(_), None) => !own.exists(),
+            _ => false,
+        };
+        // The launcher writes both copies, so the same text means nothing changed in game.
+        if !newer || fs::read(&live).ok() == fs::read(&own).ok() {
+            return false;
+        }
+        if ModSettingsStore::from_path(&live).is_err() {
+            return false;
+        }
+        fs::copy(&live, &own).is_ok()
     }
 
     fn switch_save_profile_internal(
@@ -2317,13 +2476,14 @@ pub fn create_dir_junction_or_copy(target: &Path, link: &Path) -> Result<(), Str
 
     #[cfg(windows)]
     {
+        // mklink takes only backslashes; a path from QM_DATA_DIR may have forward slashes.
         let status = crate::winproc::system_command("cmd")
             .args([
                 "/C",
                 "mklink",
                 "/J",
-                &link.to_string_lossy(),
-                &abs_target.to_string_lossy(),
+                &link.to_string_lossy().replace('/', "\\"),
+                &abs_target.to_string_lossy().replace('/', "\\"),
             ])
             .output();
         if let Ok(out) = status {
@@ -2569,14 +2729,48 @@ pub fn is_game_running() -> Option<u32> {
 
 /// Captures any untracked runtime-generated files inside `profile_mods_dir` (outside mod junctions and `qm/`)
 /// into the profile's MO2 `overwrite/` bucket before `Mods/` is rebuilt.
+/// Copies what the game wrote into a profile's `Mods/` into its `overwrite/` bucket. The
+/// launcher's own entries stay out: `qm/`, the mods it linked, and a mod it had to copy (when a
+/// junction could not be made) except for the files changed after that launch was staged, which
+/// the game wrote. Without that, a copy would come back from `overwrite/` over the mod's newer
+/// files at every later launch.
 fn capture_untracked_into_overwrite(profile_mods_dir: &Path, overwrite_dir: &Path) {
     let Ok(entries) = fs::read_dir(profile_mods_dir) else {
         return;
     };
+    // The mods the last launch placed, and when it finished placing them.
+    let plan_file = profile_mods_dir.join("qm").join("load-order.json");
+    let placed: HashSet<String> = fs::read_to_string(&plan_file)
+        .ok()
+        .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
+        .and_then(|v| v.get("enabled_mods")?.as_array().cloned())
+        .map(|ids| ids.iter().filter_map(|x| x.as_str().map(str::to_string)).collect())
+        .unwrap_or_default();
+    let placed_at = fs::metadata(&plan_file).and_then(|m| m.modified()).ok();
     for entry in entries.filter_map(|e| e.ok()) {
         let p = entry.path();
         let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
         if name == "qm" || is_reparse_point(&p) {
+            continue;
+        }
+        if p.is_dir() && placed.contains(name) {
+            let Some(since) = placed_at else {
+                continue;
+            };
+            for f in walkdir::WalkDir::new(&p).into_iter().filter_map(|e| e.ok()) {
+                let changed = f.file_type().is_file()
+                    && f.metadata().ok().and_then(|m| m.modified().ok()).is_some_and(|t| t > since);
+                if !changed {
+                    continue;
+                }
+                if let Ok(rel) = f.path().strip_prefix(&p) {
+                    let dest = overwrite_dir.join(name).join(rel);
+                    if let Some(parent) = dest.parent() {
+                        let _ = fs::create_dir_all(parent);
+                    }
+                    let _ = fs::copy(f.path(), &dest);
+                }
+            }
             continue;
         }
         let dest = overwrite_dir.join(name);
@@ -2613,6 +2807,35 @@ fn detect_steam_cloud_warning(settings: &crate::storage::LauncherSettings) -> Op
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    #[test]
+    fn overwrite_keeps_what_the_game_wrote_not_the_launchers_copies() {
+        let temp = tempdir().unwrap();
+        let mods = temp.path().join("Mods");
+        let over = temp.path().join("overwrite");
+        // A mod the launcher had to copy, staged before the plan was written.
+        fs::create_dir_all(mods.join("mod_a")).unwrap();
+        fs::write(mods.join("mod_a").join("qm.toml"), "old copy").unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(30));
+        fs::create_dir_all(mods.join("qm")).unwrap();
+        fs::write(
+            mods.join("qm").join("load-order.json"),
+            r#"{"profile_id":"p","generated_at":"now","enabled_mods":["mod_a"]}"#,
+        )
+        .unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(30));
+        // What the game wrote while it ran: inside the copy, and a folder of its own.
+        fs::write(mods.join("mod_a").join("saved.dat"), "game data").unwrap();
+        fs::create_dir_all(mods.join("from_game")).unwrap();
+        fs::write(mods.join("from_game").join("x.txt"), "x").unwrap();
+
+        capture_untracked_into_overwrite(&mods, &over);
+
+        assert!(over.join("from_game").join("x.txt").is_file());
+        assert!(over.join("mod_a").join("saved.dat").is_file());
+        assert!(!over.join("mod_a").join("qm.toml").exists(), "the launcher's copy stays out");
+        assert!(!over.join("qm").exists());
+    }
 
     #[test]
     fn test_create_and_clone_profile() {
@@ -3335,5 +3558,119 @@ mod tests {
             .filter(|n| n != "profile.json")
             .collect();
         assert!(left.iter().all(|n| !n.ends_with(".tmp") && !n.contains("unreadable")), "{left:?}");
+    }
+
+    #[test]
+    fn the_default_slot_is_made_even_when_the_vanilla_slot_came_first() {
+        let temp = tempdir().unwrap();
+        let paths = QuarterMasterPaths::resolve(Some(temp.path()));
+        // A new data folder where the built-in files are written before anything lists slots.
+        paths.repair_vanilla_builtins().unwrap();
+        let ids: Vec<String> = paths.list_save_profiles().into_iter().map(|s| s.id).collect();
+        assert_eq!(ids, ["default", VANILLA_ID]);
+    }
+
+    #[test]
+    fn a_slot_folder_without_its_sidecar_comes_back_with_its_saves() {
+        let (_t, paths) = paths_with_default();
+        paths.list_save_profiles();
+        // Saves left in slot folders with no readable save_profile.json.
+        for (id, sidecar) in [("default", None), ("eastern-front", Some("{broken"))] {
+            let active = paths.saves_dir.join(id).join("active");
+            fs::create_dir_all(&active).unwrap();
+            fs::write(active.join("saveMNB3.lua"), format!("{id} campaign _qm_meta")).unwrap();
+            let file = paths.saves_dir.join(id).join("save_profile.json");
+            match sidecar {
+                Some(text) => fs::write(&file, text).unwrap(),
+                None => {
+                    let _ = fs::remove_file(&file);
+                }
+            }
+        }
+        // A stray empty folder is not a slot.
+        fs::create_dir_all(paths.saves_dir.join("stray")).unwrap();
+
+        let slots = paths.list_save_profiles();
+        let ids: Vec<&str> = slots.iter().map(|s| s.id.as_str()).collect();
+        assert_eq!(ids, ["default", "eastern-front", VANILLA_ID]);
+        let ef = slots.iter().find(|s| s.id == "eastern-front").unwrap();
+        assert_eq!(ef.name, "Eastern Front");
+        assert!(ef.tags.modded, "the save's QuarterMaster stamp marks it modded");
+        assert_eq!(slots[0].name, "Primary Campaign & Classic Save");
+        // The saves are where they were, and the broken sidecar is kept beside the new one.
+        let dir = paths.saves_dir.join("eastern-front");
+        assert_eq!(fs::read_to_string(dir.join("active/saveMNB3.lua")).unwrap(), "eastern-front campaign _qm_meta");
+        assert_eq!(fs::read_to_string(dir.join("save_profile.json.unreadable-1")).unwrap(), "{broken");
+        assert!(dir.join("save_profile.json").is_file());
+        assert_eq!(fs::read_to_string(paths.saves_dir.join("default/active/saveMNB3.lua")).unwrap(), "default campaign _qm_meta");
+    }
+
+    #[test]
+    fn a_recovered_slot_with_no_saves_gets_its_newest_backup_back() {
+        let (_t, paths) = paths_with_default();
+        paths.list_save_profiles();
+        let dir = paths.saves_dir.join("campaign-two");
+        fs::create_dir_all(dir.join("active")).unwrap();
+        for (id, when, text) in [("b1", "2026-11-01T10:00:00Z", "older"), ("b2", "2026-11-20T10:00:00Z", "newest")] {
+            let snap = dir.join("backups").join(id);
+            fs::create_dir_all(&snap).unwrap();
+            fs::write(snap.join("saveMNB3.lua"), text).unwrap();
+            let entry = SaveBackupEntry {
+                id: id.into(),
+                timestamp: when.into(),
+                label: "Auto".into(),
+                path: snap.clone(),
+                size_bytes: text.len() as u64,
+            };
+            fs::write(snap.join("backup_meta.json"), serde_json::to_string(&entry).unwrap()).unwrap();
+        }
+        let slot = paths.list_save_profiles().into_iter().find(|s| s.id == "campaign-two").expect("recovered");
+        assert_eq!(slot.backups.len(), 2);
+        assert_eq!(fs::read_to_string(dir.join("active/saveMNB3.lua")).unwrap(), "newest");
+        // A slot that has its saves keeps them.
+        fs::write(dir.join("active/saveMNB3.lua"), "played since").unwrap();
+        fs::remove_file(dir.join("save_profile.json")).unwrap();
+        paths.list_save_profiles();
+        assert_eq!(fs::read_to_string(dir.join("active/saveMNB3.lua")).unwrap(), "played since");
+    }
+
+    #[test]
+    fn a_save_stamped_with_a_mod_the_profile_does_not_load_is_reported() {
+        let (_t, paths) = paths_with_default();
+        let profile = paths.get_profile("default").unwrap();
+        let slot = profile.linked_save_profile_id.clone();
+        paths.list_save_profiles();
+        let mut s = paths.load_settings();
+        s.active_save_profile_id = "elsewhere".into();
+        paths.save_settings(&s).unwrap();
+        let active = paths.saves_dir.join(&slot).join("active");
+        fs::create_dir_all(&active).unwrap();
+        fs::write(
+            active.join("saveMNB3.lua"),
+            "return {rank=4,_qm_meta={profile_id=\"ef\",mods={eastern_front=\"1.0.0\"}},dayz=9}",
+        )
+        .unwrap();
+        let report = paths.check_save_compatibility(&profile);
+        assert!(!report.is_safe);
+        assert_eq!(report.missing_mods_from_save, [("eastern_front".to_string(), "1.0.0".to_string())]);
+        let mut with = profile.clone();
+        with.enabled_mods.push("eastern_front".into());
+        assert!(paths.check_save_compatibility(&with).is_safe, "with the mod on there is nothing to say");
+    }
+
+    #[test]
+    fn a_profile_linked_to_a_missing_slot_gets_it() {
+        let (_t, paths) = paths_with_default();
+        let mut p = paths.get_profile("default").unwrap();
+        p.linked_save_profile_id = "eastern-front".into();
+        paths.save_profile(&p).unwrap();
+        assert_eq!(paths.ensure_linked_slot("default").unwrap().as_deref(), Some("Eastern Front"));
+        assert!(paths.list_save_profiles().iter().any(|s| s.id == "eastern-front"));
+        assert_eq!(paths.ensure_linked_slot("default").unwrap(), None, "made once");
+        // A link that is not a folder name is left alone.
+        p.linked_save_profile_id = "../x".into();
+        paths.save_profile(&p).unwrap();
+        assert_eq!(paths.ensure_linked_slot("default").unwrap(), None);
+        assert!(!paths.saves_dir.join("../x").exists());
     }
 }

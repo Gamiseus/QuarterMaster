@@ -1,0 +1,15 @@
+{
+  "$schema": "https://gamiseus.github.io/schemas/mod.schema.json",
+  "schema_version": 1,
+  "id": "compat_example_other",
+  "name": "Example Mod + Other Mod",
+  "version": "1.0.0",
+  "authors": ["Your Name"],
+  "description": "Makes Example Mod and Other Mod work together.",
+  "category": "Gameplay",
+  "relationships": {
+    "requires": { "example_mod": ">=1.0.0", "other_mod": ">=1.0.0" },
+    "load_after": ["example_mod", "other_mod"]
+  },
+  "qm_features": ["overrides", "anchors"]
+}

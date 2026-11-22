@@ -1,0 +1,11 @@
+name = "Faction unit art"
+part = 3
+order = 3
+section = "Unit art: `[units.<unit>]`"
+summary = "A faction's soldiers drawn with frames of its own, one image per animation frame."
+open = "faction.toml"
+try_next = ["Draw the other frames (aim, fire, reload1 to reload10...); the wiki lists them all."]
+[[examples]]
+section = "Unit art: `[units.<unit>]`"
+block = 1
+file = "faction.toml"

@@ -82,12 +82,180 @@ pub struct FactionFile {
     #[serde(default)]
     pub text: BTreeMap<String, String>,
     #[serde(default)]
-    pub sprites: BTreeMap<String, String>,
+    pub sprites: BTreeMap<String, SpriteEntry>,
     #[serde(default)]
     pub sounds: BTreeMap<String, String>,
     #[serde(default)]
     pub vehicles: Vec<VehicleDef>,
+    #[serde(default)]
+    pub explosions: Vec<ExplosionDef>,
+    #[serde(default)]
+    pub ordnance: Vec<OrdnanceDef>,
+    #[serde(default)]
+    pub skills: Vec<SkillDef>,
+    pub ranks: Option<RanksDef>,
     pub hooks: Option<HooksDef>,
+}
+
+/// A `[sprites]` entry: an image file, or a table with the file and the size it is shown at.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+pub enum SpriteEntry {
+    File(String),
+    Table(SpriteTable),
+}
+
+impl SpriteEntry {
+    /// The image file, when the entry replaces the image.
+    pub fn file(&self) -> Option<&str> {
+        match self {
+            SpriteEntry::File(f) => Some(f),
+            SpriteEntry::Table(t) => t.file.as_deref(),
+        }
+    }
+}
+
+/// `rank_1 = { file = "misc/rank_1.png", size = [18, 22] }`: the file (or none, to size the
+/// game's own image), one of `size`, `scale` and `like`, and a place inside the box
+/// (`offset`, `rotate`, `flip`, `draw_size`).
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SpriteTable {
+    pub file: Option<String>,
+    pub size: Option<[f64; 2]>,
+    pub scale: Option<f64>,
+    pub like: Option<String>,
+    /// Moves the image, in the game's pixels, right and down.
+    pub offset: Option<[f64; 2]>,
+    /// Turns it about its middle, in degrees clockwise.
+    pub rotate: Option<f64>,
+    /// Mirrors it about its middle: "x", "y" or "xy".
+    pub flip: Option<String>,
+    /// Draws the picture at this size inside its box, in the game's pixels.
+    pub draw_size: Option<[f64; 2]>,
+}
+
+/// `[ranks]`: the rank names the game shows on soldiers of the faction's side.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RanksDef {
+    /// Ranks 0 to 3 of a soldier (the game's Private to Sergeant).
+    pub soldier: Option<Vec<String>>,
+    /// Ranks 0 to 3 of an officer (the game's Second Lieutenant to Major).
+    pub officer: Option<Vec<String>>,
+    /// A soldier with no rank yet (the game's Recruit); the first soldier rank unless set.
+    pub recruit: Option<String>,
+    /// An officer with no rank yet (the game's Cadet); the first officer rank unless set.
+    pub cadet: Option<String>,
+    /// The sergeant hero's title (the game's Sarge): his name, and the word in the game's lines
+    /// about him. The Allies' only.
+    pub sarge: Option<String>,
+}
+
+/// `[[skills]]`: a class skill changed, replaced, moved, removed or added.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SkillDef {
+    pub class: String,
+    /// 1 to 3: the class's own skills; 4 and up: new ones.
+    pub slot: u32,
+    pub name: Option<String>,
+    pub description: Option<String>,
+    /// The skill's icon: an image file.
+    pub icon: Option<String>,
+    pub cooldown: Option<f64>,
+    /// The skill level it comes with.
+    pub unlock: Option<u32>,
+    /// A game skill: `2` (the class's own) or `"light:3"` (any class's).
+    pub game: Option<SkillGame>,
+    /// An `[[ordnance]]` id of this faction.
+    pub ordnance: Option<String>,
+    #[serde(default)]
+    pub remove: bool,
+}
+
+/// `game = 2` or `game = "light:3"`.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+pub enum SkillGame {
+    Slot(u32),
+    Named(String),
+}
+
+/// `[[explosions]]`: an explosion on one of the game's own, with numbers changed.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExplosionDef {
+    pub id: String,
+    pub based_on: Option<String>,
+    pub size: Option<f64>,
+    pub at_radius: Option<f64>,
+    pub at_damage: Option<f64>,
+    pub blast_radius: Option<f64>,
+    pub blast_damage: Option<f64>,
+    pub demo_radius: Option<f64>,
+    pub frag_radius: Option<f64>,
+    pub frag_damage: Option<f64>,
+    pub morale_hit: Option<f64>,
+    pub stun_range: Option<f64>,
+    pub stun_time: Option<f64>,
+    pub crater: Option<f64>,
+}
+
+/// `[[ordnance]]`: a grenade, rifle grenade, mortar, barrage, air strike or supply drop of the faction's own.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OrdnanceDef {
+    pub id: String,
+    /// `"thrown"` (a hand grenade, the default), `"rifle"` (a rifle grenade), `"mortar"` (a
+    /// soldier's mortar rounds), `"artillery"` (a barrage), `"airstrike"` (a plane's run) or
+    /// `"drop"` (a supply crate by parachute).
+    pub kind: Option<String>,
+    pub name: Option<String>,
+    pub description: Option<String>,
+    /// Required for a thrown or rifle grenade; a mortar round or a shell shows only its blast.
+    pub sprite: Option<String>,
+    pub explosion: Option<String>,
+    pub range: Option<f64>,
+    pub cooldown: Option<f64>,
+    pub tension: Option<f64>,
+    /// A thrown grenade: how fast it turns in the air (the frag's is 0.1 to 1 at random); 0
+    /// flies pointing the way it was thrown.
+    pub spin: Option<f64>,
+    pub skill: Option<OrdnanceSkill>,
+    #[serde(default)]
+    pub replaces_frag: bool,
+    #[serde(default)]
+    pub replaces_rifle_grenade: bool,
+    /// A mortar's rounds per use, or an artillery barrage's shells.
+    pub shots: Option<u32>,
+    /// How far each round or shell lands from the last spot.
+    pub spread: Option<f64>,
+    #[serde(default)]
+    pub replaces_mortar: bool,
+    #[serde(default)]
+    pub replaces_artillery: bool,
+    /// An air strike's or a drop's plane: an image file.
+    pub plane: Option<String>,
+    /// A drop: the game's loot names its crate holds.
+    pub contents: Option<Vec<String>>,
+    #[serde(default)]
+    pub replaces_bombing: bool,
+    #[serde(default)]
+    pub replaces_strafing: bool,
+    #[serde(default)]
+    pub replaces_drop: bool,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OrdnanceSkill {
+    pub class: String,
+    pub slot: u32,
+    /// Slot 4 only: the skill level it comes with (3, after the third, unless set).
+    pub unlock: Option<u32>,
+    /// Slot 4 only: the button's image (the grenade's sprite unless set).
+    pub icon: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -286,10 +454,133 @@ pub struct ResolvedFaction {
     pub text: BTreeMap<String, String>,
     /// Game global -> image.
     pub sprites: BTreeMap<String, String>,
+    /// Game global -> the size it is shown at, handed to the `[sprites]` size rules.
+    pub sprite_sizes: BTreeMap<String, ResolvedSpriteSize>,
     /// Game global -> sound.
     pub sounds: BTreeMap<String, String>,
     pub vehicles: Vec<ResolvedVehicle>,
+    pub explosions: Vec<ResolvedExplosion>,
+    pub ordnance: Vec<ResolvedOrdnance>,
+    pub skills: Vec<ResolvedSkill>,
+    pub ranks: Option<ResolvedRanks>,
     pub hooks: Option<String>,
+}
+
+/// One of `size`, `scale` and `like`, and a place, as the size rules of `qm.toml` take them.
+#[derive(Debug, Clone, Default, Serialize, PartialEq)]
+pub struct ResolvedSpriteSize {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub size: Option<[f64; 2]>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scale: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub like: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub offset: Option<[f64; 2]>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rotate: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub flip: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub draw_size: Option<[f64; 2]>,
+}
+
+/// The `flip` values a sprite rule takes.
+pub const SPRITE_FLIPS: [&str; 3] = ["x", "y", "xy"];
+
+/// Rank names. A list holds ranks 0 to 3; a missing one keeps the game's.
+#[derive(Debug, Clone, Default, Serialize, PartialEq)]
+pub struct ResolvedRanks {
+    pub soldier: Vec<String>,
+    pub officer: Vec<String>,
+    pub recruit: Option<String>,
+    pub cadet: Option<String>,
+    pub sarge: Option<String>,
+}
+
+/// A class skill for `QM.Skills.set`.
+#[derive(Debug, Clone, Serialize)]
+pub struct ResolvedSkill {
+    pub class: String,
+    pub slot: u32,
+    pub name: Option<String>,
+    pub description: Option<String>,
+    /// The icon, relative to the mod folder.
+    pub icon: Option<String>,
+    pub cooldown: Option<f64>,
+    pub unlock: Option<u32>,
+    pub game_class: Option<String>,
+    pub game_slot: Option<u32>,
+    /// `<faction id>:<id>`.
+    pub ordnance: Option<String>,
+    pub remove: bool,
+}
+
+/// An explosion for `QM.Explosions.register`: its id is `<faction id>:<id>`; the numbers use
+/// the game's names (`fragRadius`).
+#[derive(Debug, Clone, Serialize)]
+pub struct ResolvedExplosion {
+    pub id: String,
+    pub based_on: String,
+    pub numbers: BTreeMap<String, f64>,
+}
+
+/// The kinds of `[[ordnance]]`: (kind, the game's explosion when left out; none for a drop).
+pub const ORDNANCE_KINDS: &[(&str, &str)] = &[
+    ("thrown", "frag"),
+    ("rifle", "rifle_grenade"),
+    ("mortar", "mortar"),
+    ("artillery", "artillery"),
+    ("airstrike", "bomb"),
+    ("drop", ""),
+];
+
+/// The keys that make ordnance stand in for the game's own: (key, its kind, what it replaces).
+pub const ORDNANCE_SWAPS: &[(&str, &str, &str)] = &[
+    ("replaces_frag", "thrown", "the frag"),
+    ("replaces_rifle_grenade", "rifle", "the rifle grenade"),
+    ("replaces_mortar", "mortar", "the mortar"),
+    ("replaces_artillery", "artillery", "the artillery barrages"),
+    ("replaces_bombing", "airstrike", "the bombing runs"),
+    ("replaces_strafing", "airstrike", "the strafing runs"),
+    ("replaces_drop", "drop", "the supply crates"),
+];
+
+/// Ordnance for `QM.Ordnance.register`.
+#[derive(Debug, Clone, Serialize)]
+pub struct ResolvedOrdnance {
+    /// `<faction id>:<id>`.
+    pub id: String,
+    /// `"thrown"`, `"rifle"`, `"mortar"`, `"artillery"`, `"airstrike"` or `"drop"`.
+    pub kind: String,
+    /// Shown on a fourth skill's button.
+    pub name: Option<String>,
+    pub description: Option<String>,
+    /// The image, relative to the mod folder (none for a mortar or artillery without one).
+    pub sprite: Option<String>,
+    /// A faction explosion's full id, or a game explosion tag.
+    pub explosion: String,
+    pub range: Option<f64>,
+    pub cooldown: Option<f64>,
+    pub tension: Option<f64>,
+    /// A thrown grenade's turn rate in the air; 0 points it the way it was thrown.
+    pub spin: Option<f64>,
+    pub skill_class: Option<String>,
+    pub skill_slot: Option<u32>,
+    pub skill_unlock: Option<u32>,
+    pub skill_icon: Option<String>,
+    pub replaces_frag: bool,
+    pub replaces_rifle_grenade: bool,
+    pub shots: Option<u32>,
+    pub spread: Option<f64>,
+    pub replaces_mortar: bool,
+    pub replaces_artillery: bool,
+    /// The plane's image, relative to the mod folder.
+    pub plane: Option<String>,
+    pub contents: Vec<String>,
+    pub replaces_bombing: bool,
+    pub replaces_strafing: bool,
+    pub replaces_drop: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -463,6 +754,25 @@ pub fn check_faction(text: &str, mod_dir: &Path) -> FactionReport {
 struct Checker<'a> {
     root: &'a Path,
     diags: Vec<ManifestDiagnostic>,
+}
+
+/// An id inside the faction: lowercase letters, digits and underscores.
+fn is_local_id(s: &str) -> bool {
+    !s.is_empty() && s.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+}
+
+/// `fragRadius` as written in faction.toml: `frag_radius`.
+fn snake(key: &str) -> String {
+    let mut out = String::new();
+    for c in key.chars() {
+        if c.is_ascii_uppercase() {
+            out.push('_');
+            out.push(c.to_ascii_lowercase());
+        } else {
+            out.push(c);
+        }
+    }
+    out
 }
 
 fn is_identifier(s: &str) -> bool {
@@ -720,9 +1030,13 @@ impl<'a> Checker<'a> {
         let classes = self.classes(f, side, &known, &mut text);
         let names = self.names(f, side);
         let voices = self.voices(f, side);
-        let sprites = self.globals_map("sprites", &f.sprites, vanilla::IMAGE_EXTS);
+        let (sprites, sprite_sizes) = self.sprites(&f.sprites);
+        let ranks = self.ranks(f.ranks.as_ref(), side);
         let sounds = self.globals_map("sounds", &f.sounds, vanilla::AUDIO_EXTS);
         let vehicles = self.vehicles(f, side);
+        let explosions = self.explosions(f);
+        let ordnance = self.ordnance(f, side, &explosions);
+        let skills = self.skills(f, side, &ordnance);
         for (k, v) in &f.text {
             if !is_identifier(k) {
                 self.error(format!("text: \"{k}\" is not a valid game string name."));
@@ -750,10 +1064,396 @@ impl<'a> Checker<'a> {
             voices,
             text,
             sprites,
+            sprite_sizes,
             sounds,
             vehicles,
+            explosions,
+            ordnance,
+            skills,
+            ranks,
             hooks,
         })
+    }
+
+    fn explosions(&mut self, f: &FactionFile) -> Vec<ResolvedExplosion> {
+        let mut out = Vec::new();
+        let mut seen = BTreeSet::new();
+        for (i, e) in f.explosions.iter().enumerate() {
+            let label = format!("explosions[{i}] ({})", e.id);
+            if !is_local_id(&e.id) {
+                self.error(format!("{label}: id must use only lowercase letters, digits and underscores."));
+                continue;
+            }
+            if !seen.insert(e.id.clone()) {
+                self.error(format!("{label}: another explosion has this id."));
+                continue;
+            }
+            let based_on = e.based_on.clone().unwrap_or_else(|| "frag".to_string());
+            if vanilla::explosion_preset(&based_on).is_none() {
+                self.error(format!(
+                    "{label}: based_on \"{based_on}\" is not one of the game's explosions; use one of: {}.",
+                    vanilla::EXPLOSION_PRESETS.iter().map(|(n, _)| *n).collect::<Vec<_>>().join(", ")
+                ));
+                continue;
+            }
+            let mut numbers = BTreeMap::new();
+            for (key, value) in [
+                ("size", e.size),
+                ("atRadius", e.at_radius),
+                ("atDamage", e.at_damage),
+                ("blastRadius", e.blast_radius),
+                ("blastDamage", e.blast_damage),
+                ("demoRadius", e.demo_radius),
+                ("fragRadius", e.frag_radius),
+                ("fragDamage", e.frag_damage),
+                ("moraleHit", e.morale_hit),
+                ("stunRange", e.stun_range),
+                ("stunTime", e.stun_time),
+                ("crater", e.crater),
+            ] {
+                let Some(v) = value else { continue };
+                if !v.is_finite() || v < 0.0 {
+                    self.error(format!("{label}: {} can't be negative.", snake(key)));
+                    continue;
+                }
+                numbers.insert(key.to_string(), v);
+            }
+            out.push(ResolvedExplosion {
+                id: format!("{}:{}", f.id, e.id),
+                based_on,
+                numbers,
+            });
+        }
+        out
+    }
+
+    fn ordnance(&mut self, f: &FactionFile, side: Side, explosions: &[ResolvedExplosion]) -> Vec<ResolvedOrdnance> {
+        let mut out = Vec::new();
+        let mut seen = BTreeSet::new();
+        let mut skills: BTreeSet<(String, u32)> = BTreeSet::new();
+        // Each kind's swap of the game's own: the one grenade of the faction that has it.
+        let mut swaps: BTreeMap<&str, String> = BTreeMap::new();
+        for (i, g) in f.ordnance.iter().enumerate() {
+            let label = format!("ordnance[{i}] ({})", g.id);
+            if !is_local_id(&g.id) {
+                self.error(format!("{label}: id must use only lowercase letters, digits and underscores."));
+                continue;
+            }
+            if !seen.insert(g.id.clone()) {
+                self.error(format!("{label}: another [[ordnance]] entry has this id."));
+                continue;
+            }
+            let kind = g.kind.as_deref().unwrap_or("thrown");
+            // (kind, the game's explosion when left out, the swap key, what it stands in for)
+            let Some(&(_, default_explosion)) = ORDNANCE_KINDS.iter().find(|k| k.0 == kind) else {
+                self.error(format!(
+                    "{label}: kind must be \"thrown\" (a hand grenade), \"rifle\" (a rifle grenade), \"mortar\", \"artillery\", \"airstrike\" or \"drop\", not \"{kind}\"."
+                ));
+                continue;
+            };
+            let is_drop = kind == "drop";
+            let has_plane = kind == "airstrike" || is_drop;
+            let plane = match &g.plane {
+                Some(p) if has_plane => match self.file(&format!("{label}.plane"), p, vanilla::IMAGE_EXTS) {
+                    Some(p) => Some(p),
+                    None => continue,
+                },
+                Some(_) => {
+                    self.warn(format!("{label}: plane is for an air strike or a drop; it is left out."));
+                    None
+                }
+                None => None,
+            };
+            let mut contents: Vec<String> = Vec::new();
+            if let Some(list) = &g.contents {
+                if !is_drop {
+                    self.warn(format!("{label}: contents are for a drop; they are left out."));
+                } else {
+                    for item in list {
+                        if !(item.starts_with("loot_") || item.starts_with("side_")) {
+                            self.warn(format!(
+                                "{label}.contents: \"{item}\" is not one of the game's loot names (loot_medPack, loot_ration, side_<gun>, ...)."
+                            ));
+                        }
+                    }
+                    contents = list.clone();
+                }
+            }
+            if is_drop && g.explosion.is_some() {
+                self.warn(format!("{label}: a drop has no explosion; explosion is left out."));
+            }
+            let thrown_or_rifle = kind == "thrown" || kind == "rifle";
+            let sprite = match &g.sprite {
+                Some(s) => match self.file(&format!("{label}.sprite"), s, vanilla::IMAGE_EXTS) {
+                    Some(p) => Some(p),
+                    None => continue,
+                },
+                None if thrown_or_rifle => {
+                    self.error(format!("{label}: a {kind} grenade needs a sprite, the image it flies as."));
+                    continue;
+                }
+                None => None,
+            };
+            if !thrown_or_rifle {
+                if g.shots == Some(0) {
+                    self.error(format!("{label}: shots must be 1 or more."));
+                }
+                if is_drop && g.spread.is_some() {
+                    self.warn(format!("{label}: a drop lands on the spot; spread is left out."));
+                }
+            } else if g.shots.is_some() || g.spread.is_some() {
+                self.warn(format!(
+                    "{label}: shots and spread are for a mortar, artillery or an air strike; a {kind} grenade is one at a time."
+                ));
+            }
+            if g.spread.is_some_and(|v| !v.is_finite() || v < 0.0) {
+                self.error(format!("{label}: spread can't be negative."));
+            }
+            // The faction's own explosion, a preset by name, or a game explosion tag; the
+            // game's own for the kind when left out.
+            let wanted = g.explosion.clone().unwrap_or_else(|| default_explosion.to_string());
+            let explosion = if is_drop {
+                String::new()
+            } else if let Some(e) = explosions.iter().find(|e| e.id == format!("{}:{wanted}", f.id)) {
+                e.id.clone()
+            } else if let Some((_, tag)) = vanilla::explosion_preset(&wanted) {
+                tag.to_string()
+            } else {
+                self.error(format!(
+                    "{label}: explosion \"{wanted}\" is not an explosion of this faction or one of the game's ({}).",
+                    vanilla::EXPLOSION_PRESETS.iter().map(|(n, _)| *n).collect::<Vec<_>>().join(", ")
+                ));
+                continue;
+            };
+            for (what, v) in [("range", g.range), ("cooldown", g.cooldown), ("tension", g.tension)] {
+                if v.is_some_and(|v| !v.is_finite() || v < 0.0) {
+                    self.error(format!("{label}: {what} can't be negative."));
+                }
+            }
+            if g.range == Some(0.0) {
+                self.error(format!("{label}: range must be more than 0."));
+            }
+            if g.spin.is_some_and(|v| !v.is_finite() || v < 0.0) {
+                self.error(format!("{label}: spin can't be negative."));
+            }
+            if g.spin.is_some() && kind != "thrown" {
+                self.warn(format!(
+                    "{label}: spin is for a thrown grenade; a {kind} flies as the game's own, and spin is left out."
+                ));
+            }
+            let (mut skill_class, mut skill_slot, mut skill_unlock, mut skill_icon) = (None, None, None, None);
+            if let Some(s) = &g.skill {
+                if !vanilla::is_spec(&s.class) {
+                    self.error(format!(
+                        "{label}.skill: \"{}\" is not a class; use one of: {}.",
+                        s.class,
+                        vanilla::SPECS.iter().map(|(k, _)| *k).collect::<Vec<_>>().join(", ")
+                    ));
+                } else if s.slot == 0 {
+                    self.error(format!("{label}.skill: slot must be 1 or more: 1 to 3 are the class's own skills, 4 and up new ones."));
+                } else if !skills.insert((s.class.clone(), s.slot)) {
+                    self.error(format!("{label}.skill: another [[ordnance]] entry already takes {} skill {}.", s.class, s.slot));
+                } else {
+                    if side == Side::Axis {
+                        self.warn(format!(
+                            "{label}.skill: class skills are the player's, and the player commands the Allies; on the Axis side it is never used."
+                        ));
+                    }
+                    skill_class = Some(s.class.clone());
+                    skill_slot = Some(s.slot);
+                    if let Some(u) = s.unlock {
+                        if u >= 1 {
+                            skill_unlock = Some(u);
+                        } else {
+                            self.error(format!("{label}.skill: unlock must be 1 or more (the skill level it comes with)."));
+                        }
+                    }
+                    if let Some(icon) = &s.icon {
+                        skill_icon = self.file(&format!("{label}.skill.icon"), icon, vanilla::IMAGE_EXTS);
+                    }
+                }
+            }
+            let set = [
+                ("replaces_frag", g.replaces_frag),
+                ("replaces_rifle_grenade", g.replaces_rifle_grenade),
+                ("replaces_mortar", g.replaces_mortar),
+                ("replaces_artillery", g.replaces_artillery),
+                ("replaces_bombing", g.replaces_bombing),
+                ("replaces_strafing", g.replaces_strafing),
+                ("replaces_drop", g.replaces_drop),
+            ];
+            let mut bad = false;
+            for (key, on) in set {
+                if !on {
+                    continue;
+                }
+                let Some(&(_, wants, what)) = ORDNANCE_SWAPS.iter().find(|s| s.0 == key) else {
+                    continue;
+                };
+                if wants != kind {
+                    let own: Vec<&str> = ORDNANCE_SWAPS.iter().filter(|s| s.1 == kind).map(|s| s.0).collect();
+                    self.error(format!(
+                        "{label}: {key} is for kind = \"{wants}\"; kind = \"{kind}\" has {}.",
+                        if own.is_empty() { "none".to_string() } else { own.join(" or ") }
+                    ));
+                    bad = true;
+                } else if let Some(other) = swaps.get(key) {
+                    self.error(format!("{label}: {other} already replaces {what}; only one entry can."));
+                    bad = true;
+                } else {
+                    swaps.insert(key, g.id.clone());
+                    if key == "replaces_drop" && side == Side::Axis {
+                        self.warn(format!(
+                            "{label}: supply crates are the Allies'; on the Axis side replaces_drop is never used."
+                        ));
+                    }
+                }
+            }
+            if bad {
+                continue;
+            }
+            out.push(ResolvedOrdnance {
+                id: format!("{}:{}", f.id, g.id),
+                kind: kind.to_string(),
+                name: g.name.clone(),
+                description: g.description.clone(),
+                sprite,
+                explosion,
+                range: g.range,
+                cooldown: g.cooldown,
+                tension: g.tension,
+                spin: if kind == "thrown" { g.spin } else { None },
+                skill_class,
+                skill_slot,
+                skill_unlock,
+                skill_icon,
+                replaces_frag: g.replaces_frag,
+                replaces_rifle_grenade: g.replaces_rifle_grenade,
+                shots: if thrown_or_rifle { None } else { g.shots },
+                spread: if thrown_or_rifle || is_drop { None } else { g.spread },
+                replaces_mortar: g.replaces_mortar,
+                replaces_artillery: g.replaces_artillery,
+                plane,
+                contents,
+                replaces_bombing: g.replaces_bombing,
+                replaces_strafing: g.replaces_strafing,
+                replaces_drop: g.replaces_drop,
+            });
+        }
+        out
+    }
+
+    fn skills(&mut self, f: &FactionFile, side: Side, ordnance: &[ResolvedOrdnance]) -> Vec<ResolvedSkill> {
+        let mut out = Vec::new();
+        // The class skills the faction's ordnance already takes.
+        let mut taken: BTreeSet<(String, u32)> = ordnance
+            .iter()
+            .filter_map(|o| Some((o.skill_class.clone()?, o.skill_slot?)))
+            .collect();
+        let specs = || vanilla::SPECS.iter().map(|(k, _)| *k).collect::<Vec<_>>().join(", ");
+        for (i, s) in f.skills.iter().enumerate() {
+            let label = format!("skills[{i}] ({} skill {})", s.class, s.slot);
+            if !vanilla::is_spec(&s.class) {
+                self.error(format!("{label}: \"{}\" is not a class; use one of: {}.", s.class, specs()));
+                continue;
+            }
+            if s.slot == 0 {
+                self.error(format!("{label}: slot must be 1 or more: 1 to 3 are the class's own skills, 4 and up new ones."));
+                continue;
+            }
+            if !taken.insert((s.class.clone(), s.slot)) {
+                self.error(format!(
+                    "{label}: another [[skills]] or [[ordnance]] entry already takes {} skill {}.",
+                    s.class, s.slot
+                ));
+                continue;
+            }
+            let actions = [s.game.is_some(), s.ordnance.is_some(), s.remove].iter().filter(|a| **a).count();
+            if actions > 1 {
+                self.error(format!("{label}: game, ordnance and remove are one or the other."));
+                continue;
+            }
+            if s.slot > 3 && actions == 0 {
+                self.error(format!("{label}: skill {} is a new skill; it needs game or ordnance.", s.slot));
+                continue;
+            }
+            let (mut game_class, mut game_slot) = (None, None);
+            if let Some(g) = &s.game {
+                let parsed = match g {
+                    SkillGame::Slot(n) => Some((s.class.clone(), *n)),
+                    SkillGame::Named(t) => match t.split_once(':') {
+                        Some((c, n)) => n.parse::<u32>().ok().map(|n| (c.to_string(), n)),
+                        None => t.parse::<u32>().ok().map(|n| (s.class.clone(), n)),
+                    },
+                };
+                match parsed {
+                    Some((c, n)) if vanilla::is_spec(&c) && (1..=3).contains(&n) => {
+                        if c == "comms" && s.class != "comms" {
+                            self.warn(format!(
+                                "{label}.game: the radio operator's calls go through only for radio operators."
+                            ));
+                        }
+                        game_class = Some(c);
+                        game_slot = Some(n);
+                    }
+                    _ => {
+                        self.error(format!(
+                            "{label}.game: a game skill is 1, 2 or 3 (the class's own), or \"<class>:<slot>\" such as \"light:3\"."
+                        ));
+                        continue;
+                    }
+                }
+            }
+            let mut ord = None;
+            if let Some(id) = &s.ordnance {
+                let full = format!("{}:{id}", f.id);
+                if ordnance.iter().any(|o| o.id == full) {
+                    ord = Some(full);
+                } else {
+                    self.error(format!("{label}.ordnance: \"{id}\" is not an [[ordnance]] entry of this faction."));
+                    continue;
+                }
+            }
+            if s.unlock == Some(0) {
+                self.error(format!("{label}: unlock must be 1 or more (the skill level it comes with)."));
+                continue;
+            }
+            if s.cooldown.is_some_and(|v| !v.is_finite() || v < 0.0) {
+                self.error(format!("{label}: cooldown can't be negative."));
+                continue;
+            }
+            let icon = match &s.icon {
+                Some(p) => match self.file(&format!("{label}.icon"), p, vanilla::IMAGE_EXTS) {
+                    Some(x) => Some(x),
+                    None => continue,
+                },
+                None => None,
+            };
+            if s.remove
+                && (s.name.is_some() || s.description.is_some() || icon.is_some() || s.cooldown.is_some() || s.unlock.is_some())
+            {
+                self.warn(format!("{label}: a removed skill shows nothing; its other keys are left out."));
+            }
+            if side == Side::Axis {
+                self.warn(format!(
+                    "{label}: class skills are the player's, and the player commands the Allies; on the Axis side it is never used."
+                ));
+            }
+            out.push(ResolvedSkill {
+                class: s.class.clone(),
+                slot: s.slot,
+                name: s.name.clone(),
+                description: s.description.clone(),
+                icon,
+                cooldown: s.cooldown,
+                unlock: s.unlock,
+                game_class,
+                game_slot,
+                ordnance: ord,
+                remove: s.remove,
+            });
+        }
+        out
     }
 
     fn units(&mut self, f: &FactionFile, side: Side) -> BTreeMap<String, BTreeMap<String, String>> {
@@ -1457,6 +2157,125 @@ impl<'a> Checker<'a> {
             }
         }
         out
+    }
+
+    /// `[sprites]`: the image files, and the sizes and places of the entries that give one.
+    fn sprites(
+        &mut self,
+        map: &BTreeMap<String, SpriteEntry>,
+    ) -> (BTreeMap<String, String>, BTreeMap<String, ResolvedSpriteSize>) {
+        let mut files = BTreeMap::new();
+        let mut sizes = BTreeMap::new();
+        for (global, entry) in map {
+            if !is_identifier(global) {
+                self.error(format!("sprites: \"{global}\" is not a valid game global name."));
+                continue;
+            }
+            let label = format!("sprites.{global}");
+            let file = match entry.file() {
+                Some(raw) => match self.file(&label, raw, vanilla::IMAGE_EXTS) {
+                    Some(p) => Some(p),
+                    None => continue,
+                },
+                None => None,
+            };
+            if let SpriteEntry::Table(t) = entry {
+                let set = usize::from(t.size.is_some()) + usize::from(t.scale.is_some()) + usize::from(t.like.is_some());
+                if set > 1 {
+                    self.error(format!("{label}: give one of size, scale and like."));
+                    continue;
+                }
+                let placed = t.offset.is_some() || t.rotate.is_some() || t.flip.is_some() || t.draw_size.is_some();
+                if set == 0 && !placed && file.is_none() {
+                    self.error(format!("{label}: needs a file, a size or a place (offset, rotate, flip, draw_size)."));
+                    continue;
+                }
+                let good = |n: f64| n.is_finite() && n > 0.0;
+                if t.size.is_some_and(|[w, h]| !good(w) || !good(h))
+                    || t.scale.is_some_and(|k| !good(k))
+                    || t.draw_size.is_some_and(|[w, h]| !good(w) || !good(h))
+                {
+                    self.error(format!("{label}: sizes and scales must be more than 0."));
+                    continue;
+                }
+                if let Some(like) = &t.like {
+                    if !is_identifier(like) || like == global {
+                        self.error(format!("{label}: like must name another image."));
+                        continue;
+                    }
+                }
+                if t.offset.is_some_and(|[x, y]| !x.is_finite() || !y.is_finite())
+                    || t.rotate.is_some_and(|r| !r.is_finite())
+                {
+                    self.error(format!("{label}: offset and rotate must be numbers."));
+                    continue;
+                }
+                if let Some(flip) = &t.flip {
+                    if !SPRITE_FLIPS.contains(&flip.as_str()) {
+                        self.error(format!("{label}: flip is \"x\", \"y\" or \"xy\", not \"{flip}\"."));
+                        continue;
+                    }
+                }
+                if set == 1 || placed {
+                    sizes.insert(
+                        global.clone(),
+                        ResolvedSpriteSize {
+                            size: t.size,
+                            scale: t.scale,
+                            like: t.like.clone(),
+                            offset: t.offset,
+                            rotate: t.rotate,
+                            flip: t.flip.clone(),
+                            draw_size: t.draw_size,
+                        },
+                    );
+                }
+            }
+            if let Some(p) = file {
+                files.insert(global.clone(), p);
+            }
+        }
+        (files, sizes)
+    }
+
+    /// `[ranks]`: up to four names per list, none empty.
+    fn ranks(&mut self, r: Option<&RanksDef>, side: Side) -> Option<ResolvedRanks> {
+        let r = r?;
+        if r.sarge.is_some() && side == Side::Axis {
+            self.warn("ranks.sarge: the Sarge is the Allies'; on the Axis side it is never used.".to_string());
+        }
+        let mut bad = false;
+        for (key, list) in [("soldier", &r.soldier), ("officer", &r.officer)] {
+            if let Some(list) = list {
+                if list.len() > 4 {
+                    self.error(format!(
+                        "ranks.{key}: the game has four ranks (0 to 3); this list has {}.",
+                        list.len()
+                    ));
+                    bad = true;
+                }
+                if list.iter().any(|n| n.trim().is_empty()) {
+                    self.error(format!("ranks.{key}: a rank name can't be empty."));
+                    bad = true;
+                }
+            }
+        }
+        for (key, name) in [("recruit", &r.recruit), ("cadet", &r.cadet), ("sarge", &r.sarge)] {
+            if name.as_deref().is_some_and(|n| n.trim().is_empty()) {
+                self.error(format!("ranks.{key}: a rank name can't be empty."));
+                bad = true;
+            }
+        }
+        if bad {
+            return None;
+        }
+        Some(ResolvedRanks {
+            soldier: r.soldier.clone().unwrap_or_default(),
+            officer: r.officer.clone().unwrap_or_default(),
+            recruit: r.recruit.clone(),
+            cadet: r.cadet.clone(),
+            sarge: if side == Side::Allied { r.sarge.clone() } else { None },
+        })
     }
 
     fn vehicles(&mut self, f: &FactionFile, side: Side) -> Vec<ResolvedVehicle> {

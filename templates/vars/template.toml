@@ -1,0 +1,11 @@
+name = "Variables"
+part = 4
+order = 5
+section = "Variables: `[vars]`"
+summary = "A value set once in [vars] and filled into a patch's code."
+open = "qm.toml"
+try_next = ["Use the same variable in several patches."]
+[[examples]]
+section = "Variables: `[vars]`"
+block = 1
+file = "qm.toml"

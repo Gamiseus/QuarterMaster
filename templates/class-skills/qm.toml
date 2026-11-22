@@ -1,0 +1,27 @@
+#:schema https://gamiseus.github.io/schemas/qm.schema.json
+# Example Mod: class skills.
+# skills.lua changes, replaces, removes, moves and adds class skills with QM.Skills. mod.json
+# lists "skills" in qm_features, which also makes QuarterMaster add the hooks skills need
+# (QuarterMaster 2.2.0 or newer).
+# Change first: which class and slot each line is for.
+# Wiki: Part 5, Class skills: https://gamiseus.github.io/wiki/adding-your-own-lua-files/#class-skills-qmskills
+# Try next: ordnance on a skill (ordnance = "<id>").
+
+[manifest]
+version = "1.0.0"
+
+[[patches]]
+[patches.module]
+id = "example_mod:skills_module"
+source = "skills.lua"
+name = "includes/example_mod_skills"
+before = "main.lua"
+
+# Load it once the game's own files are loaded: the skills are set then.
+[[patches]]
+[patches.pattern]
+id = "example_mod:skills_require"
+target = "main.lua"
+pattern = 'require "includes/directives"'
+position = "after"
+payload = 'ExampleMod = require "includes/example_mod_skills"'

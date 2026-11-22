@@ -1,0 +1,8 @@
+name = "Empty mod"
+part = 1
+order = 1
+section = "The files in a mod"
+summary = "A mod.json and a qm.toml with no patches yet: the start of any mod."
+open = "qm.toml"
+aliases = ["empty"]
+try_next = ["Add an example from the catalog: a patch, a setting, a sound.", "Fill in description and authors in mod.json."]

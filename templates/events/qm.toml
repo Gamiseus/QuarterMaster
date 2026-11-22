@@ -1,0 +1,26 @@
+#:schema https://gamiseus.github.io/schemas/qm.schema.json
+# Example Mod: game events.
+# events.lua is loaded with the game and registers handlers with QM.Events: a battle starting,
+# a new wave, a save and a load. mod.json lists "events" in qm_features (QuarterMaster 2.1.0 or newer).
+# Change first: what each handler does; then the events it answers.
+# Wiki: Part 5, Game events: https://gamiseus.github.io/wiki/adding-your-own-lua-files/#game-events-qmevents
+# Try next: battle_end, and an event of your own with QM.Events.emit.
+
+[manifest]
+version = "1.0.0"
+
+[[patches]]
+[patches.module]
+id = "example_mod:events_module"
+source = "events.lua"
+name = "includes/example_mod_events"
+before = "main.lua"
+
+# Load it once the game's own files are loaded: the handlers are registered then.
+[[patches]]
+[patches.pattern]
+id = "example_mod:events_require"
+target = "main.lua"
+pattern = 'require "includes/directives"'
+position = "after"
+payload = 'ExampleMod = require "includes/example_mod_events"'

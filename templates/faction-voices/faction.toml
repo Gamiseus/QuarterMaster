@@ -1,0 +1,19 @@
+#:schema https://gamiseus.github.io/schemas/faction.schema.json
+# Example Mod: faction voices.
+# The lines in voices/ take the place of the game's in sounds/vo/allied; hurt1.wav is mapped to
+# the game's alliedHurt lines; the french unit uses voices_fr/. With fill_missing, a few
+# recordings are reused for all of a kind, so no original line slips through.
+# The files here are placeholder tones.
+# Change first: record your lines, named like the game's.
+# Wiki: Part 3, Voices: https://gamiseus.github.io/wiki/faction-mods/#voices-voices
+
+schema = 1
+id = "example_army"
+name = "Example Army"
+replaces = "allied"
+
+[voices]
+folder = "voices"                   # replaces lines in sounds/vo/allied (or vo/axis)
+map = { hurt = "alliedHurt" }       # lets you ship hurt1.wav instead of alliedHurt1.wav
+dirs = { frenchies = "voices_fr" }  # the french unit's own folder
+fill_missing = true                 # the default

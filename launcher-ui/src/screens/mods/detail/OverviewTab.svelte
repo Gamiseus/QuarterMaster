@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { KeyValueList } from "../../../components/ui";
+  import { Button, KeyValueList } from "../../../components/ui";
+  import { engine } from "../../../lib/stores/engine.svelte";
   import AssetFiles from "./AssetFiles.svelte";
   import AutoUpdateField from "./AutoUpdateField.svelte";
   import ModColourField from "./ModColourField.svelte";
@@ -76,6 +77,11 @@
   {#if detail.asset_files.length > 0 && assetsOnly}
     <AssetFiles files={detail.asset_files} modId={detail.summary.id} modName={detail.summary.name} />
   {/if}
+  <div class="engine">
+    <Button size="sm" onclick={() => engine.openMod(detail.summary, detail.summary.is_workspace_linked).catch(() => {})}>
+      {detail.summary.is_workspace_linked ? "Edit in Mod Engine" : "Open in Mod Engine"}
+    </Button>
+  </div>
   </div>
   <div class="read">
   {#if readme}

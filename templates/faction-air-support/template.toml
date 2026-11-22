@@ -1,0 +1,11 @@
+name = "Faction air support"
+part = 3
+order = 11
+section = "Ordnance: `[[ordnance]]` and `[[explosions]]`"
+summary = "Faction air support for the Allies: a bomber run skill, its own bombing and strafing hits, and supply crates of its own."
+open = "faction.toml"
+try_next = ["Give the bomber run its own plane: plane = \"planes/my_bomber.png\", as big as the game's (538 by 720).", "Drop a gun too: add \"side_<gun>\" to contents, with a gun's tag.", "Give the medics a drop of their own: kind = \"drop\" with skill = { class = \"medic\", slot = 4 }."]
+[[examples]]
+section = "Ordnance: `[[ordnance]]` and `[[explosions]]`"
+block = 3
+file = "faction.toml"

@@ -1,0 +1,12 @@
+name = "The smallest faction"
+part = 3
+order = 1
+section = "The smallest faction"
+summary = "A faction that takes over the Allied side with a new name. No art, no code."
+open = "faction.toml"
+aliases = ["faction", "faction_mod"]
+try_next = ["Give the soldiers names (template faction-names-text).", "Reskin a weapon (template faction-weapons)."]
+[[examples]]
+section = "The smallest faction"
+block = 1
+file = "faction.toml"

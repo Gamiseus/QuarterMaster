@@ -1,0 +1,31 @@
+#:schema https://gamiseus.github.io/schemas/faction.schema.json
+# Example Mod: faction names and text.
+# Soldiers get first and last names from names/first.txt and names/last.txt, written in full;
+# the faction's vehicles get call signs, and the french unit names of its own. [text] sets a
+# game text: here the rifleman's tooltip. [ranks] names the soldiers' ranks.
+# mod.json lists "ranks" in qm_features, for [ranks] (QuarterMaster 2.2.0).
+# Change first: the names in names/*.txt.
+# Wiki: Part 3, Names: https://gamiseus.github.io/wiki/faction-mods/#names-names
+#       Part 3, Text: https://gamiseus.github.io/wiki/faction-mods/#text-text
+#       Part 3, Ranks: https://gamiseus.github.io/wiki/faction-mods/#ranks-ranks
+
+schema = 1
+id = "example_army"
+name = "Example Army"
+replaces = "allied"
+
+[names]
+last_file = "names/last.txt"       # one name per line; # starts a comment
+first_file = "names/first.txt"
+format = "full"                    # "Alex Smith"; the default "initial" gives "A. Smith"
+vehicles = ["Old Faithful", "Lucky Seven"]     # vehicle call signs
+french = { last = ["Martin", "Bernard"] }      # names for the french unit
+
+[text]
+mouseOverRifleSpec = "Rifleman, the backbone of the Example Army"
+
+[ranks]
+soldier = ["Private", "Lance Corporal", "Corporal", "Sergeant"]   # ranks 0 to 3
+officer = ["Second Lieutenant", "Lieutenant", "Captain", "Major"]
+recruit = "Recruit"                       # a soldier with no rank yet
+sarge = "Top"                             # the Sarge's title

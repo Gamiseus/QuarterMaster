@@ -13,8 +13,9 @@
     corners?: boolean;
     /** "first" focuses the first control in the body on open; "content" focuses the dialog itself. Never Close. */
     initialFocus?: "first" | "content";
-    /** "lg" widens the dialog to --qm-dialog-lg (clamped to the viewport). */
-    size?: "md" | "lg";
+    /** "lg" widens the dialog to --qm-dialog-lg; "xl" to --qm-dialog-xl and most of the window's
+     * height, with a body that fills it (both clamped to the viewport). */
+    size?: "md" | "lg" | "xl";
     /** False keeps the dialog open: Escape, an outside click and Close do nothing (e.g. while a confirm runs). */
     dismissible?: boolean;
     /** True: only the Close button (and the dialog's own buttons) close it; Escape and a click outside do nothing.
@@ -156,6 +157,19 @@
 
   :global(.qm-dialog.qm-dialog-lg) {
     width: min(var(--qm-dialog-lg), calc(100vw - var(--qm-space-6)));
+  }
+
+  :global(.qm-dialog.qm-dialog-xl) {
+    width: min(var(--qm-dialog-xl), calc(100vw - var(--qm-space-6)));
+    height: min(52rem, calc(100vh - var(--qm-space-6)));
+  }
+
+  :global(.qm-dialog-xl) .body {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
   }
 
   :global(.qm-dialog:focus-visible) {

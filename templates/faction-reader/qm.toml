@@ -1,0 +1,26 @@
+#:schema https://gamiseus.github.io/schemas/qm.schema.json
+# Example Mod: reading the active faction.
+# faction_reader.lua is loaded with the game and prints which faction holds the Allied side.
+# Change first: what faction_reader.lua does with the answer.
+# Wiki: Part 3, Reading the active faction from another mod:
+#   https://gamiseus.github.io/wiki/faction-mods/#reading-the-active-faction-from-another-mod
+
+[manifest]
+version = "1.0.0"
+
+# Register faction_reader.lua under a name the game can require...
+[[patches]]
+[patches.module]
+id = "example_mod:faction_reader_module"
+source = "faction_reader.lua"
+name = "includes/example_mod_faction_reader"
+before = "main.lua"
+
+# ...and load it once the game's own files are loaded.
+[[patches]]
+[patches.pattern]
+id = "example_mod:faction_reader_require"
+target = "main.lua"
+pattern = 'require "includes/directives"'
+position = "after"
+payload = 'ExampleMod = require "includes/example_mod_faction_reader"'

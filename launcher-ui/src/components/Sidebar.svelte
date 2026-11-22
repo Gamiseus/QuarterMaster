@@ -33,12 +33,11 @@
   }
 
   function go(page: Page) {
-    app.mode = "launcher";
-    app.page = page;
+    void app.goTo("launcher", page);
   }
 
   function toggleMode() {
-    app.mode = app.mode === "engine" ? "launcher" : "engine";
+    void app.goTo(app.mode === "engine" ? "launcher" : "engine");
   }
 
   const engine = $derived(app.mode === "engine");

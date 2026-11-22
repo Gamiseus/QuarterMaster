@@ -1,0 +1,7 @@
+name = "A larger sound pool"
+part = 2
+order = 2
+section = "Numbered sound pools"
+summary = "More variants of a numbered sound, and variants for a sound the game has only once."
+open = "qm.toml"
+try_next = ["Replace the placeholders with your own recordings.", "Number them on: garand7.wav, garand8.wav..."]

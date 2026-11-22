@@ -1,0 +1,13 @@
+{
+  "$schema": "https://gamiseus.github.io/schemas/mod.schema.json",
+  "schema_version": 1,
+  "id": "example_mod",
+  "name": "Example Mod",
+  "version": "1.0.0",
+  "authors": [
+    "Your Name"
+  ],
+  "description": "An Allied class renamed, with its own weapon upgrades, bonus, skill names and badge.",
+  "category": "Content",
+  "game_version": ">=0.5.3"
+}

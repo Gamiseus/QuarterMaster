@@ -350,6 +350,61 @@ pub fn build_faction_patches_with(
         ));
     }
 
+    // The Sarge's title ([ranks] sarge). The game names him "Sarge" when he comes, finds him
+    // by that name, and says the word in a few lines; all of these read the runtime's
+    // __qm_sarge_text and __qm_is_sarge, which also know a Sarge from a save made before.
+    if active.iter().any(|lf| lf.faction.ranks.as_ref().is_some_and(|r| r.sarge.is_some())) {
+        let times = |mut p: Patch, n: usize| {
+            if let Patch::Regex(r) = &mut p {
+                r.times = Some(n);
+            }
+            p
+        };
+        let named = r#"(__qm_sarge_text and __qm_sarge_text("Sarge") or "Sarge")"#;
+        patches.push(regex_patch(
+            "qm_factions_sarge_name",
+            "Faction Sarge: his name",
+            "includes/urb_engine.lua",
+            r#"\.name = "Sarge""#,
+            &format!(".name = {named}"),
+        ));
+        patches.push(regex_patch(
+            "qm_factions_sarge_name_mnb2",
+            "Faction Sarge: his name (called in)",
+            "includes/mnb2.lua",
+            r#"\.name = "Sarge""#,
+            &format!(".name = {named}"),
+        ));
+        patches.push(times(
+            regex_patch(
+                "qm_factions_sarge_found",
+                "Faction Sarge: finding him",
+                "includes/urb_engine.lua",
+                r#"([A-Za-z_][\w.\[\]]*)\.name == "Sarge""#,
+                r#"(__qm_is_sarge and __qm_is_sarge(${1}) or ${1}.name == "Sarge")"#,
+            ),
+            2,
+        ));
+        let line = r#"(__qm_sarge_text and __qm_sarge_text("${1}") or "${1}")"#;
+        patches.push(times(
+            regex_patch(
+                "qm_factions_sarge_lines",
+                "Faction Sarge: lines about him",
+                "includes/urb_engine.lua",
+                r#""(Sarge Babysit \+1xp|unpinned by Sarge!!|There's only one Sarge, me\.|There is only one Sarge\. \\nAnd he died on your watch!!|HEADS UP, SARGE IN THE AO!!)""#,
+                line,
+            ),
+            5,
+        ));
+        patches.push(regex_patch(
+            "qm_factions_sarge_lines_mnb2",
+            "Faction Sarge: lines about him (called in)",
+            "includes/mnb2.lua",
+            r#""(There's only one Sarge\.\.)""#,
+            line,
+        ));
+    }
+
     // The game drops a magazine on reload only for its own magazine names; any other name
     // leaves an empty particle that crashes the particle update. The runtime lists a faction's
     // own magazine sprites in __qm_mag_sprites, and this makes them drop like the generic one.

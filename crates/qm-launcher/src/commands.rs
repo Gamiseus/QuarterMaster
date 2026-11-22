@@ -3,6 +3,7 @@ use qm_core::handshake::{CrashReport, GluePatchEntry, StackMode};
 use qm_core::patch::order::OrderRule;
 use qm_core::patch::InsertPosition;
 use qm_manager::storage::{DetectedPaths, ModsSource, WindowSettings};
+use qm_manager::templates::TemplateInfo;
 use qm_manager::{
     ArchiveModCandidate, ConflictResolutionSuggestion, LoadOrderResolution, ModProfile,
     ProfileDiff, SaveBackupEntry, SaveProfile, SharedStack,
@@ -12,9 +13,23 @@ use qm_service::dto::{
     IssueReportRequest, IssueReportResult, LegacyData, LegacyMoveResult, ManualImportResult,
     ManualInstall,
 };
+use qm_service::ops::engine::{
+    EngineCheck, EngineFile, EngineLibraryMod, EngineLint, EngineProjects, EngineSymbol,
+    EngineTree, EngineWriteRequest,
+};
+use qm_service::ops::engine_test::EngineTestPlan;
 use qm_service::ops::extras::{FileView, LeftoverBackup, ModFileList};
 use qm_service::ops::modpacks::ModpackPreview;
+use qm_service::ops::release::{ReleaseInfo, ReleaseZip};
+use qm_service::ops::sprite_lineup::{
+    SpriteCatalog, SpriteRef, SpriteSaveRequest, SpriteSaved, SpriteShelf, SpriteSource, SpriteUses,
+};
 use qm_service::ops::sprites::{RibbonInfo, SpriteKind};
+use qm_service::ops::studio::{
+    PatchDraft, StudioFileText, StudioGameFiles, StudioMatches, StudioPatchId, StudioPatchRef,
+    StudioPatches, StudioPreview, StudioSaved,
+};
+use qm_service::ops::templates::{TemplateAddPreview, TemplateFileView};
 use qm_service::{
     AnchorCandidate, AppInfo, BisectPreview, BisectStatus, BisectView, CatalogQuery, CatalogResult,
     CompatChangesView, CompatExportPreview, CompatExportRequest, CompatExportResult,
@@ -275,6 +290,15 @@ pub async fn modpack_import(
 #[specta::specta]
 pub async fn profile_preview_switch(svc: Svc<'_>, id: String) -> Result<SwitchPreview, QmError> {
     run(&svc, move |s| s.profile_preview_switch(&id)).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn profile_save_check(
+    svc: Svc<'_>,
+    id: String,
+) -> Result<qm_manager::profiles::SaveCompatibilityReport, QmError> {
+    run(&svc, move |s| s.profile_save_check(&id)).await
 }
 
 #[tauri::command]
@@ -1258,4 +1282,356 @@ pub async fn mod_version_set(
     version: Option<String>,
 ) -> Result<ModSummary, QmError> {
     run(&svc, move |s| s.mod_version_set(&id, version)).await
+}
+
+// Mod Engine (sub-project 3)
+
+#[tauri::command]
+#[specta::specta]
+pub async fn engine_projects(svc: Svc<'_>) -> Result<EngineProjects, QmError> {
+    run(&svc, move |s| s.engine_projects()).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn engine_library_mods(svc: Svc<'_>) -> Result<Vec<EngineLibraryMod>, QmError> {
+    run(&svc, move |s| Ok(s.engine_library_mods())).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn engine_tree(svc: Svc<'_>, folder: String) -> Result<EngineTree, QmError> {
+    run(&svc, move |s| s.engine_tree(&folder)).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn engine_file_read(
+    svc: Svc<'_>,
+    folder: String,
+    path: String,
+) -> Result<EngineFile, QmError> {
+    run(&svc, move |s| s.engine_file_read(&folder, &path)).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn engine_file_write(
+    svc: Svc<'_>,
+    folder: String,
+    req: EngineWriteRequest,
+) -> Result<EngineFile, QmError> {
+    run(&svc, move |s| s.engine_file_write(&folder, req)).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn engine_file_create(
+    svc: Svc<'_>,
+    folder: String,
+    path: String,
+    is_folder: bool,
+) -> Result<(), QmError> {
+    run(&svc, move |s| {
+        s.engine_file_create(&folder, &path, is_folder)
+    })
+    .await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn engine_file_rename(
+    svc: Svc<'_>,
+    folder: String,
+    from: String,
+    to: String,
+) -> Result<(), QmError> {
+    run(&svc, move |s| s.engine_file_rename(&folder, &from, &to)).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn engine_file_delete(svc: Svc<'_>, folder: String, path: String) -> Result<(), QmError> {
+    run(&svc, move |s| s.engine_file_delete(&folder, &path)).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn engine_check(
+    svc: Svc<'_>,
+    folder: String,
+    path: String,
+    text: String,
+) -> Result<EngineCheck, QmError> {
+    run(&svc, move |s| s.engine_check(&folder, &path, &text)).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn engine_lint(svc: Svc<'_>, folder: String) -> Result<EngineLint, QmError> {
+    run(&svc, move |s| s.engine_lint(&folder)).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn engine_symbols(svc: Svc<'_>) -> Result<Vec<EngineSymbol>, QmError> {
+    run(&svc, move |s| Ok(s.engine_symbols().as_ref().clone())).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn engine_copy_to_workspace(
+    svc: Svc<'_>,
+    mod_id: String,
+    version: String,
+) -> Result<String, QmError> {
+    run(&svc, move |s| s.engine_copy_to_workspace(&mod_id, &version)).await
+}
+
+// ---- Sprite line-up (Mod Engine) ----
+
+#[tauri::command]
+#[specta::specta]
+pub async fn engine_sprite_shelves(
+    svc: Svc<'_>,
+    folder: String,
+) -> Result<Vec<SpriteShelf>, QmError> {
+    run(&svc, move |s| s.engine_sprite_shelves(&folder)).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn engine_sprite_catalog(
+    svc: Svc<'_>,
+    source: SpriteSource,
+    owner: String,
+) -> Result<SpriteCatalog, QmError> {
+    run(&svc, move |s| s.engine_sprite_catalog(source, &owner)).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn engine_sprite_image(svc: Svc<'_>, sprite: SpriteRef) -> Result<String, QmError> {
+    run(&svc, move |s| s.engine_sprite_image(&sprite)).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn engine_sprite_uses(
+    svc: Svc<'_>,
+    folder: String,
+    path: String,
+) -> Result<SpriteUses, QmError> {
+    run(&svc, move |s| s.engine_sprite_uses(&folder, &path)).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn engine_sprite_save(
+    svc: Svc<'_>,
+    folder: String,
+    req: SpriteSaveRequest,
+) -> Result<SpriteSaved, QmError> {
+    run(&svc, move |s| s.engine_sprite_save(&folder, req)).await
+}
+
+/// Opens a workspace mod's folder in Explorer; the folder is checked by the backend.
+#[tauri::command]
+#[specta::specta]
+pub async fn engine_reveal(svc: Svc<'_>, folder: String) -> Result<(), QmError> {
+    run(&svc, move |s| {
+        let path = s.engine_project_dir_public(&folder)?;
+        std::process::Command::new(explorer_exe())
+            .arg(&path)
+            .spawn()
+            .map(drop)
+            .map_err(|e| {
+                QmError::new(ErrorKind::Io, "Could not open Explorer.").with_details(e.to_string())
+            })
+    })
+    .await
+}
+
+// ---- Patch Studio (Mod Engine, Stage B) ----
+
+#[tauri::command]
+#[specta::specta]
+pub async fn studio_game_files(svc: Svc<'_>) -> Result<StudioGameFiles, QmError> {
+    run(&svc, move |s| s.studio_game_files()).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn studio_game_file(
+    svc: Svc<'_>,
+    path: String,
+    with_mods: bool,
+) -> Result<StudioFileText, QmError> {
+    run(&svc, move |s| s.studio_game_file(&path, with_mods)).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn studio_matches(
+    svc: Svc<'_>,
+    path: String,
+    lines: String,
+    with_mods: bool,
+) -> Result<StudioMatches, QmError> {
+    run(&svc, move |s| s.studio_matches(&path, &lines, with_mods)).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn studio_patches(svc: Svc<'_>, folder: String) -> Result<StudioPatches, QmError> {
+    run(&svc, move |s| s.studio_patches(&folder)).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn studio_patch_ids(svc: Svc<'_>, folder: String) -> Result<Vec<StudioPatchId>, QmError> {
+    run(&svc, move |s| s.studio_patch_ids(&folder)).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn studio_preview(
+    svc: Svc<'_>,
+    folder: String,
+    draft: PatchDraft,
+    editing: Option<StudioPatchRef>,
+    with_mods: bool,
+) -> Result<StudioPreview, QmError> {
+    run(&svc, move |s| {
+        s.studio_preview(&folder, &draft, editing.as_ref(), with_mods)
+    })
+    .await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn studio_save(
+    svc: Svc<'_>,
+    folder: String,
+    draft: PatchDraft,
+    editing: Option<StudioPatchRef>,
+    expected_hash: Option<String>,
+) -> Result<StudioSaved, QmError> {
+    run(&svc, move |s| {
+        s.studio_save(&folder, &draft, editing.as_ref(), expected_hash.as_deref())
+    })
+    .await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn studio_remove(
+    svc: Svc<'_>,
+    folder: String,
+    at: StudioPatchRef,
+    expected_hash: Option<String>,
+) -> Result<String, QmError> {
+    run(&svc, move |s| {
+        s.studio_remove(&folder, &at, expected_hash.as_deref())
+    })
+    .await
+}
+
+// ---- Test in game and Release helper (Mod Engine, Stages C and E) ----
+
+#[tauri::command]
+#[specta::specta]
+pub async fn engine_test_plan(svc: Svc<'_>, folder: String) -> Result<EngineTestPlan, QmError> {
+    run(&svc, move |s| s.engine_test_plan(&folder)).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn engine_test_launch(svc: Svc<'_>, folder: String) -> Result<GameStatus, QmError> {
+    run(&svc, move |s| s.engine_test_launch(&folder)).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn release_info(svc: Svc<'_>, folder: String) -> Result<ReleaseInfo, QmError> {
+    run(&svc, move |s| s.release_info(&folder)).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn release_prepare(
+    svc: Svc<'_>,
+    folder: String,
+    version: String,
+    lines: Vec<String>,
+) -> Result<(), QmError> {
+    run(&svc, move |s| s.release_prepare(&folder, &version, &lines)).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn release_pack(svc: Svc<'_>, folder: String) -> Result<ReleaseZip, QmError> {
+    run(&svc, move |s| s.release_pack(&folder)).await
+}
+
+/// Opens the folder a workspace mod's release zips go to; the path is the backend's.
+#[tauri::command]
+#[specta::specta]
+pub async fn release_reveal(svc: Svc<'_>, folder: String) -> Result<(), QmError> {
+    run(&svc, move |s| {
+        let path = s.release_folder(&folder)?;
+        std::process::Command::new(explorer_exe())
+            .arg(&path)
+            .spawn()
+            .map(drop)
+            .map_err(|e| {
+                QmError::new(ErrorKind::Io, "Could not open Explorer.").with_details(e.to_string())
+            })
+    })
+    .await
+}
+
+// ---- Templates (Mod Engine, Stage D) ----
+
+#[tauri::command]
+#[specta::specta]
+pub async fn templates_list(svc: Svc<'_>) -> Result<Vec<TemplateInfo>, QmError> {
+    run(&svc, move |s| Ok(s.templates_list())).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn template_preview(svc: Svc<'_>, id: String) -> Result<Vec<TemplateFileView>, QmError> {
+    run(&svc, move |s| s.template_preview(&id)).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn template_create(
+    svc: Svc<'_>,
+    id: String,
+    name: String,
+    mod_id: String,
+) -> Result<String, QmError> {
+    run(&svc, move |s| s.template_create(&id, &name, &mod_id)).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn template_add_preview(
+    svc: Svc<'_>,
+    folder: String,
+    id: String,
+) -> Result<TemplateAddPreview, QmError> {
+    run(&svc, move |s| s.template_add_preview(&folder, &id)).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn template_add(
+    svc: Svc<'_>,
+    folder: String,
+    id: String,
+) -> Result<Vec<String>, QmError> {
+    run(&svc, move |s| s.template_add(&folder, &id)).await
 }

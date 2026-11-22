@@ -1,0 +1,13 @@
+{
+  "$schema": "https://gamiseus.github.io/schemas/mod.schema.json",
+  "schema_version": 1,
+  "id": "example_mod",
+  "name": "Example Mod",
+  "version": "1.0.0",
+  "authors": [
+    "Your Name"
+  ],
+  "description": "A game text string (the M1's description) replaced by a .txt file. No code.",
+  "category": "Visuals",
+  "game_version": ">=0.5.3"
+}

@@ -1,0 +1,51 @@
+# Example Mod: submenus and conditions.
+# "Advanced" is one row that opens a page of the options whose submenu key names it.
+# "Extra Enemies" shows only while Difficulty is "Custom". mod.json lists "config_submenus"
+# in qm_features, the feature submenus need.
+# Change first: the options in the submenu.
+# Wiki: Part 6, Grouping options in a submenu:
+#   https://gamiseus.github.io/wiki/settings-keybinds-and-menus/#grouping-options-in-a-submenu
+
+name = "Example Mod"
+
+[[options]]
+id = "double_xp"
+label = "Double XP"
+type = "checkbox"
+default = false
+
+[[options]]
+id = "advanced"
+label = "Advanced"
+type = "submenu"
+description = "Finer settings for experienced players."
+
+[[options]]
+id = "xp_for_medics"
+label = "Medics Earn XP"
+type = "checkbox"
+default = true
+submenu = "advanced"
+
+[[options]]
+id = "xp_cap"
+label = "XP Cap"
+type = "cycle"
+options = [100, 200, 500]
+default = 200
+submenu = "advanced"
+
+[[options]]
+id = "difficulty"
+label = "Difficulty"
+type = "cycle"
+options = ["Normal", "Hard", "Custom"]
+default = "Normal"
+
+[[options]]
+id = "custom_enemy_count"
+label = "Extra Enemies"
+type = "cycle"
+options = [1, 2, 3]
+default = 1
+show_if = { id = "difficulty", value = "Custom" }

@@ -1,0 +1,13 @@
+{
+  "$schema": "https://gamiseus.github.io/schemas/mod.schema.json",
+  "schema_version": 1,
+  "id": "example_mod",
+  "name": "Example Mod",
+  "version": "1.0.0",
+  "authors": [
+    "Your Name"
+  ],
+  "description": "A value set once in [vars] and filled into a patch's code.",
+  "category": "Gameplay",
+  "game_version": ">=0.5.3"
+}

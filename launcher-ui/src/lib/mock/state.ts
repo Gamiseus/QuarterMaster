@@ -53,6 +53,13 @@ export interface MockLog {
   restarts: number;
   /** Reports made with "Report a problem". */
   issueReports: IssueReportRequest[];
+  /** Mod Engine folders opened in Explorer. */
+  engineReveals: string[];
+  /** Mods made from a template and examples added, as "<template>:<folder>". */
+  templateCreates: string[];
+  templateAdds: string[];
+  /** https links opened in the browser. */
+  openedUrls: string[];
 }
 
 /** Set by e2e specs (via an init script) before the app loads to steer the mock backend. */
@@ -146,6 +153,18 @@ export interface MockInit {
   manualInstall?: boolean;
   /** An earlier QuarterMaster left its data in AppData. */
   legacyData?: boolean;
+  /** The game's Lua was not found, so the Mod Engine does not check Lua. */
+  engineNoLua?: boolean;
+  /** No workspace mods folder is set (the first-run state has none either). */
+  noWorkspace?: boolean;
+  /** The game's files are not read yet, so the Patch Studio has no game file to show. */
+  studioNoGame?: boolean;
+  /** Field Radio is off in the active profile, so the Mod Engine's test is blocked. */
+  testOff?: boolean;
+  /** The Release helper's check fails, so nothing is packed. */
+  packFails?: boolean;
+  /** Adds New Uniforms, a workspace mod with images for the sprite line-up, and Red Army, a faction with one. */
+  spriteMods?: boolean;
 }
 
 declare global {
@@ -156,7 +175,7 @@ declare global {
   }
 }
 
-export const log: MockLog = { lastLoadOrderSet: null, launches: [], imports: [], uninstalls: [], updateInstalls: [], launcherUpdates: [], catalogInstalls: [], reveals: [], dossierExports: [], updateChecks: 0, settingsPatches: [], glueCreates: [], orderRules: [], stackingSets: [], noticeDismissals: [], fixes: [], compatExports: [], trials: [], manualImports: 0, legacyMoves: 0, restarts: 0, issueReports: [] };
+export const log: MockLog = { lastLoadOrderSet: null, launches: [], imports: [], uninstalls: [], updateInstalls: [], launcherUpdates: [], catalogInstalls: [], reveals: [], dossierExports: [], updateChecks: 0, settingsPatches: [], glueCreates: [], orderRules: [], stackingSets: [], noticeDismissals: [], fixes: [], compatExports: [], trials: [], manualImports: 0, legacyMoves: 0, restarts: 0, issueReports: [], engineReveals: [], templateCreates: [], templateAdds: [], openedUrls: [] };
 
 /** Running mock jobs, as `jobs_list` reports them. */
 export const jobs: JobInfo[] = [];

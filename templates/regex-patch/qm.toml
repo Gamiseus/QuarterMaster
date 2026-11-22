@@ -1,0 +1,31 @@
+#:schema https://gamiseus.github.io/schemas/qm.schema.json
+# Example Mod: regex patches.
+# The first changes the frag skill's cooldown from 120 to 60: root_capture replaces only the
+# captured number. The second puts a line inside spawnMNB2Wave, indented like the function.
+# Change first: the payload "60".
+# Wiki: Part 4, Regex patches: https://gamiseus.github.io/wiki/changing-game-code/#regex-patches
+
+[manifest]
+version = "1.0.0"
+
+[[patches]]
+[patches.regex]
+id = "example_mod:frag_cooldown"
+target = "includes/urb_engine.lua"
+pattern = 'player\.deployedTroops\[foo\]\.skill2Timer = (?P<seconds>120)'
+root_capture = "seconds"
+position = "at"
+payload = "60"
+times = 1
+
+[[patches]]
+[patches.regex]
+id = "example_mod:log_wave"
+target = "includes/mnb2.lua"
+pattern = '(?P<indent>[ \t]*)function spawnMNB2Wave\(\)'
+position = "after"
+payload = '''
+
+print("[Example Mod] a wave is spawning")'''
+line_prepend = "$indent  "
+times = 1

@@ -170,6 +170,52 @@ menu.optionsPageIndex["long_mod/"] = 3
 menu_modOptionsButton()
 eq(menu.optionsPageIndex["long_mod/"], nil, "the options screen opens on page 1")
 
+-- Mod Operations cards and pages: on_click from config.toml or from Lua, run when clicked.
+playClickSound = noop
+local clicked = {}
+function exampleStart() clicked[#clicked + 1] = "global" end
+ExampleTable = { open = function() clicked[#clicked + 1] = "dotted" end }
+menu.applyConfigs({
+  card_mod = {
+    name = "Card Mod",
+    modes = {
+      { id = "a", title = "A", on_click = "exampleStart" },
+      { id = "b", title = "B", on_click = "ExampleTable.open" },
+      { id = "c", title = "C", on_click = "page:brief" },
+      { id = "d", title = "D", on_click = "definedLater" },
+    },
+    pages = { { id = "brief", title = "Brief", action_label = "Go", action_on_click = "ExampleTable.open" } },
+  },
+})
+QM.Menu.registerMenuButton({ id = "e", title = "E", modId = "card_mod", on_click = function() clicked[#clicked + 1] = "fn" end })
+QM.Menu.registerMenuButton({ id = "f", title = "F", modId = "card_mod", on_click = "page:brief" })
+function definedLater() clicked[#clicked + 1] = "later" end
+local card = {}
+for _, b in ipairs(menu.menuButtons) do card[b.id] = b end
+card.a.onClick()
+card.b.onClick()
+card.d.onClick()
+card.e.onClick()
+eq(table.concat(clicked, ","), "global,dotted,later,fn", "cards call a global, a dotted name, a global defined later and a function")
+local brief = menu.getPage("card_mod", "brief")
+check(brief ~= nil, "the mod's page has a number")
+menuPage = 1
+card.c.onClick()
+eq(menuPage, brief, "a page: card from config.toml opens the mod's page")
+menuPage = 1
+card.f.onClick()
+eq(menuPage, brief, "a page: card registered from Lua opens it too")
+-- A card added from Lua without its modId still finds a page only one mod has.
+QM.Menu.registerMenuButton({ id = "g", title = "G", on_click = "page:brief" })
+for _, b in ipairs(menu.menuButtons) do card[b.id] = b end
+menuPage = 1
+card.g.onClick()
+eq(menuPage, brief, "a page: card without its modId finds the one page with that id")
+buttons = {}
+menu.customPages[brief].registerButtons()
+_G.menu_custom_actionButton()
+eq(clicked[#clicked], "dotted", "the page's button calls its dotted name")
+
 if failures > 0 then
   print(failures .. " check(s) failed")
   os.exit(1)

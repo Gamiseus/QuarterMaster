@@ -1,0 +1,20 @@
+#:schema https://gamiseus.github.io/schemas/faction.schema.json
+# Example Mod: faction vehicles.
+# The Sherman becomes the Example Tank: its body, turret, wreck and debris come from
+# vehicles/tank/ (placeholders here), with its own name and call signs.
+# Change first: the images in vehicles/tank/.
+# Wiki: Part 3, Vehicles: https://gamiseus.github.io/wiki/faction-mods/#vehicles-vehicles
+
+schema = 1
+id = "example_army"
+name = "Example Army"
+replaces = "allied"
+
+[[vehicles]]
+reskin = "sherman"
+name = "Example Tank"                # shown in the vehicle tooltip
+body = "vehicles/tank/body.png"
+turret = "vehicles/tank/turret.png"
+husk = "vehicles/tank/husk.png"      # the wreck
+debris = "vehicles/tank/debris"      # debris1.png to debris13.png, one per piece of the game's
+call_signs = ["Old Faithful", "Lucky Seven"]

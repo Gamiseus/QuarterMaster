@@ -1,0 +1,26 @@
+#:schema https://gamiseus.github.io/schemas/qm.schema.json
+# Example Mod: a fourth class skill.
+# skill.lua gives the rifle class a fourth skill with QM.Skills. mod.json lists "skills" in
+# qm_features, which also makes QuarterMaster add the button's hook (QuarterMaster 2.2.0 or newer).
+# Change first: the class, the name and what use does.
+# Wiki: Part 5, Class skills: https://gamiseus.github.io/wiki/adding-your-own-lua-files/#class-skills-qmskills
+# Try next: a grenade on the fourth skill (template custom-grenade, skill slot 4).
+
+[manifest]
+version = "1.0.0"
+
+[[patches]]
+[patches.module]
+id = "example_mod:skill_module"
+source = "skill.lua"
+name = "includes/example_mod_skill"
+before = "main.lua"
+
+# Load it once the game's own files are loaded: the skill is added then.
+[[patches]]
+[patches.pattern]
+id = "example_mod:skill_require"
+target = "main.lua"
+pattern = 'require "includes/directives"'
+position = "after"
+payload = 'ExampleMod = require "includes/example_mod_skill"'

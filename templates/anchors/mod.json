@@ -1,0 +1,12 @@
+{
+  "$schema": "https://gamiseus.github.io/schemas/mod.schema.json",
+  "schema_version": 1,
+  "id": "example_mod",
+  "name": "Example Mod",
+  "version": "1.0.0",
+  "authors": ["Your Name"],
+  "description": "A patch placed after another mod's block when that mod is on, and on the game's own line when it is not.",
+  "category": "Gameplay",
+  "game_version": ">=0.5.3",
+  "qm_features": ["anchors"]
+}

@@ -1,0 +1,14 @@
+#:schema https://gamiseus.github.io/schemas/faction.schema.json
+# Example Mod: faction code hooks.
+# hooks.lua runs while Example Army is active: once when the faction is applied, and for every
+# soldier and weapon the game makes.
+# Change first: the code in hooks.lua.
+# Wiki: Part 3, Code: https://gamiseus.github.io/wiki/faction-mods/#code-hooks
+
+schema = 1
+id = "example_army"
+name = "Example Army"
+replaces = "allied"
+
+[hooks]
+lua = "hooks.lua"

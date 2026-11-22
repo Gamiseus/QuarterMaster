@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./fixtures";
 
 const PAGES = ["Mods", "Saves", "Diagnostics", "Settings"];
 
@@ -32,7 +32,7 @@ test("sidebar navigates to each page", async ({ page }) => {
   }
   await nav.getByRole("switch", { name: "Mod Engine" }).click();
   await expect(page.getByRole("heading", { level: 1, name: "Mod Engine" })).toBeVisible();
-  await expect(page.getByText("Mod Engine arrives in a later update.")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Pick a mod" })).toBeVisible();
 });
 
 test("each screen and the Browse tab load without an error toast", async ({ page }) => {

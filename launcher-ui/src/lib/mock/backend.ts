@@ -3,6 +3,11 @@ import { emitMock } from "../events";
 import { mods as fixtureMods, profileDocs, settings, soundSwap } from "./fixtures";
 import { handlers as app } from "./handlers/app";
 import { handlers as diagnostics } from "./handlers/diagnostics";
+import { handlers as engine, writeFromOutside } from "./handlers/engine";
+import { handlers as sprites } from "./handlers/sprites";
+import { handlers as studio } from "./handlers/studio";
+import { handlers as templates } from "./handlers/templates";
+import { handlers as release } from "./handlers/release";
 import { handlers as extras } from "./handlers/extras";
 import { handlers as install } from "./handlers/install";
 import { handlers as mods } from "./handlers/mods";
@@ -14,12 +19,12 @@ import { handlers as updates } from "./handlers/updates";
 import { addCompatScenario, COMPAT_MOD, seedExportClash } from "./compat";
 import { releaseSuggestions, seedAmbiguousFix, seedDriftedFixes, seedFactionOrder, seedGameUpdate, seedLegacyCopy } from "./ledger";
 import { addHaltScenario, addHaltSplitScenario } from "./patchworld";
-import { fail, log, restoreProfiles, state, type Handlers } from "./state";
+import { fail, log, restoreProfiles, state, type Handlers, type MockInit } from "./state";
 
 export type { MockInit, MockLog } from "./state";
 
 const all = new Map<string, Handlers[string]>(
-  [app, settingsHandlers, setupHandlers, profiles, savesHandlers, mods, install, updates, diagnostics, extras].flatMap((h) => Object.entries(h)),
+  [app, settingsHandlers, setupHandlers, profiles, savesHandlers, mods, install, updates, diagnostics, extras, engine, studio, sprites, templates, release].flatMap((h) => Object.entries(h)),
 );
 
 function handle(cmd: string, args: Record<string, unknown> | undefined): unknown {
@@ -32,8 +37,11 @@ function handle(cmd: string, args: Record<string, unknown> | undefined): unknown
 
 /** Applies `window.__qmMockInit`, set by e2e specs before the app loads. */
 function applyInit(): void {
-  const init = window.__qmMockInit ?? {};
+  // `?mockInit={"spriteMods":true}` sets it by hand in the mock dev server.
+  const fromUrl = new URLSearchParams(window.location.search).get("mockInit");
+  const init: MockInit = window.__qmMockInit ?? (fromUrl ? (JSON.parse(fromUrl) as MockInit) : {});
   state.init = { ...init, dialog: init.dialog ? [...init.dialog] : undefined };
+  if (init.noWorkspace) settings.workspace_mods_dir = null;
   if (init.firstRun) {
     settings.first_run_completed = false;
     settings.workspace_mods_dir = null;
@@ -85,4 +93,5 @@ export function installMockBackend(): void {
   window.__qmMockEmit = emitMock;
   window.__qmMockLog = log;
   window.__qmMockReleaseSuggestions = releaseSuggestions;
+  window.__qmMockEngineWrite = writeFromOutside;
 }

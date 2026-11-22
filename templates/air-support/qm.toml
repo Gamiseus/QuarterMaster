@@ -1,0 +1,28 @@
+#:schema https://gamiseus.github.io/schemas/qm.schema.json
+# Example Mod: air support.
+# air_support.lua registers a heavy bomb with QM.Explosions, and with QM.Ordnance an air strike
+# (kind = "airstrike") for the radio operators and a supply drop (kind = "drop") for the
+# medics. mod.json lists "ordnance" in qm_features, which also makes QuarterMaster add the
+# hooks ordnance needs (QuarterMaster 2.2.0 or newer).
+# Change first: the bombs, then what the crate holds.
+# Wiki: Part 5, Air strikes and supply drops: https://gamiseus.github.io/wiki/adding-your-own-lua-files/#air-strikes-and-supply-drops
+# Try next: a strafing run, or call one in from your own code with QM.Ordnance.callIn.
+
+[manifest]
+version = "1.0.0"
+
+[[patches]]
+[patches.module]
+id = "example_mod:air_support_module"
+source = "air_support.lua"
+name = "includes/example_mod_air_support"
+before = "main.lua"
+
+# Load it once the game's own files are loaded: the ordnance is registered then.
+[[patches]]
+[patches.pattern]
+id = "example_mod:air_support_require"
+target = "main.lua"
+pattern = 'require "includes/directives"'
+position = "after"
+payload = 'ExampleMod = require "includes/example_mod_air_support"'

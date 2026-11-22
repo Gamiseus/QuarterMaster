@@ -1,0 +1,42 @@
+#:schema https://gamiseus.github.io/schemas/faction.schema.json
+# Example Mod: faction skills.
+# This faction stands in for the Allies, with its own class skills (in a Campaign battle):
+# riflemen fire tungsten rounds and charge as the light infantry do, gunners have no
+# incendiary rounds, snipers have head shots from level 1, and medics can rally at level 4.
+# mod.json lists "skills" in qm_features (QuarterMaster 2.2.0 or newer).
+# Change first: which class and slot each entry is for.
+# Wiki: Part 3, Skills: https://gamiseus.github.io/wiki/faction-mods/#skills-skills
+
+schema = 1
+id = "example_army"
+name = "Example Army"
+replaces = "allied"
+
+[[skills]]
+class = "rifle"
+slot = 1
+name = "Tungsten rounds"
+description = "armour-piercing rounds, ready sooner"
+icon = "icons/tungsten.png"
+cooldown = 120
+
+[[skills]]
+class = "rifle"
+slot = 3
+game = "light:3"                        # the light infantry's charge
+
+[[skills]]
+class = "gunner"
+slot = 3
+remove = true                           # no incendiary rounds
+
+[[skills]]
+class = "sniper"
+slot = 3
+unlock = 1                              # head shots from the start
+
+[[skills]]
+class = "medic"
+slot = 4                                # a new skill above the three
+game = "officer:1"                      # the officer's rally
+unlock = 4                              # at a skill level past 3

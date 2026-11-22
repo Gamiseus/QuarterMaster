@@ -56,6 +56,13 @@ pub enum QmEvent {
     Recovered {
         summary: String,
     },
+    /// A file of a workspace mod changed on disk (the Mod Engine reloads it).
+    WorkspaceChanged {
+        /// The mod's folder in the workspace.
+        folder: String,
+        /// The file's path inside the mod, with `/`.
+        path: String,
+    },
 }
 
 pub trait EventSink: Send + Sync + 'static {

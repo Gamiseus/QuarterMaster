@@ -1,0 +1,11 @@
+name = "Read the active faction"
+part = 3
+order = 14
+section = "Reading the active faction from another mod"
+summary = "A code mod that asks which faction holds each side, and what a faction's weapons and vehicles are called."
+open = "faction_reader.lua"
+try_next = ["Change your mod's behaviour when a faction replaces the Allies."]
+[[examples]]
+section = "Reading the active faction from another mod"
+block = 1
+file = "faction_reader.lua"

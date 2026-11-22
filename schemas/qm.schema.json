@@ -280,6 +280,20 @@
       "description": "copy patches in the short form: each [[copy]] entry is one patch, the same table as [patches.copy] under [[patches]]. Both forms can be mixed in one file.",
       "items": {
         "properties": {
+          "after": {
+            "description": "Patches this one runs after, by id, \"mod_id:patch_id\" or \"mod_id:*\".",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "before": {
+            "description": "Patches this one runs before, by id, \"mod_id:patch_id\" or \"mod_id:*\".",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
           "group": {
             "description": "A label the launcher lists this patch under, such as \"HUD\". The loader does not use it.",
             "type": "string"
@@ -288,6 +302,16 @@
             "type": "string"
           },
           "name": {
+            "type": "string"
+          },
+          "on_failure": {
+            "default": "warn",
+            "enum": [
+              "warn",
+              "skip_patch",
+              "skip_mod",
+              "abort"
+            ],
             "type": "string"
           },
           "payload": {
@@ -299,6 +323,10 @@
               "append"
             ],
             "type": "string"
+          },
+          "priority": {
+            "description": "Overrides the mod's priority for this patch. Lower runs first.",
+            "type": "integer"
           },
           "sources": {
             "items": {
@@ -369,6 +397,20 @@
           "name": {
             "type": "string"
           },
+          "on_failure": {
+            "default": "warn",
+            "enum": [
+              "warn",
+              "skip_patch",
+              "skip_mod",
+              "abort"
+            ],
+            "type": "string"
+          },
+          "priority": {
+            "description": "Overrides the mod's priority for this patch. Lower runs first.",
+            "type": "integer"
+          },
           "source": {
             "type": "string"
           }
@@ -390,21 +432,26 @@
     },
     "patches": {
       "items": {
+        "description": "One patch: exactly one of [patches.pattern], [patches.regex], [patches.copy] or [patches.module], with all of the patch's keys inside it.",
+        "maxProperties": 1,
+        "minProperties": 1,
         "properties": {
-          "after": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "before": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
           "copy": {
             "properties": {
+              "after": {
+                "description": "Patches this one runs after, by id, \"mod_id:patch_id\" or \"mod_id:*\".",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "before": {
+                "description": "Patches this one runs before, by id, \"mod_id:patch_id\" or \"mod_id:*\".",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
               "group": {
                 "description": "A label the launcher lists this patch under, such as \"HUD\". The loader does not use it.",
                 "type": "string"
@@ -413,6 +460,16 @@
                 "type": "string"
               },
               "name": {
+                "type": "string"
+              },
+              "on_failure": {
+                "default": "warn",
+                "enum": [
+                  "warn",
+                  "skip_patch",
+                  "skip_mod",
+                  "abort"
+                ],
                 "type": "string"
               },
               "payload": {
@@ -424,6 +481,10 @@
                   "append"
                 ],
                 "type": "string"
+              },
+              "priority": {
+                "description": "Overrides the mod's priority for this patch. Lower runs first.",
+                "type": "integer"
               },
               "sources": {
                 "items": {
@@ -451,9 +512,6 @@
             ],
             "type": "object"
           },
-          "id": {
-            "type": "string"
-          },
           "module": {
             "properties": {
               "before": {
@@ -473,6 +531,20 @@
               "name": {
                 "type": "string"
               },
+              "on_failure": {
+                "default": "warn",
+                "enum": [
+                  "warn",
+                  "skip_patch",
+                  "skip_mod",
+                  "abort"
+                ],
+                "type": "string"
+              },
+              "priority": {
+                "description": "Overrides the mod's priority for this patch. Lower runs first.",
+                "type": "integer"
+              },
               "source": {
                 "type": "string"
               }
@@ -483,21 +555,15 @@
             ],
             "type": "object"
           },
-          "name": {
-            "type": "string"
-          },
-          "on_failure": {
-            "default": "warn",
-            "enum": [
-              "warn",
-              "skip_patch",
-              "skip_mod",
-              "abort"
-            ],
-            "type": "string"
-          },
           "pattern": {
             "properties": {
+              "after": {
+                "description": "Patches this one runs after, by id, \"mod_id:patch_id\" or \"mod_id:*\".",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
               "anchors": {
                 "items": {
                   "$ref": "#/definitions/rung"
@@ -511,6 +577,16 @@
                   "literal",
                   "edits"
                 ],
+                "type": "string"
+              },
+              "before": {
+                "description": "Patches this one runs before, by id, \"mod_id:patch_id\" or \"mod_id:*\".",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "description": {
                 "type": "string"
               },
               "expect": {
@@ -553,6 +629,10 @@
                   "after"
                 ],
                 "type": "string"
+              },
+              "priority": {
+                "description": "Overrides the mod's priority for this patch. Lower runs first.",
+                "type": "integer"
               },
               "requires": {
                 "description": "Patches this patch needs, by id, \"mod_id:patch_id\" or \"mod_id:*\". One in the same file runs first; when it did not apply, this patch is skipped.",
@@ -601,16 +681,30 @@
             ],
             "type": "object"
           },
-          "priority": {
-            "type": "integer"
-          },
           "regex": {
             "properties": {
+              "after": {
+                "description": "Patches this one runs after, by id, \"mod_id:patch_id\" or \"mod_id:*\".",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
               "anchors": {
                 "items": {
                   "$ref": "#/definitions/rung"
                 },
                 "type": "array"
+              },
+              "before": {
+                "description": "Patches this one runs before, by id, \"mod_id:patch_id\" or \"mod_id:*\".",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "description": {
+                "type": "string"
               },
               "expect": {
                 "minimum": 1,
@@ -651,6 +745,10 @@
                   "after"
                 ],
                 "type": "string"
+              },
+              "priority": {
+                "description": "Overrides the mod's priority for this patch. Lower runs first.",
+                "type": "integer"
               },
               "requires": {
                 "description": "Patches this patch needs, by id, \"mod_id:patch_id\" or \"mod_id:*\". One in the same file runs first; when it did not apply, this patch is skipped.",
@@ -715,6 +813,13 @@
       "description": "pattern patches in the short form: each [[pattern]] entry is one patch, the same table as [patches.pattern] under [[patches]]. Both forms can be mixed in one file.",
       "items": {
         "properties": {
+          "after": {
+            "description": "Patches this one runs after, by id, \"mod_id:patch_id\" or \"mod_id:*\".",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
           "anchors": {
             "items": {
               "$ref": "#/definitions/rung"
@@ -728,6 +833,16 @@
               "literal",
               "edits"
             ],
+            "type": "string"
+          },
+          "before": {
+            "description": "Patches this one runs before, by id, \"mod_id:patch_id\" or \"mod_id:*\".",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "description": {
             "type": "string"
           },
           "expect": {
@@ -770,6 +885,10 @@
               "after"
             ],
             "type": "string"
+          },
+          "priority": {
+            "description": "Overrides the mod's priority for this patch. Lower runs first.",
+            "type": "integer"
           },
           "requires": {
             "description": "Patches this patch needs, by id, \"mod_id:patch_id\" or \"mod_id:*\". One in the same file runs first; when it did not apply, this patch is skipped.",
@@ -856,11 +975,28 @@
       "description": "regex patches in the short form: each [[regex]] entry is one patch, the same table as [patches.regex] under [[patches]]. Both forms can be mixed in one file.",
       "items": {
         "properties": {
+          "after": {
+            "description": "Patches this one runs after, by id, \"mod_id:patch_id\" or \"mod_id:*\".",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
           "anchors": {
             "items": {
               "$ref": "#/definitions/rung"
             },
             "type": "array"
+          },
+          "before": {
+            "description": "Patches this one runs before, by id, \"mod_id:patch_id\" or \"mod_id:*\".",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "description": {
+            "type": "string"
           },
           "expect": {
             "minimum": 1,
@@ -901,6 +1037,10 @@
               "after"
             ],
             "type": "string"
+          },
+          "priority": {
+            "description": "Overrides the mod's priority for this patch. Lower runs first.",
+            "type": "integer"
           },
           "requires": {
             "description": "Patches this patch needs, by id, \"mod_id:patch_id\" or \"mod_id:*\". One in the same file runs first; when it did not apply, this patch is skipped.",
@@ -962,9 +1102,41 @@
       "additionalProperties": {
         "additionalProperties": false,
         "properties": {
+          "draw_size": {
+            "description": "Draw the picture at [width, height] game pixels inside its place, while the game's code still sees the original's size. Needs \"sprite_transforms\" in qm_features.",
+            "items": {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            "maxItems": 2,
+            "minItems": 2,
+            "type": "array"
+          },
+          "flip": {
+            "description": "Mirror the image about its middle: x left-right, y up-down, xy both. Needs \"sprite_transforms\" in qm_features.",
+            "enum": [
+              "x",
+              "y",
+              "xy"
+            ],
+            "type": "string"
+          },
           "like": {
             "description": "Show the image at the size another image global is shown at.",
             "type": "string"
+          },
+          "offset": {
+            "description": "Move the image by [x, y] game pixels, right and down, inside the place the game draws it. Needs \"sprite_transforms\" in qm_features.",
+            "items": {
+              "type": "number"
+            },
+            "maxItems": 2,
+            "minItems": 2,
+            "type": "array"
+          },
+          "rotate": {
+            "description": "Turn the image about its middle, in degrees clockwise. Needs \"sprite_transforms\" in qm_features.",
+            "type": "number"
           },
           "scale": {
             "description": "A fraction of the image's own pixel size: 0.25 shows a 400x400 file at 100x100.",
@@ -984,7 +1156,7 @@
         },
         "type": "object"
       },
-      "description": "The size an image is shown at, by the name of its global (e.g. top_m1), whatever the file's resolution. A replaced image takes the original's size without a rule. See the modding wiki, Part 2: https://gamiseus.github.io/wiki/",
+      "description": "The size an image is shown at, and where it sits, by the name of its global (e.g. top_m1), whatever the file's resolution. A replaced image takes the original's size without a rule. See the modding wiki, Part 2: https://gamiseus.github.io/wiki/",
       "type": "object"
     },
     "vars": {

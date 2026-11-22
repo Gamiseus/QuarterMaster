@@ -1,0 +1,17 @@
+# Example Mod: a keybind.
+# Press Ctrl+T in the game to print where the mouse points on the map. The key shows in the
+# game's Keybinds screen, under its own tab, where players can change it.
+# Change first: default (the key), modifiers and name.
+# Wiki: Part 6, Keybinds: https://gamiseus.github.io/wiki/settings-keybinds-and-menus/#keybinds
+
+name = "Example Mod"
+
+[[keybinds]]
+id = "example_mod_ping"
+name = "Ping Location"
+category = "Orders"
+tab = "Example Mod"
+default = "t"
+modifiers = ["ctrl"]
+description = "Marks the spot under the cursor."
+on_trigger = "ExampleMod.onPing"

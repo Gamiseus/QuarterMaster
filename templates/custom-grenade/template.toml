@@ -1,0 +1,11 @@
+name = "A custom grenade"
+part = 5
+order = 5
+section = "Ordnance: `QM.Ordnance`"
+summary = "A new grenade with its own sprite and explosion, thrown by the light infantry's second skill."
+open = "grenade.lua"
+try_next = ["Draw your grenade in assets/sprites/ (it is 40 by 40, as the frag).", "Make it a fourth skill instead: skill = { class = \"light\", slot = 4 }.", "Let the Axis throw it in place of their frags with replaces_frag = \"axis\".", "Make a rifle grenade instead: kind = \"rifle\" (template rifle-grenade)."]
+[[examples]]
+section = "Ordnance: `QM.Ordnance`"
+block = 1
+file = "grenade.lua"

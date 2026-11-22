@@ -781,6 +781,9 @@ impl Service {
             Some((profile, open.run_id))
         });
         let (profile, run_id) = run?;
+        // Options changed in the game's Mod Settings menu go to the profile's own copy now,
+        // so every reader of the profile (Options tab, compare, duplicate) sees them.
+        self.paths().capture_live_mod_settings(&profile);
         let done = match self.paths().finish_run(&profile, &run_id, exit_code, note) {
             Ok(done) => done,
             Err(e) => {

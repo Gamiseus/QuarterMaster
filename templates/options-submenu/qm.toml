@@ -1,0 +1,5 @@
+#:schema https://gamiseus.github.io/schemas/qm.schema.json
+# Example Mod: options only, in config.toml; no patches.
+
+[manifest]
+version = "1.0.0"

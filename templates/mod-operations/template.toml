@@ -1,0 +1,15 @@
+name = "A Mod Operations card"
+part = 6
+order = 4
+section = "Mod Operations: cards and pages"
+summary = "A card on the game's Mod Operations screen that opens a page with a button."
+open = "config.toml"
+try_next = ["Make the button start something in the game."]
+[[examples]]
+section = "Mod Operations: cards and pages"
+block = 1
+file = "config.toml"
+[[examples]]
+section = "Mod Operations: cards and pages"
+block = 2
+file = "operations.lua"

@@ -47,8 +47,19 @@ class AppStore {
   page = $state<Page>("mods");
   startupDone = $state(false);
   mode = $state<Mode>("launcher");
+  /** Asked before the screen changes; false keeps the current one (the Mod Engine's unsaved edits). */
+  leaveGuard: (() => Promise<boolean>) | null = null;
   #shownRecoveries = new Set<string>();
   #seq = 0;
+
+  /** Shows a screen, once the screen being left agrees. Returns false when it stayed. */
+  async goTo(mode: Mode, page?: Page): Promise<boolean> {
+    if (mode === this.mode && (page === undefined || page === this.page)) return true;
+    if (this.leaveGuard && !(await this.leaveGuard())) return false;
+    this.mode = mode;
+    if (page !== undefined) this.page = page;
+    return true;
+  }
 
   async load(): Promise<void> {
     const seq = ++this.#seq;

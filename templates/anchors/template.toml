@@ -1,0 +1,11 @@
+name = "Anchors on another mod's code"
+part = 7
+order = 2
+section = "Anchors: placing your code on another mod's code"
+summary = "A patch placed after another mod's block when that mod is on, and on the game's own line when it is not."
+open = "qm.toml"
+try_next = ["Anchor on a line inside the other mod's block with pattern and exact."]
+[[examples]]
+section = "Anchors: placing your code on another mod's code"
+block = 1
+file = "qm.toml"

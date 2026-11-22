@@ -1,0 +1,24 @@
+#:schema https://gamiseus.github.io/schemas/qm.schema.json
+# Example Mod: a custom screen.
+# screen.lua asks for a page number and draws the page itself; the card in config.toml opens
+# it, and its Back button returns to the main menu.
+# Change first: what draw() shows.
+# Wiki: Part 6, A fully custom screen: https://gamiseus.github.io/wiki/settings-keybinds-and-menus/#a-fully-custom-screen
+
+[manifest]
+version = "1.0.0"
+
+[[patches]]
+[patches.module]
+id = "example_mod:screen_module"
+source = "screen.lua"
+name = "includes/example_mod_screen"
+before = "main.lua"
+
+[[patches]]
+[patches.pattern]
+id = "example_mod:screen_require"
+target = "main.lua"
+pattern = 'require "includes/directives"'
+position = "after"
+payload = 'ExampleMod = require "includes/example_mod_screen"'

@@ -1,0 +1,55 @@
+#:schema https://gamiseus.github.io/schemas/qm.schema.json
+# Example Mod: order and requirements.
+# example_mod:require puts its line after other mods' lines at the same spot (stack = "last").
+# example_mod:add_helper defines a helper; example_mod:use_helper needs it, and also needs
+# other_mod:load_module: when either did not apply, use_helper is skipped, so a missing
+# helper never crashes the game. A name that matches no loaded patch (other_mod is not
+# installed) only gives a warning in the log, and use_helper still runs.
+# example_mod:after_helper shows `after`: it runs after add_helper in the same file.
+# Change first: the ids in requires and after.
+# Wiki: Part 7, Working with other mods: https://gamiseus.github.io/wiki/working-with-other-mods/#part-7-working-with-other-mods
+
+[manifest]
+version = "1.0.0"
+
+[[patches]]
+[patches.module]
+id = "example_mod:module"
+source = "example.lua"
+name = "includes/example_mod"
+before = "main.lua"
+
+[[patches]]
+[patches.pattern]
+id = "example_mod:require"
+target = "main.lua"
+pattern = 'require "includes/directives"'
+position = "after"
+payload = 'ExampleMod = require "includes/example_mod"'
+stack = "last"               # or "first"
+
+[[patches]]
+[patches.pattern]
+id = "example_mod:add_helper"
+target = "main.lua"
+pattern = 'tensionLoop:setLooping(true)'
+position = "before"
+payload = 'function ExampleMod.useHelper() print("[Example Mod] helper used") end'
+
+[[patches]]
+[patches.pattern]
+id = "example_mod:use_helper"
+requires = ["example_mod:add_helper", "other_mod:load_module"]
+target = "main.lua"
+pattern = 'tensionLoop:setLooping(true)'
+position = "before"
+payload = 'ExampleMod.useHelper()'
+
+[[patches]]
+[patches.pattern]
+id = "example_mod:after_helper"
+after = ["example_mod:add_helper"]
+target = "main.lua"
+pattern = 'tensionLoop:setLooping(true)'
+position = "before"
+payload = 'print("[Example Mod] after the helper")'

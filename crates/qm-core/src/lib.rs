@@ -137,6 +137,24 @@ do
       love.load = function(...)
         local r = qm_pack(orig_load(...))
         qm_reassert_errhand()
+        -- QM.Ordnance and QM.Skills: the game functions they wrap, once its own are loaded.
+        local qm_ordnance = rawget(_G, "QM") and rawget(_G, "QM").Ordnance
+        if type(qm_ordnance) == "table" and type(qm_ordnance.install) == "function" then
+          pcall(qm_ordnance.install)
+        end
+        local qm_skills = rawget(_G, "QM") and rawget(_G, "QM").Skills
+        if type(qm_skills) == "table" and type(qm_skills.install) == "function" then
+          pcall(qm_skills.install)
+        end
+        -- QM.Events watches the game once a frame.
+        local qm_events = rawget(_G, "QM") and rawget(_G, "QM").Events
+        local game_update = love.update
+        if type(qm_events) == "table" and type(qm_events.tick) == "function" and type(game_update) == "function" then
+          love.update = function(...)
+            pcall(qm_events.tick)
+            return game_update(...)
+          end
+        end
         -- A mod may have replaced a game function QuarterMaster wraps (updateProfile, the
         -- faction's functions) after it was wrapped: put QuarterMaster's part back around it.
         local reassert = rawget(_G, "__qm_reassert_wrappers")

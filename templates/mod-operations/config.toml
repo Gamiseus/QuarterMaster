@@ -1,0 +1,22 @@
+# Example Mod: a Mod Operations card and page.
+# The card shows on the game's Mod Operations screen; it opens the briefing page, whose Begin
+# button calls exampleStartOperation in operations.lua.
+# Change first: the card's title and the page's text.
+# Wiki: Part 6, Mod Operations: https://gamiseus.github.io/wiki/settings-keybinds-and-menus/#mod-operations-cards-and-pages
+
+name = "Example Mod"
+
+[[modes]]
+id = "example_briefing"
+title = "Example Operation"
+subtitle = "A sample mission"
+description = "Opens the briefing for the example operation."
+priority = 50
+on_click = "page:briefing"
+
+[[pages]]
+id = "briefing"
+title = "Example Operation"
+content = "Hold the line for ten minutes. Reinforcements arrive at dawn."
+action_label = "Begin"
+action_on_click = "exampleStartOperation"

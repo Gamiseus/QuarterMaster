@@ -180,7 +180,7 @@ mouseOverRifleSpec = "Heavy Infantry, Medium to long range"
 mouseOverGunnerSpec = "Gunner, Lays suppressive fire"
 mouseOverLightSpec = "Light Infantry, fast"
 
-for _, name in ipairs({ "specClick", "getRandomAlliedGun", "getRandomGruntGun", "getRandomSMG", "firstNamer", "batiseur", "batiseurAirborne", "vehicleNamer" }) do
+for _, name in ipairs({ "specClick", "getRandomAlliedGun", "getRandomGruntGun", "getRandomSMG", "firstNamer", "batiseur", "batiseurAirborne", "vehicleNamer", "soldierRankTell" }) do
   vanilla(name)
 end
 convertedId = function(id) return id end
@@ -200,6 +200,14 @@ if scenario == "pools" then
     return game_grunt()
   end
   getRandomAlliedGun = function() error("the other mod's pool is broken") end
+end
+
+-- The [sprites] size rules a faction hands on.
+local sprite_rules_seen = {}
+local real_sprite_rules = rawget(_G, "__qm_sprite_rules")
+__qm_sprite_rules = function(id, rules)
+  sprite_rules_seen[id] = rules
+  if real_sprite_rules then return real_sprite_rules(id, rules) end
 end
 
 player = { unlock = vanilla_unlock(), deployedTroops = {}, deployedVehicles = {} }
@@ -421,6 +429,21 @@ eq(sherman_debris3.bytes, "vehicles/t34/debris1.png", "debris 3 reuses 1")
 eq(__qm_vehicle_label({ tag = "sherman" }), "T-34/76", "vehicle tooltip name")
 eq(__qm_vehicle_label({ tag = "jeep" }), "jeep", "other vehicles keep their tag")
 
+-- Rank names.
+eq(soldierRankTell({ faction = "allied", spec = "rifle", rank = 0 }), "Krasnoarmeyets", "rank 0 is named")
+eq(soldierRankTell({ faction = "allied", spec = "rifle", rank = 1 }), "Yefreitor", "rank 1 is named")
+eq(soldierRankTell({ faction = "allied", spec = "rifle", rank = 2 }), "Corporal", "a rank not named keeps the game's")
+eq(soldierRankTell({ faction = "allied", spec = "rifle" }), "Krasnoarmeyets", "no rank: the first rank")
+eq(soldierRankTell({ faction = "allied", spec = "officer" }), "Kursant", "an officer with no rank: cadet")
+eq(soldierRankTell({ faction = "allied", spec = "officer", rank = 1 }), "First Lieutenant", "officer ranks not named keep the game's")
+eq(soldierRankTell({ faction = "axis", spec = "rifle", rank = 0 }), "Private", "the other side keeps the game's")
+
+-- Sizes go to the [sprites] size rules.
+local rules = sprite_rules_seen["faction:red_army"]
+check(rules and rules.rank_1 and rules.rank_1.size[1] == 18 and rules.rank_1.size[2] == 22, "a sized sprite's rule")
+eq(rules and rules.spec_rifle and rules.spec_rifle.scale, 0.5, "a size for the game's own image")
+eq(rank_1 and rank_1.bytes, "misc/rank_1.png", "a sized sprite's file is loaded")
+
 -- Hooks and the public view.
 eq(TEST_HOOK_ENABLED, "red_army", "hooks on_enable")
 check((TEST_WEAPONS_CREATED or 0) > 0, "hooks on_weapon_created")
@@ -436,5 +459,22 @@ run("factions.lua")
 before = TEST_WEAPONS_CREATED or 0
 weaponCreator({}, "m1")
 eq((TEST_WEAPONS_CREATED or 0) - before, per_call, "a second apply does not double the hooks")
+
+-- The Sarge's title: the game's texts that name him, and the helpers its patched lines call.
+mnb2CallSarge = "Call Sarge, hard hitting experienced hero unit"
+oneSargeTxt = "there's only one Sarge..."
+perkText6 = "Mentor: Each kill has 5% to call a Sarge the section can only have one sarge"
+__qm_factions_runtime.load_ranks({ replaces = "allied", ranks = { soldier = {}, officer = {}, sarge = "Starshina" },
+  text = { oneSargeTxt = "there's only one Sarge..." } })
+eq(mnb2CallSarge, "Call Starshina, hard hitting experienced hero unit", "a game text names the Sarge's title")
+eq(perkText6, "Mentor: Each kill has 5% to call a Starshina the section can only have one starshina", "lower case too")
+eq(oneSargeTxt, "there's only one Sarge...", "a text the faction set itself is left alone")
+eq(__qm_sarge_text("HEADS UP, SARGE IN THE AO!!"), "HEADS UP, STARSHINA IN THE AO!!", "upper case")
+eq(__qm_sarge_text("Sarge"), "Starshina", "his name")
+check(__qm_is_sarge({ name = "Starshina" }), "the Sarge by his title")
+check(__qm_is_sarge({ name = "Sarge" }), "and a Sarge from an older save")
+check(not __qm_is_sarge({ name = "Ivanov" }), "not anyone else")
+__qm_factions_runtime.load_ranks({ replaces = "axis", ranks = { soldier = {}, officer = {}, sarge = "Feldwebel" } })
+eq(__qm_sarge_title, "Starshina", "an Axis faction does not name the Sarge")
 
 if failures == 0 then print("HARNESS OK") else os.exit(1) end

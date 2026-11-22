@@ -1,0 +1,11 @@
+name = "Faction classes"
+part = 3
+order = 5
+section = "Classes: `[classes.<slot>]` (Allied side)"
+summary = "An Allied class renamed, with its own weapon upgrades, bonus, skill names and badge."
+open = "faction.toml"
+try_next = ["Rename the other classes the same way: the wiki lists the slots."]
+[[examples]]
+section = "Classes: `[classes.<slot>]` (Allied side)"
+block = 1
+file = "faction.toml"

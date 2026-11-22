@@ -1,0 +1,8 @@
+name = "Replace a sound"
+part = 2
+order = 1
+section = "How a file finds what it replaces"
+summary = "One of the game's sounds replaced by a file with the same name. No code."
+open = "qm.toml"
+aliases = ["assets", "sound_replacer", "asset_file_injection"]
+try_next = ["Record your own garand1.wav and drop it in place of the placeholder.", "Add garand5.wav to make the M1's sound pool larger (template sound-pool)."]

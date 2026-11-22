@@ -10,6 +10,7 @@
   import { lineRules } from "../lib/stores/linerules.svelte";
   import { stacking } from "../lib/stores/stacking.svelte";
   import { openFixes } from "../screens/mods/mods-view.svelte";
+  import { app } from "../lib/stores/app.svelte";
   import LineRulesNotice from "../screens/mods/patches/LineRulesNotice.svelte";
   import StackingNotice from "../screens/mods/patches/StackingNotice.svelte";
   import FailureGroupRow from "../screens/mods/patches/FailureGroupRow.svelte";
@@ -35,12 +36,15 @@
   const loadErrors = $derived(prelaunch.loadErrors);
   const waiting = $derived(prelaunch.waiting);
   const fixWarnings = $derived(prelaunch.fixWarnings);
+  const saveMods = $derived(prelaunch.saveMods);
 
   const description = $derived(
     !blocked
       ? prelaunch.notice
         ? "Choose how code from several mods at one line is ordered before you play."
-        : "Some of your fixes need a look. You can still launch."
+        : fixWarnings.length > 0
+          ? "Some of your fixes need a look. You can still launch."
+          : "This save was played with mods this profile does not load. You can still launch."
       : planError !== null
       ? "QuarterMaster cannot read this profile's load order file, so the game would start with no mods."
       : prelaunch.compileErrors.length > 0
@@ -57,7 +61,7 @@
   // The dialog only makes sense while something blocks a launch (it may clear while it is open),
   // while it shows the stacking notice, or while fixes need a look.
   $effect(() => {
-    if (!prelaunch.blocked && !prelaunch.notice && prelaunch.fixWarnings.length === 0) prelaunch.open = false;
+    if (!prelaunch.blocked && !prelaunch.notice && prelaunch.fixWarnings.length === 0 && prelaunch.saveMods.length === 0) prelaunch.open = false;
   });
   $effect(() => {
     if (!prelaunch.open) prelaunch.notice = false;
@@ -77,6 +81,11 @@
   function reviewFixes() {
     prelaunch.open = false;
     openFixes();
+  }
+
+  function openSaves() {
+    prelaunch.open = false;
+    void app.goTo("launcher", "saves");
   }
 
   function launchWithoutMods() {
@@ -160,6 +169,16 @@
         {#each fixWarnings as line (line)}<li>{line}</li>{/each}
       </ul>
       <Button size="sm" onclick={reviewFixes}>Review fixes</Button>
+    </div>
+  {/if}
+  {#if saveMods.length > 0}
+    <p class="conflicts-title">Save slot</p>
+    <div class="row">
+      <p class="note" aria-label="Save slot warning">
+        The save slot was last played with {saveMods.map(modName).join(", ")}, which this profile does not load, so the save
+        may not play right. Turn the {saveMods.length === 1 ? "mod" : "mods"} on, or pick another save slot.
+      </p>
+      <Button size="sm" onclick={openSaves}>Save slots</Button>
     </div>
   {/if}
   {#if waiting.length > 0}

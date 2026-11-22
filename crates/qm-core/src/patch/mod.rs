@@ -22,6 +22,7 @@ pub mod copy;
 pub mod edits;
 pub mod faction;
 pub mod fingerprint;
+pub mod ordnance;
 pub mod linemap;
 pub mod loader;
 pub mod menu;
@@ -40,6 +41,8 @@ pub mod vars;
 mod menu_runtime_tests;
 #[cfg(test)]
 mod input_runtime_tests;
+#[cfg(test)]
+mod events_runtime_tests;
 
 pub type Priority = i32;
 
@@ -150,7 +153,8 @@ impl From<RawPatchFile> for PatchFile {
     }
 }
 
-/// One `[sprites.<name>]` entry. Exactly one key is used: `size`, `scale` or `like`.
+/// One `[sprites.<name>]` entry: at most one of `size`, `scale` and `like`, and any of the
+/// place keys `offset`, `rotate`, `flip` and `draw_size`.
 #[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq)]
 pub struct SpriteRule {
     /// Show the image at this width and height, in the game's pixels.
@@ -163,6 +167,19 @@ pub struct SpriteRule {
     /// Show the image at the size another image global is shown at.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub like: Option<String>,
+    /// Move it inside the box the game draws it in, in the game's pixels (right, down).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub offset: Option<[f64; 2]>,
+    /// Turn it about its middle, in degrees, clockwise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rotate: Option<f64>,
+    /// Mirror it about its middle: "x" (left-right), "y" (up-down) or "xy".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub flip: Option<String>,
+    /// Draw the picture at this width and height inside its box, in the game's pixels. The
+    /// box, the size the game's code sees, stays as it is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub draw_size: Option<[f64; 2]>,
 }
 
 #[cfg_attr(feature = "specta", derive(specta::Type))]

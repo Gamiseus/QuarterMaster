@@ -1,0 +1,20 @@
+#:schema https://gamiseus.github.io/schemas/faction.schema.json
+# Example Mod: faction unit art.
+# The rifleman (base) and the sergeant get their own frames. units/base/ has idle.png and
+# aim.png (placeholders here); the sergeant borrows what it lacks from base, and its idle
+# frame comes from units/shared/. Frames missing from both stay the game's.
+# Change first: draw your frames at any resolution, in the vanilla frame's proportions.
+# Wiki: Part 3, Unit art: https://gamiseus.github.io/wiki/faction-mods/#unit-art-unitsunit
+
+schema = 1
+id = "example_army"
+name = "Example Army"
+replaces = "allied"
+
+[units.base]
+folder = "units/base"
+
+[units.sarge]
+folder = "units/sarge"
+copy_from = "base"                                # frames the sergeant lacks use your base frames
+frames = { idle = "units/shared/idle_cap.png" }   # point single frames anywhere

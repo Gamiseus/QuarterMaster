@@ -2,6 +2,7 @@ import { onEvent } from "../events";
 import { app } from "./app.svelte";
 import { catalog } from "./catalog.svelte";
 import { diagnostics } from "./diagnostics.svelte";
+import { engine } from "./engine.svelte";
 import { fixes } from "./fixes.svelte";
 import { game } from "./game.svelte";
 import { jobs } from "./jobs.svelte";
@@ -31,6 +32,7 @@ export function connectStores(): () => void {
     game.handle(e);
     jobs.handle(e);
     logs.handle(e);
+    engine.handle(e);
   });
 }
 

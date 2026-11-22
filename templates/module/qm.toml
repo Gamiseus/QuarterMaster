@@ -1,0 +1,38 @@
+#:schema https://gamiseus.github.io/schemas/qm.schema.json
+# Example Mod: your own Lua file.
+# Three patches: register example.lua under a name the game can require, load it once the
+# game's files are loaded, and call its update every frame.
+# Change first: the code in example.lua.
+# Wiki: Part 5, Module patches: https://gamiseus.github.io/wiki/adding-your-own-lua-files/#module-patches
+
+[manifest]
+version = "1.0.0"
+
+# 1. Register the file.
+[[patches]]
+[patches.module]
+id = "example_mod:module"
+source = "example.lua"
+name = "includes/example_mod"
+before = "main.lua"
+
+# 2. Load it once the game's own files are loaded.
+[[patches]]
+[patches.pattern]
+id = "example_mod:require"
+target = "main.lua"
+pattern = 'require "includes/directives"'
+position = "after"
+payload = 'ExampleMod = require "includes/example_mod"'
+
+# 3. Call it every frame.
+[[patches]]
+[patches.pattern]
+id = "example_mod:update"
+target = "main.lua"
+pattern = 'function love.update(dt)'
+position = "after"
+payload = '''
+if ExampleMod and ExampleMod.update then ExampleMod.update(dt) end
+'''
+match_indent = true

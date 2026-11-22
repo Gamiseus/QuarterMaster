@@ -1,0 +1,15 @@
+name = "Regex patches"
+part = 4
+order = 4
+section = "Regex patches"
+summary = "Two regex patches: a number in the game's code changed, and a line added after a function."
+open = "qm.toml"
+try_next = ["Halve the cooldown again, or match another skill timer."]
+[[examples]]
+section = "Regex patches"
+block = 1
+file = "qm.toml"
+[[examples]]
+section = "Regex patches"
+block = 2
+file = "qm.toml"

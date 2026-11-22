@@ -1,0 +1,31 @@
+# Example Mod: options.
+# These rows appear in the game under Mod Operations > Mod Settings, and on the mod's Options
+# tab in the launcher. Their values are kept per profile and read in Lua as
+# QM.settings.example_mod.<id>. The button calls ExampleMod.resetStats in options.lua.
+# Change first: label, description and default.
+# Wiki: Part 6, Options: https://gamiseus.github.io/wiki/settings-keybinds-and-menus/#options
+
+name = "Example Mod"
+
+[[options]]
+id = "double_xp"
+label = "Double XP"
+type = "checkbox"
+default = false
+description = "Soldiers earn experience twice as fast."
+
+[[options]]
+id = "squad_size"
+label = "Squad Size"
+type = "cycle"
+options = [6, 8, 12]
+labels = ["Small (6)", "Medium (8)", "Large (12)"]
+default = 6
+description = "How many soldiers you can field."
+
+[[options]]
+id = "reset_stats"
+label = "Reset Statistics"
+type = "button"
+button_text = "RESET"
+on_click = "ExampleMod.resetStats"

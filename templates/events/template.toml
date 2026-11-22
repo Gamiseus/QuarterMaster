@@ -1,0 +1,11 @@
+name = "Game events"
+part = 5
+order = 4
+section = "Game events: `QM.Events`"
+summary = "Code that answers a battle starting, a new wave, a save and a load, without patching the game's lines."
+open = "events.lua"
+try_next = ["Answer battle_end too, and tidy up what your mod made in the battle.", "Send your mod's own event with QM.Events.emit(\"example_mod:<event>\")."]
+[[examples]]
+section = "Game events: `QM.Events`"
+block = 1
+file = "events.lua"

@@ -184,6 +184,14 @@ async profilePreviewSwitch(id: string) : Promise<Result<SwitchPreview, QmError>>
     else return { status: "error", error: e  as any };
 }
 },
+async profileSaveCheck(id: string) : Promise<Result<SaveCompatibilityReport, QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("profile_save_check", { id }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async profileCreate(req: NewProfile) : Promise<Result<ModProfile, QmError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("profile_create", { req }) };
@@ -1137,6 +1145,308 @@ async modFiles(id: string) : Promise<Result<ModFileList, QmError>> {
     else return { status: "error", error: e  as any };
 }
 },
+async engineProjects() : Promise<Result<EngineProjects, QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("engine_projects") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async engineLibraryMods() : Promise<Result<EngineLibraryMod[], QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("engine_library_mods") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async engineTree(folder: string) : Promise<Result<EngineTree, QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("engine_tree", { folder }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async engineFileRead(folder: string, path: string) : Promise<Result<EngineFile, QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("engine_file_read", { folder, path }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async engineFileWrite(folder: string, req: EngineWriteRequest) : Promise<Result<EngineFile, QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("engine_file_write", { folder, req }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async engineFileCreate(folder: string, path: string, isFolder: boolean) : Promise<Result<null, QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("engine_file_create", { folder, path, isFolder }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async engineFileRename(folder: string, from: string, to: string) : Promise<Result<null, QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("engine_file_rename", { folder, from, to }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async engineFileDelete(folder: string, path: string) : Promise<Result<null, QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("engine_file_delete", { folder, path }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async engineCheck(folder: string, path: string, text: string) : Promise<Result<EngineCheck, QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("engine_check", { folder, path, text }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async engineLint(folder: string) : Promise<Result<EngineLint, QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("engine_lint", { folder }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async engineSymbols() : Promise<Result<EngineSymbol[], QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("engine_symbols") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async engineCopyToWorkspace(modId: string, version: string) : Promise<Result<string, QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("engine_copy_to_workspace", { modId, version }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async engineSpriteShelves(folder: string) : Promise<Result<SpriteShelf[], QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("engine_sprite_shelves", { folder }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async engineSpriteCatalog(source: SpriteSource, owner: string) : Promise<Result<SpriteCatalog, QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("engine_sprite_catalog", { source, owner }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async engineSpriteImage(sprite: SpriteRef) : Promise<Result<string, QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("engine_sprite_image", { sprite }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async engineSpriteUses(folder: string, path: string) : Promise<Result<SpriteUses, QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("engine_sprite_uses", { folder, path }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async engineSpriteSave(folder: string, req: SpriteSaveRequest) : Promise<Result<SpriteSaved, QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("engine_sprite_save", { folder, req }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Opens a workspace mod's folder in Explorer; the folder is checked by the backend.
+ */
+async engineReveal(folder: string) : Promise<Result<null, QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("engine_reveal", { folder }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async studioGameFiles() : Promise<Result<StudioGameFiles, QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("studio_game_files") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async studioGameFile(path: string, withMods: boolean) : Promise<Result<StudioFileText, QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("studio_game_file", { path, withMods }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async studioMatches(path: string, lines: string, withMods: boolean) : Promise<Result<StudioMatches, QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("studio_matches", { path, lines, withMods }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async studioPatches(folder: string) : Promise<Result<StudioPatches, QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("studio_patches", { folder }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async studioPatchIds(folder: string) : Promise<Result<StudioPatchId[], QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("studio_patch_ids", { folder }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async studioPreview(folder: string, draft: PatchDraft, editing: StudioPatchRef | null, withMods: boolean) : Promise<Result<StudioPreview, QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("studio_preview", { folder, draft, editing, withMods }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async studioSave(folder: string, draft: PatchDraft, editing: StudioPatchRef | null, expectedHash: string | null) : Promise<Result<StudioSaved, QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("studio_save", { folder, draft, editing, expectedHash }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async studioRemove(folder: string, at: StudioPatchRef, expectedHash: string | null) : Promise<Result<string, QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("studio_remove", { folder, at, expectedHash }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async engineTestPlan(folder: string) : Promise<Result<EngineTestPlan, QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("engine_test_plan", { folder }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async engineTestLaunch(folder: string) : Promise<Result<GameStatus, QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("engine_test_launch", { folder }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async releaseInfo(folder: string) : Promise<Result<ReleaseInfo, QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("release_info", { folder }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async releasePrepare(folder: string, version: string, lines: string[]) : Promise<Result<null, QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("release_prepare", { folder, version, lines }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async releasePack(folder: string) : Promise<Result<ReleaseZip, QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("release_pack", { folder }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Opens the folder a workspace mod's release zips go to; the path is the backend's.
+ */
+async releaseReveal(folder: string) : Promise<Result<null, QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("release_reveal", { folder }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async templatesList() : Promise<Result<TemplateInfo[], QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("templates_list") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async templatePreview(id: string) : Promise<Result<TemplateFileView[], QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("template_preview", { id }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async templateCreate(id: string, name: string, modId: string) : Promise<Result<string, QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("template_create", { id, name, modId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async templateAddPreview(folder: string, id: string) : Promise<Result<TemplateAddPreview, QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("template_add_preview", { folder, id }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async templateAdd(folder: string, id: string) : Promise<Result<string[], QmError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("template_add", { folder, id }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async modVersionRemove(id: string, version: string) : Promise<Result<null, QmError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("mod_version_remove", { id, version }) };
@@ -1538,7 +1848,11 @@ submenu?: string | null }
 /**
  * Normalized option control type for the Launcher UI and `GMenu`.
  */
-export type ConfigOptionType = "checkbox" | "cycle" | "slider" | "separator" | "button" | "submenu"
+export type ConfigOptionType = "checkbox" | "cycle" | "slider" | "separator" | "button" | 
+/**
+ * One row that opens a sub-page holding the options whose `submenu` names it. Holds no value.
+ */
+"submenu"
 export type ConfigPageDef = { id: string; title: string; page_type: string | null; content: string | null; action_label: string | null; action_on_click: string | null }
 export type ConfigResetMode = "defaults" | "safe"
 /**
@@ -1740,6 +2054,171 @@ export type EditsRefusal =
  * that site is refused, and nothing is written there.
  */
 "split_change"
+export type EngineCheck = { diagnostics: EngineDiagnostic[]; 
+/**
+ * False for a Lua file when the game's `lua51.dll` was not found.
+ */
+lua_checked: boolean }
+/**
+ * The counts of a project's last full check.
+ */
+export type EngineCheckCounts = { errors: number; warnings: number }
+/**
+ * One problem. Lines and columns are 1-based; `None` when the check has no place for it
+ * (the message is about the whole file or the whole mod).
+ */
+export type EngineDiagnostic = { 
+/**
+ * The file it is in; `None` for the mod as a whole.
+ */
+path: string | null; line: number | null; column: number | null; end_line: number | null; end_column: number | null; severity: EngineSeverity; message: string; 
+/**
+ * What found it: `toml`, `json`, `lua`, `patches`, `manifest`, `config`, `faction`, `lint`.
+ */
+source: string }
+export type EngineEntry = { 
+/**
+ * Relative to the mod's folder, with `/`.
+ */
+path: string; folder: boolean; size_bytes: number; kind: EngineFileKind }
+/**
+ * A file opened for editing. `text` always has `\n` line breaks and no byte order mark;
+ * `crlf` and `bom` say how it is written back.
+ */
+export type EngineFile = { path: string; text: string; 
+/**
+ * SHA-256 of the bytes on disk, for the save's change check.
+ */
+hash: string; crlf: boolean; bom: boolean }
+export type EngineFileKind = "lua" | "toml" | "json" | "markdown" | "text" | "image" | "audio" | "other"
+/**
+ * An installed library mod, for the read-only list.
+ */
+export type EngineLibraryMod = { id: string; name: string; version: string }
+export type EngineLint = { passed: boolean; diagnostics: EngineDiagnostic[]; patch_count: number; matched_patches: number; zero_match_patches: number; 
+/**
+ * The capabilities the security scan found, as the launcher names them.
+ */
+capabilities: string[]; 
+/**
+ * False when the game's files are not cached, so no pattern was tried.
+ */
+game_checked: boolean }
+/**
+ * What a workspace mod is, from the files it has.
+ */
+export type EngineModKind = 
+/**
+ * Has a `qm.toml` (or patch files under `qm/`), or only a `mod.json`.
+ */
+"patch" | 
+/**
+ * Has a `faction.toml`.
+ */
+"faction" | 
+/**
+ * Has only an `assets/` folder.
+ */
+"assets" | 
+/**
+ * Has none of the mod files yet.
+ */
+"unmanaged"
+export type EngineProject = { 
+/**
+ * The folder's name in the workspace: how the Mod Engine names the mod.
+ */
+folder: string; 
+/**
+ * From `mod.json`, else the folder name.
+ */
+name: string; id: string | null; version: string | null; kind: EngineModKind; 
+/**
+ * A library mod has the same id.
+ */
+in_library: boolean; 
+/**
+ * `None` until the project was checked in this session.
+ */
+last_check: EngineCheckCounts | null }
+export type EngineProjects = { 
+/**
+ * False when no workspace mods folder is set (`projects` is then empty).
+ */
+workspace_set: boolean; projects: EngineProject[] }
+export type EngineSeverity = "error" | "warning" | "info"
+/**
+ * A global the game's own code defines.
+ */
+export type EngineSymbol = { 
+/**
+ * `name`, or `Table.name` for a function in a table.
+ */
+name: string; kind: EngineSymbolKind; 
+/**
+ * `function(a, b)` for a function; empty for a table.
+ */
+signature: string; file: string; line: number }
+export type EngineSymbolKind = "function" | "table"
+/**
+ * Why a test cannot run yet, and what fixes it.
+ */
+export type EngineTestBlock = 
+/**
+ * The mod folder has no id (no `mod.json` and no `[manifest] id`).
+ */
+"no_id" | 
+/**
+ * The launcher's mod set has no mod with this id (the Library side without a copy).
+ */
+"not_in_set" | 
+/**
+ * The active profile has the mod turned off.
+ */
+"off" | 
+/**
+ * A mod it requires is not installed.
+ */
+"required_missing" | 
+/**
+ * A mod it requires is turned off in the active profile.
+ */
+"required_off" | 
+/**
+ * The Vanilla profile runs no mods.
+ */
+"vanilla"
+/**
+ * A mod a test needs, with whether it can run.
+ */
+export type EngineTestMod = { id: string; name: string; installed: boolean; enabled: boolean }
+export type EngineTestPlan = { mod_id: string; mod_name: string; in_set: boolean; enabled: boolean; 
+/**
+ * The mods it requires, followed through their own requirements.
+ */
+requires: EngineTestMod[]; 
+/**
+ * Mods on in the active profile that the test turns off.
+ */
+turned_off: EngineTestMod[]; blocked: EngineTestBlock | null; 
+/**
+ * The reason in plain words, when blocked.
+ */
+message: string | null; 
+/**
+ * The launcher is on the Workspace side.
+ */
+workspace_mode: boolean }
+export type EngineTree = { entries: EngineEntry[]; 
+/**
+ * More entries than `MAX_TREE_ENTRIES` were found and left out.
+ */
+truncated: boolean }
+export type EngineWriteRequest = { path: string; text: string; 
+/**
+ * The hash the file had when it was opened; `None` for a new file or an overwrite.
+ */
+expected_hash: string | null; crlf: boolean; bom: boolean }
 export type ErrorKind = "not_found" | "invalid_input" | "conflict" | "game_running" | "io" | "network" | "integrity" | "cancelled" | "internal"
 /**
  * One enabled faction that replaces a side.
@@ -2833,6 +3312,39 @@ base_mod_id?: string | null;
  */
 runs_as?: RunsAsVerdict | null }
 /**
+ * A patch in the form. Fields a kind does not use stay empty; on save, only the keys the
+ * form owns are written or removed, so any other key of an existing patch is kept.
+ */
+export type PatchDraft = { kind: StudioPatchKind | null; id: string; name: string; group: string; 
+/**
+ * Game files the patch changes (pattern, regex, copy). Usually one.
+ */
+target: string[]; 
+/**
+ * The lines to find (pattern) or the expression (regex).
+ */
+pattern: string; 
+/**
+ * `at`, `before` or `after`; for copy, `prepend` or `append`.
+ */
+position: string; payload: string; match_indent: boolean | null; times: number | null; requires: string[]; 
+/**
+ * Order hints: patches this one runs before or after in the same file.
+ */
+before: string[]; after: string[]; 
+/**
+ * `warn`, `skip_patch`, `skip_mod` or `abort`; empty for the default.
+ */
+on_failure: string; 
+/**
+ * Module: the mod's Lua file; copy: the files copied.
+ */
+source: string[]; 
+/**
+ * Module: the game file it loads before.
+ */
+load_before: string }
+/**
  * Telemetry record for a single patch execution on a target file.
  */
 export type PatchExecutionRecord = { patch_id: string; patch_name: string; 
@@ -3113,7 +3625,11 @@ export type Provenance = { created_at: string; source: FixSource; conflict_id?: 
  */
 mods?: ([string, string | null])[]; approved?: ApprovedImpact | null; history?: FixEvent[] }
 export type QmError = { kind: ErrorKind; message: string; details: string | null }
-export type QmEvent = { type: "game_status_changed"; status: GameStatus } | { type: "job_progress"; id: JobId; kind: JobKind; progress: number; label: string } | { type: "job_finished"; id: JobId; kind: JobKind; error: QmError | null; output: string | null } | { type: "invalidated"; scope: Scope } | { type: "log_line"; source: LogSource; line: string } | { type: "recovered"; summary: string }
+export type QmEvent = { type: "game_status_changed"; status: GameStatus } | { type: "job_progress"; id: JobId; kind: JobKind; progress: number; label: string } | { type: "job_finished"; id: JobId; kind: JobKind; error: QmError | null; output: string | null } | { type: "invalidated"; scope: Scope } | { type: "log_line"; source: LogSource; line: string } | { type: "recovered"; summary: string } | 
+/**
+ * A file of a workspace mod changed on disk (the Mod Engine reloads it).
+ */
+{ type: "workspace_changed"; folder: string; path: string }
 /**
  * Bindings-only wrapper so `QmEvent` can be registered as a typed tauri-specta event without
  * adding a Tauri dependency to `qm-service`. Serializes exactly like `QmEvent`.
@@ -3229,6 +3745,40 @@ export type RelationWarning = {
  * The rule's patch.
  */
 rule: string; mod_id: string; depends_on: string; text: string }
+export type ReleaseInfo = { mod_id: string; name: string; 
+/**
+ * `version` in `mod.json` (None without the file or the key).
+ */
+json_version: string | null; 
+/**
+ * `[manifest] version` in `qm.toml`.
+ */
+toml_version: string | null; 
+/**
+ * The next patch, minor and major versions after the newer of the two.
+ */
+next: string[]; 
+/**
+ * `owner/repo`, from `[publish] repository`, else `github` in `mod.json`.
+ */
+repository: string | null; 
+/**
+ * The mod has a `[publish]` table (it asks to be listed on the site).
+ */
+has_publish: boolean; has_readme: boolean; 
+/**
+ * The newest section of `CHANGELOG.md`: its heading and lines.
+ */
+changelog_version: string | null; changelog_lines: string[]; 
+/**
+ * The zip in `_releases/<folder>`, when one was packed.
+ */
+last_zip: ReleaseZip | null; 
+/**
+ * What the zip is named (`<folder>.zip`).
+ */
+asset_name: string }
+export type ReleaseZip = { name: string; size_bytes: number; sha256: string; version: string }
 export type ResolvedModOrderEntry = { mod_id: string; name: string; version: string; effective_priority: number; order_index: number; 
 /**
  * Human-readable "Why is this mod at position #N?" explanation strings.
@@ -3695,7 +4245,120 @@ export type SoldierSummary = { id: number; name: string; age: number; rank: numb
  */
 award_icons: number[]; perks_count: number; combat_time: number }
 export type SolverDiagnostic = { severity: DiagnosticSeverity; mod_id: string; kind: string; message: string; related_mod_id: string | null }
+export type SpriteCatalog = { items: SpriteItem[]; 
+/**
+ * More images than `MAX_SPRITE_ITEMS` were found and left out.
+ */
+truncated: boolean }
+export type SpriteItem = { sprite: SpriteRef; 
+/**
+ * The file name without its extension.
+ */
+name: string; 
+/**
+ * The pixel size, when it could be read (PNG); 0 otherwise.
+ */
+width: number; height: number }
 export type SpriteKind = "ribbon" | "award"
+/**
+ * Where the picture sits in its box, in the game's pixels: its top-left corner's move from
+ * the box's, the size it is drawn at, its turn in degrees clockwise about its middle, and
+ * its mirroring. The whole box, unturned, is no place.
+ */
+export type SpritePlace = { x: number; y: number; width: number; height: number; rotate: number; flip_x: boolean; flip_y: boolean }
+/**
+ * One image: where it comes from and its path there, with `/`.
+ */
+export type SpriteRef = { source: SpriteSource; owner: string; path: string }
+export type SpriteSaveRequest = { global: string; target: SpriteTarget; place: SpritePlace; 
+/**
+ * The box the place was made in (the use's), to tell a draw size from the whole box.
+ */
+box_width: number; box_height: number }
+export type SpriteSaved = { 
+/**
+ * The file written: `qm.toml` or `faction.toml`.
+ */
+file: string; 
+/**
+ * The entry as it is now in that file; empty when it was taken out.
+ */
+written: string; 
+/**
+ * What it does in game, in plain words.
+ */
+message: string; 
+/**
+ * The feature added to `mod.json`, when one was.
+ */
+feature_added: string | null }
+/**
+ * A place to pick images from: the game, a workspace mod, a library mod.
+ */
+export type SpriteShelf = { source: SpriteSource; owner: string; label: string }
+export type SpriteSource = 
+/**
+ * The game's own images (`owner` is empty).
+ */
+"game" | 
+/**
+ * A mod folder of the workspace (`owner` is the folder).
+ */
+"workspace" | 
+/**
+ * A library mod (`owner` is its id; its newest version is read).
+ */
+"library"
+/**
+ * Where Save writes a place.
+ */
+export type SpriteTarget = 
+/**
+ * `[sprites.<global>]` in `qm.toml`.
+ */
+"qm" | 
+/**
+ * The `[sprites]` entry of `faction.toml`.
+ */
+"faction"
+/**
+ * A game image a file of the mod is shown as.
+ */
+export type SpriteUse = { 
+/**
+ * The game global (`allied_fire`).
+ */
+global: string; 
+/**
+ * Where Save writes.
+ */
+target: SpriteTarget; 
+/**
+ * The game's own image at that global, to line up with; None when the game has none
+ * (the mod adds the image).
+ */
+original: SpriteItem | null; 
+/**
+ * The box: the size the game's code sees, in the game's pixels.
+ */
+box_width: number; box_height: number; 
+/**
+ * The place saved now, or the whole box.
+ */
+place: SpritePlace; 
+/**
+ * A place is saved.
+ */
+placed: boolean; 
+/**
+ * The global's size rule as written (`size = [40, 12]`), when it has one.
+ */
+size_rule: string | null }
+export type SpriteUses = { file: SpriteItem; uses: SpriteUse[]; 
+/**
+ * What to know, in plain words: why there are none, or how the game was read.
+ */
+note: string | null }
 /**
  * One patch's code in a shared stack, with every line nested inside it.
  */
@@ -3805,6 +4468,132 @@ export type StagedTestPlan = {
  */
 label: string | null; staged_at: string }
 export type StartupStatus = { done: boolean; recovered: string | null; attached_pid: number | null }
+export type StudioChangedRun = { start: number; end: number; mine: boolean }
+/**
+ * A game file as the studio shows it.
+ */
+export type StudioFileText = { path: string; text: string; 
+/**
+ * The file as the active profile's mods leave it; false for the game's own, also when
+ * "with mods" was asked and no mod of the profile changes the file.
+ */
+with_mods: boolean; 
+/**
+ * With mods: the lines each patch wrote.
+ */
+runs: StudioLineRun[] }
+/**
+ * How a patch is written in its file.
+ */
+export type StudioForm = 
+/**
+ * `[[pattern]]`, `[[regex]]`, `[[copy]]`, `[[module]]`.
+ */
+"short" | 
+/**
+ * `[[patches]]` with `[patches.<kind>]`.
+ */
+"long"
+/**
+ * A game Lua file, for the file picker.
+ */
+export type StudioGameFile = { path: string; lines: number; 
+/**
+ * How many of the active profile's patches change it.
+ */
+changed_by: number }
+export type StudioGameFiles = { 
+/**
+ * False until the game's files have been read (no game folder, or still starting).
+ */
+game_ready: boolean; files: StudioGameFile[] }
+/**
+ * A run of lines (1-based, inclusive) one patch wrote.
+ */
+export type StudioLineRun = { start: number; end: number; mod_id: string; patch_id: string; patch_name: string }
+/**
+ * Where chosen lines match as a pattern.
+ */
+export type StudioMatches = { count: number; 
+/**
+ * The first line of the first few places (1-based).
+ */
+lines: number[] }
+/**
+ * Another patch of the mod on the same file.
+ */
+export type StudioOtherOutcome = { patch_id: string; name: string; applied: boolean }
+export type StudioOutcome = { kind: StudioOutcomeKind; matched: number; expected: number | null; 
+/**
+ * What the engine said, in its words.
+ */
+messages: string[] }
+export type StudioOutcomeKind = "applied" | "no_match" | "wrong_count" | "skipped" | "refused" | 
+/**
+ * The draft could not be read (a missing id, a TOML or loader error).
+ */
+"invalid"
+export type StudioPatch = { at: StudioPatchRef; draft: PatchDraft; 
+/**
+ * The studio can write it back (any patch file of the mod).
+ */
+editable: boolean; 
+/**
+ * The hash of its file as read, for saving.
+ */
+hash: string }
+/**
+ * A patch id to pick for `requires`, `before` and `after`.
+ */
+export type StudioPatchId = { id: string; name: string; mod_id: string }
+export type StudioPatchKind = "pattern" | "regex" | "module" | "copy"
+/**
+ * Where a patch is written.
+ */
+export type StudioPatchRef = { 
+/**
+ * `qm.toml`, or `qm/<name>.toml`.
+ */
+file: string; form: StudioForm; kind: StudioPatchKind; 
+/**
+ * Its place in `[[patches]]` (long) or in `[[<kind>]]` (short).
+ */
+index: number }
+export type StudioPatches = { patches: StudioPatch[]; 
+/**
+ * The hash of `qm.toml` as read (empty when there is none), for saving.
+ */
+hash: string; 
+/**
+ * The id new patch ids start with.
+ */
+mod_id: string; 
+/**
+ * `qm.toml` uses the long form, so new patches do too.
+ */
+long_form: boolean }
+export type StudioPreview = { target: string; 
+/**
+ * The file as the game would load it with the draft.
+ */
+text: string; 
+/**
+ * Lines the mod's patches wrote; `mine` marks the draft's.
+ */
+changed: StudioChangedRun[]; outcome: StudioOutcome; others: StudioOtherOutcome[]; 
+/**
+ * The result's Lua compile error, when the game's Lua is there and finds one.
+ */
+compile_error: string | null; compile_checked: boolean; 
+/**
+ * The base was the active profile's result and it already holds this mod's saved patches.
+ */
+mod_in_base: boolean }
+export type StudioSaved = { at: StudioPatchRef; hash: string; 
+/**
+ * `short_patches` was added to `mod.json`'s `qm_features`.
+ */
+feature_added: boolean }
 /**
  * What a trial leaves out for a suspect.
  */
@@ -3819,6 +4608,76 @@ export type SuspendedRung = { patch_id: string; rung: number; reason: string;
 source: string }
 export type SwitchPreview = { added_mods: string[]; removed_mods: string[]; diff: ProfileDiff; save_compatibility: SaveCompatibilityReport }
 export type Target = string | string[]
+/**
+ * What adding an example to a mod would change, or why it cannot.
+ */
+export type TemplateAddPreview = { changes: TemplateChange[]; 
+/**
+ * Clashes that stop the addition; empty when it can go ahead.
+ */
+blocked: string[] }
+export type TemplateChange = { path: string; kind: TemplateChangeKind; detail: string }
+export type TemplateChangeKind = 
+/**
+ * A new file.
+ */
+"add" | 
+/**
+ * Tables added to a file the mod has.
+ */
+"merge" | 
+/**
+ * Left out: the mod has its own.
+ */
+"skip"
+/**
+ * A template file as the catalog shows it, with the template's own names.
+ */
+export type TemplateFileView = { path: string; 
+/**
+ * The text; None for an image or a sound.
+ */
+text: string | null; size_bytes: number }
+/**
+ * What the catalog shows for a template.
+ */
+export type TemplateInfo = { id: string; name: string; 
+/**
+ * The wiki part it belongs to (1 to 12).
+ */
+part: number; 
+/**
+ * Its place within the part.
+ */
+order: number; 
+/**
+ * The wiki heading that explains it, and that heading's link anchor.
+ */
+section: string; anchor: string; 
+/**
+ * The section on the published wiki.
+ */
+wiki_url: string; summary: string; 
+/**
+ * The file to open first.
+ */
+open: string; 
+/**
+ * What to try after it works.
+ */
+try_next: string[]; 
+/**
+ * Older `qm new` names that pick this template.
+ */
+aliases: string[]; 
+/**
+ * Wiki examples this template holds word for word.
+ */
+examples: WikiExample[]; 
+/**
+ * Its files, in path order (`template.toml` left out).
+ */
+files: string[] }
 /**
  * What a trial run leaves out (D68). It changes a copy of the profile in memory; the profile
  * file is never written.
@@ -3989,6 +4848,11 @@ rate_limit_mode: string; launcher: LauncherUpdateInfo; mods: ModUpdateInfo[] }
  * A name a diagnostic test run would watch, and the code checks that flagged it.
  */
 export type WatchSuggestion = { name: string; checks: string[] }
+/**
+ * A wiki example a template carries word for word: the `block`-th code block (1-based,
+ * counting toml, lua and json blocks) under the heading `section`, found in `file`.
+ */
+export type WikiExample = { section: string; block: number; file: string }
 /**
  * Overrides for the game's `conf.lua` window values. `None`: the game's own value.
  */

@@ -1,0 +1,16 @@
+{
+  "$schema": "https://gamiseus.github.io/schemas/mod.schema.json",
+  "schema_version": 1,
+  "id": "example_mod",
+  "name": "Example Mod",
+  "version": "1.0.0",
+  "authors": [
+    "Your Name"
+  ],
+  "description": "Any other game image or sound replaced while the faction is active, by its game name.",
+  "category": "Content",
+  "game_version": ">=0.5.3",
+  "qm_features": [
+    "faction_sprite_sizes"
+  ]
+}

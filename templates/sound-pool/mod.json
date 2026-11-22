@@ -1,0 +1,13 @@
+{
+  "$schema": "https://gamiseus.github.io/schemas/mod.schema.json",
+  "schema_version": 1,
+  "id": "example_mod",
+  "name": "Example Mod",
+  "version": "1.0.0",
+  "authors": [
+    "Your Name"
+  ],
+  "description": "More variants of a numbered sound, and variants for a sound the game has only once.",
+  "category": "Audio",
+  "game_version": ">=0.5.3"
+}

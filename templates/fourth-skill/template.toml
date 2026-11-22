@@ -1,0 +1,11 @@
+name = "A fourth skill"
+part = 5
+order = 9
+section = "Class skills: `QM.Skills`"
+summary = "A fourth skill for the riflemen, with its own button, icon and cooldown."
+open = "skill.lua"
+try_next = ["Draw the icon in assets/sprites/ (46 by 46, as the game's).", "Throw a custom grenade from it instead (template custom-grenade, slot 4)."]
+[[examples]]
+section = "Class skills: `QM.Skills`"
+block = 1
+file = "skill.lua"

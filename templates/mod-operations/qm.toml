@@ -1,0 +1,20 @@
+#:schema https://gamiseus.github.io/schemas/qm.schema.json
+# Example Mod: loads operations.lua, which has the page's button function.
+
+[manifest]
+version = "1.0.0"
+
+[[patches]]
+[patches.module]
+id = "example_mod:operations_module"
+source = "operations.lua"
+name = "includes/example_mod_operations"
+before = "main.lua"
+
+[[patches]]
+[patches.pattern]
+id = "example_mod:operations_require"
+target = "main.lua"
+pattern = 'require "includes/directives"'
+position = "after"
+payload = 'ExampleMod = require "includes/example_mod_operations"'

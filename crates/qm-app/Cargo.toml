@@ -1,6 +1,6 @@
 [package]
 name = "qm-app"
-version = "2.0.2"
+version = "2.2.0"
 edition = "2024"
 description = "QuarterMaster Desktop Mod Launcher GUI Server & App Host"
 

@@ -1,0 +1,12 @@
+name = "Your first patch"
+part = 4
+order = 1
+section = "Your first patch"
+summary = "One pattern patch: a line of the game's code found, and your code put after it."
+open = "qm.toml"
+aliases = ["patch", "single_anchor_patch"]
+try_next = ["Change the payload and see it in the game's log.", "Find another line with the Patch Studio and patch it."]
+[[examples]]
+section = "Your first patch"
+block = 1
+file = "qm.toml"

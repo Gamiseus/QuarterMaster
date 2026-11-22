@@ -1,13 +1,14 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "QuarterMaster commands, the minimal window controls for the main window, and opening https links.",
+  "description": "QuarterMaster commands, the minimal window controls for the main window (destroy closes it after the unsaved-edits question), and opening https links.",
   "windows": ["main"],
   "permissions": [
     "core:default",
     "core:window:allow-minimize",
     "core:window:allow-toggle-maximize",
     "core:window:allow-close",
+    "core:window:allow-destroy",
     "core:window:allow-start-dragging",
     "dialog:allow-open",
     {

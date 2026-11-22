@@ -1,0 +1,42 @@
+#:schema https://gamiseus.github.io/schemas/qm.schema.json
+# Example Mod: feature gates and apply_as.
+# mod.json says the mod needs QuarterMaster 1.8.0 or newer and the "apply_as" feature, so an
+# older QuarterMaster says so instead of loading it wrongly. The patch below replaces two lines
+# with the same two lines plus one; apply_as = "edits" runs it as separate edits, so another
+# mod patching the same lines still finds them.
+# Change first: min_qm in mod.json, to the oldest QuarterMaster you tested with.
+# Wiki: Part 7, Feature gates: https://gamiseus.github.io/wiki/working-with-other-mods/#feature-gates-min_qm-and-qm_features
+
+[manifest]
+version = "1.0.0"
+
+[[patches]]
+[patches.module]
+id = "example_mod:gates_module"
+source = "gates.lua"
+name = "includes/example_mod_gates"
+before = "main.lua"
+
+[[patches]]
+[patches.pattern]
+id = "example_mod:gates_require"
+target = "main.lua"
+pattern = 'require "includes/directives"'
+position = "after"
+payload = 'ExampleMod = require "includes/example_mod_gates"'
+
+[[patches]]
+[patches.pattern]
+id = "example_mod:new_profile_extra"
+target = "main.lua"
+pattern = '''
+player = {}
+newProfile(player)
+'''
+position = "at"
+payload = '''
+player = {}
+newProfile(player)
+ExampleMod.onNewProfile(player)
+'''
+apply_as = "edits"

@@ -1,0 +1,15 @@
+name = "Faction code hooks"
+part = 3
+order = 13
+section = "Code: `[hooks]`"
+summary = "A faction's Lua for what the file can't express: run once, and on every soldier and weapon made."
+open = "hooks.lua"
+try_next = ["Change a soldier's stats by unit in on_soldier_created."]
+[[examples]]
+section = "Code: `[hooks]`"
+block = 1
+file = "faction.toml"
+[[examples]]
+section = "Code: `[hooks]`"
+block = 2
+file = "hooks.lua"

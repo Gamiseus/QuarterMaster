@@ -1,0 +1,13 @@
+{
+  "$schema": "https://gamiseus.github.io/schemas/mod.schema.json",
+  "schema_version": 1,
+  "id": "example_mod",
+  "name": "Example Mod",
+  "version": "1.0.0",
+  "authors": [
+    "Your Name"
+  ],
+  "description": "A weapon reskinned with new art, sound and stats, a new weapon based on another, and random pools.",
+  "category": "Content",
+  "game_version": ">=0.5.3"
+}

@@ -1,0 +1,11 @@
+name = "Faction vehicles"
+part = 3
+order = 8
+section = "Vehicles: `[[vehicles]]`"
+summary = "The Sherman reskinned as a faction tank: body, turret, wreck, debris, name and call signs."
+open = "faction.toml"
+try_next = ["Draw the tank's parts; keep each in the proportions of the game's."]
+[[examples]]
+section = "Vehicles: `[[vehicles]]`"
+block = 1
+file = "faction.toml"

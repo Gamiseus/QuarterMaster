@@ -1,0 +1,11 @@
+name = "Short form and groups"
+part = 4
+order = 2
+section = "Sorting patches into groups: `group`"
+summary = "Patches in the short form ([[pattern]], [[regex]]), sorted into groups for the Patches tab."
+open = "qm.toml"
+try_next = ["Open the mod's Patches tab in the launcher to see the groups."]
+[[examples]]
+section = "Sorting patches into groups: `group`"
+block = 1
+file = "qm.toml"

@@ -1,0 +1,9 @@
+#:schema https://gamiseus.github.io/schemas/qm.schema.json
+# Example Mod: an empty mod.
+# QuarterMaster loads it already; it changes nothing yet.
+# Change first: description and authors in mod.json.
+# Wiki: Part 1, The files in a mod: https://gamiseus.github.io/wiki/what-a-mod-is/#the-files-in-a-mod
+# Try next: add an example from the template catalog to this mod.
+
+[manifest]
+version = "1.0.0"

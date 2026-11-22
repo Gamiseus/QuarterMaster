@@ -131,6 +131,16 @@ impl Service {
         })
     }
 
+    /// Whether the profile's save slot was last played with mods the profile does not load,
+    /// for the pre-launch check.
+    pub fn profile_save_check(
+        &self,
+        id: &str,
+    ) -> QmResult<qm_manager::profiles::SaveCompatibilityReport> {
+        let profile = self.profile_get(id)?;
+        Ok(self.paths().check_save_compatibility(&profile))
+    }
+
     pub fn profile_create(&self, req: NewProfile) -> QmResult<ModProfile> {
         if req.name.trim().is_empty() {
             return Err(QmError::new(

@@ -1,0 +1,20 @@
+name = "Options"
+part = 6
+order = 1
+section = "Options"
+summary = "Options in the game's Mod Settings and the launcher: a checkbox, a choice, a button, read from Lua."
+open = "config.toml"
+aliases = ["settings", "gmenu_settings", "gmenu_config"]
+try_next = ["Use the options in your own code through QM.settings.", "Group options in a submenu (template options-submenu)."]
+[[examples]]
+section = "Options"
+block = 1
+file = "config.toml"
+[[examples]]
+section = "Reading an option in Lua"
+block = 1
+file = "options.lua"
+[[examples]]
+section = "Acting when an option changes"
+block = 2
+file = "config.toml"

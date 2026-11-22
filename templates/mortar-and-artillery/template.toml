@@ -1,0 +1,11 @@
+name = "Mortars and artillery"
+part = 5
+order = 7
+section = "Mortars and artillery"
+summary = "A heavy mortar for the riflemen and the Axis, and a barrage the officers call in as a fourth skill."
+open = "mortar_and_artillery.lua"
+try_next = ["Draw the barrage's icon in assets/sprites/ (46 by 46, as the game's skill icons).", "Call a barrage from your own code: QM.Ordnance.callIn(ExampleMod.barrage, x, y).", "Let the Axis barrages land as heavy shells: replaces_artillery = \"axis\"."]
+[[examples]]
+section = "Mortars and artillery"
+block = 1
+file = "mortar_and_artillery.lua"

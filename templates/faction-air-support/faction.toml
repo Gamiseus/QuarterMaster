@@ -1,0 +1,38 @@
+#:schema https://gamiseus.github.io/schemas/faction.schema.json
+# Example Mod: faction air support.
+# This faction stands in for the Allies: its radio operators call in a bomber run as their
+# fourth skill (in a Campaign battle), its own bombing and strafing runs use its explosions,
+# and its supply crates hold med packs, rations and ammunition.
+# mod.json lists "ordnance" in qm_features (QuarterMaster 2.2.0 or newer).
+# Change first: what the supply crates hold.
+# Wiki: Part 3, Ordnance: https://gamiseus.github.io/wiki/faction-mods/#ordnance-ordnance-and-explosions
+
+schema = 1
+id = "example_army"
+name = "Example Army"
+replaces = "allied"
+
+[[explosions]]
+id = "light_strafe"
+based_on = "strafe"                     # a strafing hit, then these
+frag_damage = 35
+
+[[ordnance]]
+id = "bombers"
+kind = "airstrike"                      # a plane's run, as the game's
+explosion = "bomb"                      # the game's bomb
+shots = 2                               # bombs when the radio operators call it
+skill = { class = "comms", slot = 4 }
+replaces_bombing = true                 # and the faction's own bombing runs drop it
+
+[[ordnance]]
+id = "fighters"
+kind = "airstrike"
+explosion = "light_strafe"
+replaces_strafing = true                # every hit of the faction's strafing runs
+
+[[ordnance]]
+id = "supplies"
+kind = "drop"                           # a supply crate by parachute
+contents = ["loot_medPack", "loot_ration", "loot_ammo"]
+replaces_drop = true                    # the faction's supply crates hold these

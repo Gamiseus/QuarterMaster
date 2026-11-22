@@ -1,4 +1,5 @@
-import type { DetectedConflict, LoadError } from "../bindings";
+import { call } from "../api";
+import { commands, type DetectedConflict, type LoadError } from "../bindings";
 import { waitingNotes } from "../diagnostics/health";
 import { attentionLines } from "../patches/fixlist";
 import { app } from "./app.svelte";
@@ -20,6 +21,11 @@ class PreLaunchStore {
   notice = $state(false);
   /** The Launch button is waiting for the stacking check before it opens the notice. */
   checking = $state(false);
+  /**
+   * Mods the active profile's save slot was last played with (or its save is stamped with) that
+   * the profile does not load. The save may need their weapons and art; it does not block.
+   */
+  saveMods = $state<string[]>([]);
 
   /** The built-in Vanilla profile is active: it loads no mods, so the load order gate does not apply. */
   get vanillaActive(): boolean {
@@ -101,21 +107,33 @@ class PreLaunchStore {
   async request(): Promise<void> {
     if (this.vanillaActive) return this.launch();
     if (this.checking) return;
-    if (stacking.unseen) {
-      this.checking = true;
-      try {
-        await stacking.ensure();
-      } finally {
-        this.checking = false;
-      }
+    this.checking = true;
+    try {
+      if (stacking.unseen) await stacking.ensure();
+      await this.checkSave();
+    } finally {
+      this.checking = false;
     }
     if (stacking.noticeBeforeLaunch || lineRules.showNotice) {
       this.notice = true;
       this.open = true;
-    } else if (this.blocked || this.fixWarnings.length > 0) {
+    } else if (this.blocked || this.fixWarnings.length > 0 || this.saveMods.length > 0) {
       this.open = true;
     } else {
       await this.launch();
+    }
+  }
+
+  /** Reads which mods the active profile's save needs and the profile does not load. */
+  async checkSave(): Promise<void> {
+    const id = profiles.activeSummary?.id;
+    this.saveMods = [];
+    if (!id) return;
+    try {
+      const report = await call(commands.profileSaveCheck(id), { expect: ["not_found", "io", "internal"] });
+      if (profiles.activeSummary?.id === id) this.saveMods = report.missing_mods_from_save.map(([mod]) => mod);
+    } catch {
+      // No answer: nothing to warn about.
     }
   }
 

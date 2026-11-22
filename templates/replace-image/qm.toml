@@ -1,0 +1,10 @@
+#:schema https://gamiseus.github.io/schemas/qm.schema.json
+# Example Mod: a replaced image.
+# assets/sprites/top_m1.png takes the place of the game's sprites/top_m1.png (the M1 Garand
+# seen from above). The game's file is 100x100; this one is 400x400 and is shown in the same
+# 100x100 box, four times sharper. The file here is a placeholder pattern.
+# Change first: the image. Keep the original's proportions, or it is stretched to fit.
+# Wiki: Part 2, Image resolution and size: https://gamiseus.github.io/wiki/replacing-art-and-sound/#image-resolution-and-size
+
+[manifest]
+version = "1.0.0"

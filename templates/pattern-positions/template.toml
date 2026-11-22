@@ -1,0 +1,19 @@
+name = "Before, after and at"
+part = 4
+order = 3
+section = "The three positions"
+summary = "The three positions of a pattern patch side by side, and a pattern of two lines."
+open = "qm.toml"
+try_next = ["Load a save and start a new profile; the log shows all three."]
+[[examples]]
+section = "The three positions"
+block = 1
+file = "qm.toml"
+[[examples]]
+section = "The three positions"
+block = 2
+file = "qm.toml"
+[[examples]]
+section = "The three positions"
+block = 3
+file = "qm.toml"

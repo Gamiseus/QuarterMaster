@@ -32,7 +32,7 @@ pub fn compile_menu_configs(configs: &[LoadedModConfig]) -> String {
     out
 }
 
-fn pattern_patch(
+pub(crate) fn pattern_patch(
     id: &str,
     name: &str,
     target: &str,

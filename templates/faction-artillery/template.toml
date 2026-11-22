@@ -1,0 +1,11 @@
+name = "Faction mortars and artillery"
+part = 3
+order = 10
+section = "Ordnance: `[[ordnance]]` and `[[explosions]]`"
+summary = "Faction mortars and artillery for the Axis: heavy mortar rounds, and barrages of heavier shells."
+open = "faction.toml"
+try_next = ["Give the faction's mortar more punch: base heavy_shell on heavy_mortar and use it for the mortar too.", "On an Allied faction, give a class a barrage skill: kind = \"artillery\" with skill = { class = \"comms\", slot = 4 }.", "Add a [[ordnance]] the faction throws, as in the faction-grenades template."]
+[[examples]]
+section = "Ordnance: `[[ordnance]]` and `[[explosions]]`"
+block = 2
+file = "faction.toml"

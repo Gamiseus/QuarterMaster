@@ -23,6 +23,7 @@ pub mod stacks;
 pub mod storage;
 pub mod suggestions;
 pub mod syspath;
+pub mod templates;
 pub mod vanilla_assets;
 pub mod winproc;
 
@@ -34,7 +35,7 @@ pub use conflict::{
 };
 pub use devtools::{
     decode_profile_code, encode_profile_code, lint_mod_directory, package_mod_release,
-    register_windows_protocols, scaffold_new_mod, ModLintReport, ModStarter, MOD_STARTERS, ModpackImportPreview,
+    register_windows_protocols, scaffold_new_mod, ModLintReport, ModpackImportPreview,
     ModpackManifest, ModpackModEntry,
 };
 pub use library::{

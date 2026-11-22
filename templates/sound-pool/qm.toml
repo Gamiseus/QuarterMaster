@@ -1,0 +1,11 @@
+#:schema https://gamiseus.github.io/schemas/qm.schema.json
+# Example Mod: a larger sound pool.
+# The game has garand1.wav to garand4.wav and picks one at random. garand5.wav and garand6.wav
+# make the pool six; the game picks from all of them. mg42Sound1.wav and mg42Sound2.wav turn
+# the MG42's single sound (mg42Sound.wav) into a pool of two. No code needed.
+# The files here are short placeholder tones; put your own recordings there.
+# Change first: the files in assets/sounds/.
+# Wiki: Part 2, Numbered sound pools: https://gamiseus.github.io/wiki/replacing-art-and-sound/#numbered-sound-pools
+
+[manifest]
+version = "1.0.0"

@@ -1,0 +1,11 @@
+name = "Air support"
+part = 5
+order = 8
+section = "Air strikes and supply drops"
+summary = "A bomber run the radio operators call in, and a medical supply drop the medics call in, each as a fourth skill."
+open = "air_support.lua"
+try_next = ["Give the bomber run its own plane: plane = \"example_mod_bomber\", an image in assets/sprites/ as big as the game's (538 by 720).", "Make a strafing run: explosion based on \"strafe\", shots = 40, spread = 250.", "Call one in from your own code: QM.Ordnance.callIn(ExampleMod.medicalDrop, x, y)."]
+[[examples]]
+section = "Air strikes and supply drops"
+block = 1
+file = "air_support.lua"

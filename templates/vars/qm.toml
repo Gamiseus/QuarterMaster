@@ -1,0 +1,22 @@
+#:schema https://gamiseus.github.io/schemas/qm.schema.json
+# Example Mod: variables.
+# [vars] holds a value; {{qm:example_mod_cooldown}} in a payload is filled in with it when the
+# game loads. Name variables after your mod: they are shared by every mod.
+# Change first: the value of example_mod_cooldown.
+# Wiki: Part 4, Variables: https://gamiseus.github.io/wiki/changing-game-code/#variables-vars
+
+[manifest]
+version = "1.0.0"
+
+[vars]
+example_mod_cooldown = "60"
+
+[[patches]]
+[patches.regex]
+id = "example_mod:frag_cooldown"
+target = "includes/urb_engine.lua"
+pattern = 'player\.deployedTroops\[foo\]\.skill2Timer = (?P<seconds>120)'
+root_capture = "seconds"
+position = "at"
+payload = "{{qm:example_mod_cooldown}}"
+times = 1

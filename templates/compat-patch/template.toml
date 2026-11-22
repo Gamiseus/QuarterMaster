@@ -1,0 +1,11 @@
+name = "A compatibility patch"
+part = 7
+order = 3
+section = "Compatibility patches"
+summary = "A small mod that makes two other mods work together: it turns a patch off and orders another."
+open = "qm.toml"
+try_next = ["Let the launcher write one for you: Patches tab, Fixes, Save as compatibility patch."]
+[[examples]]
+section = "Compatibility patches"
+block = 2
+file = "qm.toml"

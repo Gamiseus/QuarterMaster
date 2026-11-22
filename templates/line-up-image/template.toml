@@ -1,0 +1,11 @@
+name = "Line up an image"
+part = 2
+order = 5
+section = "Lining an image up"
+summary = "A replacement drawn at twice the resolution on a bigger canvas, off-centre and facing the other way, lined up with a [sprites] rule."
+open = "qm.toml"
+try_next = ["Open the mod in the Mod Engine's Sprites view, drag the image into place and save.", "Mirror a figure drawn facing the other way with flip = \"x\"."]
+[[examples]]
+section = "Lining an image up"
+block = 1
+file = "qm.toml"

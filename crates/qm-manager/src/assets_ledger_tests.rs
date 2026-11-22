@@ -56,8 +56,13 @@ fn faction(id: &str, root: &Path) -> LoadedFaction {
             voices: Vec::new(),
             text: BTreeMap::new(),
             sprites: BTreeMap::new(),
+            sprite_sizes: BTreeMap::new(),
             sounds: BTreeMap::new(),
             vehicles: Vec::new(),
+            explosions: Vec::new(),
+            ordnance: Vec::new(),
+            skills: Vec::new(),
+            ranks: None,
             hooks: None,
         },
     }

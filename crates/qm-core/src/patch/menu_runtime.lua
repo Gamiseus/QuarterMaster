@@ -163,6 +163,41 @@ function menu.getPage(modId, pageId)
   return menu.pageLookup[key]
 end
 
+-- Runs a click handler from a mod's menu definitions: a function, "page:<page id>" (one of the
+-- mod's pages), the name of a global function, or "Table.function" one level into a global
+-- table. A name is looked up when the click happens, so a function defined later still works.
+function menu.runHandler(modId, ref)
+  if type(ref) == "function" then
+    pcall(ref)
+    return
+  end
+  if type(ref) ~= "string" then return end
+  local pageId = ref:match("^page:(.+)$")
+  if pageId then
+    local num = menu.getPage(modId or "global", pageId)
+    if not num then
+      -- A card added from Lua without its modId: the page with that id, when one mod has one.
+      local suffix, found, count = ":" .. pageId, nil, 0
+      for key, n in pairs(menu.pageLookup) do
+        if key:sub(-#suffix) == suffix then
+          found, count = n, count + 1
+        end
+      end
+      if count == 1 then num = found end
+    end
+    if num then menuPage = num end
+    return
+  end
+  local fn = _G[ref]
+  if fn == nil then
+    local tableName, fnName = ref:match("^([^%.]+)%.([^%.]+)$")
+    if tableName and type(_G[tableName]) == "table" then
+      fn = _G[tableName][fnName]
+    end
+  end
+  if type(fn) == "function" then pcall(fn) end
+end
+
 -- ============================================================================
 -- OPTION & MODE REGISTRATION & AUTOMATIC SETTINGS DISPATCH
 -- ============================================================================
@@ -307,11 +342,7 @@ local function registerOptionButtonHandlers(modId, opt)
       local nextIdx = (curIdx % #opt.options) + 1
       menu.setOptionValue(modId, opt, opt.options[nextIdx])
     elseif optType == "button" and opt.on_click then
-      if type(opt.on_click) == "function" then
-        pcall(opt.on_click)
-      elseif type(opt.on_click) == "string" and _G[opt.on_click] then
-        pcall(_G[opt.on_click])
-      end
+      menu.runHandler(modId, opt.on_click)
     end
   end
 
@@ -532,6 +563,12 @@ end
 function menu.registerMenuButton(def)
   if not def or not def.id or not def.title then return end
 
+  -- on_click, from config.toml or Lua, becomes the function a click on the card calls.
+  if def.onClick == nil and def.on_click ~= nil then
+    local ref, modId = def.on_click, def.modId or "global"
+    def.onClick = function() menu.runHandler(modId, ref) end
+  end
+
   for i, btn in ipairs(menu.menuButtons) do
     if btn.id == def.id then
       menu.menuButtons[i] = def
@@ -633,11 +670,7 @@ function menu.registerPage(def)
       buttons[#buttons + 1] = Button.new(980, 686, 260, 30, "menu_custom_action", "active", true, def.action_label)
       _G.menu_custom_actionButton = function()
         playClickSound()
-        if type(def.action_on_click) == "function" then
-          pcall(def.action_on_click)
-        elseif type(def.action_on_click) == "string" and _G[def.action_on_click] then
-          pcall(_G[def.action_on_click])
-        end
+        menu.runHandler(modId, def.action_on_click)
       end
     end
   end
@@ -671,17 +704,6 @@ function menu.applyConfigs(compiledData)
     if cfg.modes then
       for _, mode in ipairs(cfg.modes) do
         mode.modId = modId
-        if mode.on_click and type(mode.on_click) == "string" and mode.on_click:sub(1, 5) == "page:" then
-          local targetPageId = mode.on_click:sub(6)
-          mode.onClick = function()
-            local pNum = menu.getPage(modId, targetPageId)
-            if pNum then
-              menuPage = pNum
-            end
-          end
-        elseif mode.on_click and type(mode.on_click) == "string" and _G[mode.on_click] then
-          mode.onClick = _G[mode.on_click]
-        end
         menu.registerMenuButton(mode)
       end
     end
@@ -1089,19 +1111,7 @@ function menu.registerModOptionsButtons()
 
       elseif optType == "button" then
         playClickSound()
-        local clickHandler = opt.onClick or opt.on_click
-        if type(clickHandler) == "function" then
-          pcall(clickHandler)
-        elseif type(clickHandler) == "string" then
-          if _G[clickHandler] then
-            pcall(_G[clickHandler])
-          elseif clickHandler:match("%.") then
-            local modName, fnName = clickHandler:match("^([^%.]+)%.([^%.]+)$")
-            if _G[modName] and _G[modName][fnName] then
-              pcall(_G[modName][fnName])
-            end
-          end
-        end
+        menu.runHandler(activeModId, opt.onClick or opt.on_click)
       end
     end
   end

@@ -395,6 +395,9 @@ impl Service {
     /// Active profile settings, falling back to the live save folder copy. A file that exists
     /// but cannot be parsed is an error, so writers never overwrite other mods' values.
     fn load_mod_settings(&self) -> QmResult<ModSettingsStore> {
+        // Options changed in the game since are in the save folder's copy (issue #2).
+        let active = self.paths().load_settings().active_profile_id;
+        self.paths().capture_live_mod_settings(&active);
         let path = self.profile_settings_path();
         let source = if path.is_file() {
             Some(path)

@@ -7,7 +7,6 @@ use qm_core::patch::table::PatchTable;
 use qm_manager::{
     decode_profile_code, lint_mod_directory, package_mod_release, register_windows_protocols,
     resolve_load_order, scaffold_new_mod, simulate_and_analyze_patches_with, SimulationOptions,
-    MOD_STARTERS,
     ConflictResolutionSuggestion, DetectedConflict, LaunchMethod, QuarterMasterPaths,
 };
 use qm_schema::{compare_saves, generate_mod_json_schema, generate_qm_toml_schema};
@@ -15,9 +14,9 @@ use qm_service::testing::NullSink;
 use qm_service::{GameStage, LaunchRequest, QmError, Service, Win32Probe};
 
 fn print_help() {
-    let templates: Vec<String> = MOD_STARTERS
+    let templates: Vec<String> = qm_manager::templates::templates()
         .iter()
-        .map(|s| format!("          {:<10} {}", s.id, s.summary))
+        .map(|t| format!("          {:<22} {}", t.id, t.name))
         .collect();
     println!(
         r#"qm {version}: the QuarterMaster command line, for making and checking Mud and Blood mods.
@@ -30,7 +29,7 @@ MAKING A MOD
   new <id> "<name>" [--template <t>] [--author <name>] [--dir <folder>]
         Create a mod folder named after <name> in the current folder (or --dir).
         <id> is the mod's permanent id: lowercase letters, digits, _ and -.
-        Templates (default: patch):
+        Templates (default: first-patch; the Mod Engine shows each with its wiki section):
 {templates}
   lint <mod_dir>
         Check one mod before you release it: mod.json, every patch run against the game's

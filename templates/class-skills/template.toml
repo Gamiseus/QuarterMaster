@@ -1,0 +1,11 @@
+name = "Class skills"
+part = 5
+order = 10
+section = "Class skills: `QM.Skills`"
+summary = "Skills changed, replaced with code or another class's, removed, moved to another level, and new ones past level 3."
+open = "skills.lua"
+try_next = ["Draw the tungsten rounds' icon in assets/sprites/ (46 by 46, as the game's).", "Put ordnance on a skill: ordnance = \"<id>\" (templates custom-grenade, rifle-grenade, mortar-and-artillery, air-support).", "Take a skill away from a class: QM.Skills.remove(\"<class>\", <slot>)."]
+[[examples]]
+section = "Class skills: `QM.Skills`"
+block = 2
+file = "skills.lua"

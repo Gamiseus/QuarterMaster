@@ -1,0 +1,11 @@
+name = "Faction voices"
+part = 3
+order = 6
+section = "Voices: `[voices]`"
+summary = "A faction's own voice lines, with fewer recordings than the game and a folder for the french unit."
+open = "faction.toml"
+try_next = ["Record lines named like the game's (contact1.wav, pinned3.wav...) into voices/."]
+[[examples]]
+section = "Voices: `[voices]`"
+block = 1
+file = "faction.toml"

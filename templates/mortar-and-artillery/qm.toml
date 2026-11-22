@@ -1,0 +1,28 @@
+#:schema https://gamiseus.github.io/schemas/qm.schema.json
+# Example Mod: a mortar and an artillery barrage.
+# mortar_and_artillery.lua registers a heavy shell with QM.Explosions, and with QM.Ordnance a
+# mortar (kind = "mortar") for the riflemen and the Axis mortar men, and a barrage
+# (kind = "artillery") for the officers. mod.json lists "ordnance" in qm_features, which also
+# makes QuarterMaster add the hooks ordnance needs (QuarterMaster 2.2.0 or newer).
+# Change first: the shell's numbers, then the rounds and shells.
+# Wiki: Part 5, Mortars and artillery: https://gamiseus.github.io/wiki/adding-your-own-lua-files/#mortars-and-artillery
+# Try next: call a barrage from your own code with QM.Ordnance.callIn.
+
+[manifest]
+version = "1.0.0"
+
+[[patches]]
+[patches.module]
+id = "example_mod:artillery_module"
+source = "mortar_and_artillery.lua"
+name = "includes/example_mod_artillery"
+before = "main.lua"
+
+# Load it once the game's own files are loaded: the ordnance is registered then.
+[[patches]]
+[patches.pattern]
+id = "example_mod:artillery_require"
+target = "main.lua"
+pattern = 'require "includes/directives"'
+position = "after"
+payload = 'ExampleMod = require "includes/example_mod_artillery"'

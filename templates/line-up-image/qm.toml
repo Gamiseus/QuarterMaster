@@ -1,0 +1,21 @@
+#:schema https://gamiseus.github.io/schemas/qm.schema.json
+# Example Mod: an image lined up with the game's.
+# assets/sprites/allied_fire.png takes the place of the game's Allied soldier firing, seen from
+# above: a 100x100 image with the soldier in its middle. This one is drawn at twice the
+# resolution on a bigger canvas (240x240, so 120x120 in the game), with the soldier right of and
+# below its middle, facing the other way and a little turned. Without the rule below it would be
+# squeezed into the game's 100x100 box and sit off. The rule moves, sizes, turns and mirrors the
+# picture inside that box; the box, and so the game's own placing, stays the same.
+# The image here is a placeholder.
+# Change first: the image, then the numbers. The Mod Engine's Sprites view shows your image
+# over the game's, lets you drag it into place, and writes these lines when you save.
+# Wiki: Part 2, Lining an image up: https://gamiseus.github.io/wiki/replacing-art-and-sound/#lining-an-image-up
+
+[manifest]
+version = "1.0.0"
+
+[sprites.allied_fire]
+offset = [-18, -22]        # 18 pixels left and 22 up
+draw_size = [120, 120]     # drawn at 120x120 inside the box
+rotate = -5                # turned 5 degrees anticlockwise about its middle
+flip = "x"                 # mirrored left to right

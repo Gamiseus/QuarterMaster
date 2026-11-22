@@ -85,6 +85,8 @@ pub struct ModMeta {
     /// mod.json `overrides`: launcher check findings the author silences (D69). The game
     /// never reads it.
     pub overrides: Vec<String>,
+    /// mod.json `qm_features`, lowercase.
+    pub features: BTreeSet<String>,
 }
 
 /// Per-patch data from the profile and compat layers. Never read from or written to a patch
@@ -316,6 +318,9 @@ pub fn apply_plan_with(raw: &RawLoad, plan: &PlanLoad, mode: FpMode) -> Applied 
     report.overrides = layered.compat.reports;
     report.warnings.extend(layered.notes);
     let var_collisions = loader::var_collisions(&layered.patches);
+    report
+        .warnings
+        .extend(loader::module_collisions(&layered.patches));
     let (patches, targets, vars) = loader::process_patches(layered.patches);
     for rp in &raw.patches {
         let (id, stack) = match &rp.patch {
@@ -1458,6 +1463,19 @@ fn layer_patches_with(
             p,
             crate::patch::menu::MENU_PATCH_PRIORITY,
             PathBuf::from("qm/menu"),
+            HashMap::new(),
+        ));
+    }
+
+    // Ordnance: the hooks QM.Ordnance and QM.Explosions need, when a mod asks for them.
+    let faction_ordnance = active
+        .iter()
+        .any(|lf| !lf.faction.ordnance.is_empty() || !lf.faction.explosions.is_empty() || !lf.faction.skills.is_empty());
+    for p in crate::patch::ordnance::build_ordnance_patches(&raw.mods, faction_ordnance) {
+        out.push((
+            p,
+            crate::patch::menu::MENU_PATCH_PRIORITY,
+            PathBuf::from("qm/ordnance"),
             HashMap::new(),
         ));
     }

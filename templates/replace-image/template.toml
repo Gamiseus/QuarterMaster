@@ -1,0 +1,8 @@
+name = "Replace an image"
+part = 2
+order = 3
+section = "Image resolution and size"
+summary = "One of the game's images replaced, at four times its resolution. No code."
+open = "qm.toml"
+aliases = ["sprite_replacer"]
+try_next = ["Draw your own top_m1.png at any resolution with the same proportions.", "Give a new image a size of your choosing (template image-size)."]

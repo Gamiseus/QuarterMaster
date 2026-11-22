@@ -1,0 +1,15 @@
+name = "A keybind"
+part = 6
+order = 3
+section = "Keybinds"
+summary = "A key of your choosing that runs your code; players can rebind it in the game."
+open = "config.toml"
+try_next = ["Check if the key is held each frame with QM.Input.isDown."]
+[[examples]]
+section = "Keybinds"
+block = 1
+file = "config.toml"
+[[examples]]
+section = "Keybinds"
+block = 2
+file = "keybind.lua"

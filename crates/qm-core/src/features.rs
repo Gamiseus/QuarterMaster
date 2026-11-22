@@ -32,6 +32,12 @@ pub const QM_FEATURES: &[&str] = &[
     "asset_choices",
     "short_patches",
     "config_submenus",
+    "events",
+    "ordnance",
+    "skills",
+    "ranks",
+    "faction_sprite_sizes",
+    "sprite_transforms",
 ];
 
 /// Why this QuarterMaster cannot load the mod, or None when it can. The reason follows the

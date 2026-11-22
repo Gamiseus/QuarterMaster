@@ -12,6 +12,7 @@ local R = {
   classes = {},       -- spec -> class definition (allied side)
   hooks = {},         -- list of hook tables from hooks.lua files
   vehicle_names = {}, -- vehicle tag -> display name
+  ranks = {},         -- side -> { soldier = {...}, officer = {...}, recruit, cadet }
   counts = {},
 }
 
@@ -203,6 +204,82 @@ function R.load_sprites_and_sounds(f)
       R.replace_sound(name, f.root, rel, f)
     end
   end
+  -- Sizes go to the [sprites] size rules, which are applied once the game has loaded. An
+  -- image the player gave back to another mod or the game keeps that one's size.
+  local sizes, n = {}, 0
+  for name, rule in pairs(f.sprite_sizes or {}) do
+    if not (f.sprites and f.sprites[name] and R.left_out(f, name)) then
+      sizes[name] = rule
+      n = n + 1
+    end
+  end
+  if n > 0 then
+    if type(_G.__qm_sprite_rules) == "function" then
+      _G.__qm_sprite_rules("faction:" .. f.id, sizes)
+    else
+      R.log("this QuarterMaster has no sprite sizes; the faction's sizes are left out")
+    end
+  end
+end
+
+-- [ranks]: the names soldierRankTell gives the faction's side.
+function R.load_ranks(f)
+  if not f.ranks then return end
+  R.ranks[f.replaces] = f.ranks
+  local title = f.ranks.sarge
+  if f.replaces ~= "allied" or type(title) ~= "string" then return end
+  _G.__qm_sarge_title = title
+  -- The game's texts that name him, unless the faction's [text] set them.
+  for _, key in ipairs({ "mnb2CallSarge", "oneSargeTxt", "perkText6" }) do
+    if not (f.text and f.text[key]) and type(rawget(_G, key)) == "string" then
+      rawset(_G, key, _G.__qm_sarge_text(rawget(_G, key)))
+    end
+  end
+end
+
+-- The Sarge's title in a text: "Sarge", "SARGE" and the word "sarge" become the faction's.
+_G.__qm_sarge_text = function(s)
+  local t = rawget(_G, "__qm_sarge_title")
+  if type(t) ~= "string" or type(s) ~= "string" then return s end
+  local function lit(x) return (x:gsub("%%", "%%%%")) end
+  s = s:gsub("SARGE", lit(t:upper()))
+  s = s:gsub("Sarge", lit(t))
+  s = s:gsub("%f[%a]sarge%f[%A]", lit(t:lower()))
+  return s
+end
+
+-- Is this soldier the Sarge? By the game's name or the faction's title, so a Sarge from a save
+-- made before the faction (or with another title) is still the one Sarge.
+_G.__qm_is_sarge = function(d)
+  if type(d) ~= "table" then return false end
+  local t = rawget(_G, "__qm_sarge_title")
+  return d.name == "Sarge" or (type(t) == "string" and d.name == t)
+end
+
+function R.wrap_ranks()
+  if next(R.ranks) == nil then return end
+  if type(rawget(_G, "soldierRankTell")) ~= "function" then
+    R.log("soldierRankTell not found; rank names skipped")
+    return
+  end
+  R.wrap("soldierRankTell", function(orig) return function(soldier, ...)
+    local r = type(soldier) == "table" and R.ranks[soldier.faction or "allied"]
+    if r then
+      local officer = soldier.spec == "officer"
+      local list
+      if officer then list = r.officer else list = r.soldier end
+      list = list or {}
+      local name
+      if soldier.rank == nil then
+        if officer then name = r.cadet else name = r.recruit end
+        name = name or list[1]
+      elseif type(soldier.rank) == "number" then
+        name = list[soldier.rank + 1]
+      end
+      if name then return name end
+    end
+    return orig(soldier, ...)
+  end end)
 end
 
 function R.apply_text(f)
@@ -719,6 +796,103 @@ end
 -- Entry point
 ---------------------------------------------------------------------------------------------
 
+-- [[explosions]] and [[ordnance]]: registered with QM.Explosions and QM.Ordnance. A grenade's
+-- image becomes the global qmf_<faction>_<grenade>, the name its particle is drawn by.
+function R.load_ordnance(f)
+  local X, G = _G.QM and _G.QM.Explosions, _G.QM and _G.QM.Ordnance
+  if not (X and G) then
+    if (f.explosions and #f.explosions > 0) or (f.ordnance and #f.ordnance > 0) then
+      R.log("this QuarterMaster has no QM.Ordnance; the faction's ordnance is left out")
+    end
+    return
+  end
+  for _, e in ipairs(f.explosions or {}) do
+    local def = { id = e.id, based_on = e.based_on }
+    for k, v in pairs(e.numbers or {}) do def[k] = v end
+    X.register(def)
+  end
+  for _, g in ipairs(f.ordnance or {}) do
+    local name = "qmf_" .. g.id:gsub("[^%w_]", "_")
+    -- A mortar round or an artillery shell may have no sprite: only its explosion shows.
+    local img = g.sprite and R.image(f.root, g.sprite) or nil
+    if img then _G[name] = img end
+    -- An air strike's or a drop's own plane.
+    local plane = nil
+    local planeImg = g.plane and R.image(f.root, g.plane) or nil
+    if planeImg then
+      plane = name .. "_plane"
+      _G[plane] = planeImg
+    end
+    local skill = nil
+    if g.skill_class and g.skill_slot then
+      skill = { class = g.skill_class, slot = g.skill_slot, unlock = g.skill_unlock }
+      if g.skill_icon then
+        local icon = R.image(f.root, g.skill_icon)
+        if icon then
+          _G[name .. "_icon"] = icon
+          skill.icon = name .. "_icon"
+        end
+      end
+    end
+    G.register({
+      id = g.id,
+      name = g.name,
+      description = g.description,
+      sprite = g.sprite and name or nil,
+      -- A drop has no explosion.
+      explosion = g.explosion ~= "" and g.explosion or nil,
+      plane = plane,
+      contents = g.contents,
+      range = g.range,
+      cooldown = g.cooldown,
+      tension = g.tension,
+      spin = g.spin,
+      skill = skill,
+      kind = g.kind,
+      shots = g.shots,
+      spread = g.spread,
+      replaces_frag = g.replaces_frag and f.replaces or nil,
+      replaces_rifle_grenade = g.replaces_rifle_grenade and f.replaces or nil,
+      replaces_mortar = g.replaces_mortar and f.replaces or nil,
+      replaces_artillery = g.replaces_artillery and f.replaces or nil,
+      replaces_bombing = g.replaces_bombing and f.replaces or nil,
+      replaces_strafing = g.replaces_strafing and f.replaces or nil,
+      replaces_drop = g.replaces_drop and f.replaces or nil,
+    })
+  end
+end
+
+-- The faction's [[skills]]: QM.Skills.set for each, with its icon as its own global.
+function R.load_skills(f)
+  local S = _G.QM and _G.QM.Skills
+  if not S then
+    if f.skills and #f.skills > 0 then R.log("this QuarterMaster has no QM.Skills; the faction's skills are left out") end
+    return
+  end
+  for _, s in ipairs(f.skills or {}) do
+    local icon = nil
+    if s.icon then
+      local img = R.image(f.root, s.icon)
+      if img then
+        icon = "qmf_" .. tostring(f.id):gsub("[^%w_]", "_") .. "_skill_" .. s.class .. "_" .. s.slot
+        _G[icon] = img
+      end
+    end
+    S.set({
+      class = s.class,
+      slot = s.slot,
+      name = s.name,
+      description = s.description,
+      icon = icon,
+      cooldown = s.cooldown,
+      unlock = s.unlock,
+      game = s.game_slot and (s.game_class .. ":" .. s.game_slot) or nil,
+      ordnance = s.ordnance,
+      remove = s.remove or nil,
+    })
+  end
+end
+
 function R.summary(f)
   local parts = {}
   local frames = 0
@@ -729,6 +903,9 @@ function R.summary(f)
   if f.weapons and #f.weapons > 0 then parts[#parts + 1] = #f.weapons .. " weapons" end
   if classes > 0 then parts[#parts + 1] = classes .. " classes" end
   if f.vehicles and #f.vehicles > 0 then parts[#parts + 1] = #f.vehicles .. " vehicles" end
+  if f.ordnance and #f.ordnance > 0 then parts[#parts + 1] = #f.ordnance .. " ordnance" end
+  if f.skills and #f.skills > 0 then parts[#parts + 1] = #f.skills .. " skills" end
+  if f.ranks then parts[#parts + 1] = "rank names" end
   if #parts == 0 then parts[1] = "text and sounds only" end
   return table.concat(parts, ", ")
 end
@@ -753,11 +930,15 @@ function R.apply(data)
     R.try(label .. " classes", R.load_classes, f)
     R.try(label .. " voices", R.load_voices, f)
     R.try(label .. " vehicles", R.load_vehicles, f)
+    R.try(label .. " ordnance", R.load_ordnance, f)
+    R.try(label .. " skills", R.load_skills, f)
+    R.try(label .. " ranks", R.load_ranks, f)
     R.try(label .. " names", R.wrap_names, f)
     R.try(label .. " hooks", R.load_hooks, f)
     R.log(f.name .. " replaces the " .. (side == "allied" and "Allies" or "Germans") .. ": " .. R.summary(f))
   end
   R.try("weapons", R.wrap_weapon_creator)
+  R.try("ranks", R.wrap_ranks)
   R.try("weapon pools", R.wrap_pools)
   if R.factions.allied then R.try("classes", R.wrap_spec_click) end
   R.try("soldier hooks", R.wrap_soldiers)

@@ -1,0 +1,11 @@
+name = "Feature gates and apply_as"
+part = 7
+order = 4
+section = "Feature gates: `min_qm` and `qm_features`"
+summary = "A mod that names the QuarterMaster it needs, and an at patch that keeps lines other mods need."
+open = "mod.json"
+try_next = ["Run qm lint: it says which features your files use."]
+[[examples]]
+section = "Keeping lines other mods need: `apply_as`"
+block = 1
+file = "qm.toml"

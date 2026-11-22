@@ -1,0 +1,15 @@
+name = "Order and requirements"
+part = 7
+order = 1
+section = "A patch that needs another patch"
+summary = "Patches that need another patch, run after it, or put their code above or below other mods' at a shared line."
+open = "qm.toml"
+try_next = ["Name the mods you need in mod.json under relationships."]
+[[examples]]
+section = "Where your block goes at a shared line"
+block = 1
+file = "qm.toml"
+[[examples]]
+section = "A patch that needs another patch"
+block = 1
+file = "qm.toml"

@@ -1,0 +1,16 @@
+{
+  "$schema": "https://gamiseus.github.io/schemas/mod.schema.json",
+  "schema_version": 1,
+  "id": "example_mod",
+  "name": "Example Mod",
+  "version": "1.0.0",
+  "authors": [
+    "Your Name"
+  ],
+  "description": "Code that answers a battle starting, a new wave, a save and a load, without patching the game's lines.",
+  "category": "Gameplay",
+  "game_version": ">=0.5.3",
+  "qm_features": [
+    "events"
+  ]
+}

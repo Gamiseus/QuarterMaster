@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { getCurrentWindow } from "@tauri-apps/api/window";
   import { Tooltip } from "bits-ui";
   import { untrack } from "svelte";
   import BlockingBanner from "./components/BlockingBanner.svelte";
@@ -11,6 +12,7 @@
   import Toasts from "./components/Toasts.svelte";
   import { connectStores, loadStores } from "./lib/stores";
   import { app } from "./lib/stores/app.svelte";
+  import { engine } from "./lib/stores/engine.svelte";
   import { updates } from "./lib/stores/updates.svelte";
   import { openUpdates } from "./screens/mods/mods-view.svelte";
   import OnboardingDialog from "./screens/onboarding/OnboardingDialog.svelte";
@@ -20,6 +22,7 @@
   import { setup } from "./lib/stores/setup.svelte";
   import DiagnosticsScreen from "./screens/diagnostics/DiagnosticsScreen.svelte";
   import ModEngineScreen from "./screens/modengine/ModEngineScreen.svelte";
+  import UnsavedDialog from "./screens/modengine/UnsavedDialog.svelte";
   import ModsScreen from "./screens/mods/ModsScreen.svelte";
   import SavesScreen from "./screens/saves/SavesScreen.svelte";
   import SettingsScreen from "./screens/settings/SettingsScreen.svelte";
@@ -60,6 +63,33 @@
   $effect(() => {
     if (autoCheck) return untrack(() => updates.schedule());
   });
+
+  // Closing the window with unsaved Mod Engine edits asks first. The listener is only there while
+  // edits are unsaved, so the window otherwise closes as it always has.
+  $effect(() => {
+    if (!engine.hasUnsaved) return;
+    let unlisten: (() => void) | null = null;
+    let gone = false;
+    getCurrentWindow()
+      .onCloseRequested(async (event) => {
+        let ok = true;
+        try {
+          ok = await engine.confirmLeave();
+        } catch {
+          // Never trap the window open.
+        }
+        if (!ok) event.preventDefault();
+      })
+      .then((u) => {
+        if (gone) u();
+        else unlisten = u;
+      })
+      .catch(() => {});
+    return () => {
+      gone = true;
+      unlisten?.();
+    };
+  });
 </script>
 
 <Tooltip.Provider delayDuration={400} skipDelayDuration={200}>
@@ -80,6 +110,7 @@
     <OnboardingDialog />
     <ManualInstallDialog />
     <ReportIssueDialog />
+    <UnsavedDialog />
     <Toasts />
   </div>
 </Tooltip.Provider>

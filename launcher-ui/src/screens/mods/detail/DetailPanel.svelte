@@ -162,7 +162,7 @@
             {:else if value === "load-order"}
               <LoadOrderTab modId={mod.id} enabled={mod.enabled} manifest={data.manifest} />
             {:else if value === "patches"}
-              <PatchesTab modId={mod.id} {canMutate} />
+              <PatchesTab modId={mod.id} {canMutate} workspaceMod={mod.is_workspace_linked ? mod : null} />
             {:else}
               <SecurityTab report={data.security_report} integrity={data.integrity} />
             {/if}

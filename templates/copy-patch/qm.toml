@@ -1,0 +1,16 @@
+#:schema https://gamiseus.github.io/schemas/qm.schema.json
+# Example Mod: a copy patch.
+# The text of extra_functions.lua is added to the end of the game's includes/urb_engine.lua,
+# so its functions are defined there, next to the game's own.
+# Change first: the functions in extra_functions.lua.
+# Wiki: Part 5, Copy patches: https://gamiseus.github.io/wiki/adding-your-own-lua-files/#copy-patches
+
+[manifest]
+version = "1.0.0"
+
+[[patches]]
+[patches.copy]
+id = "example_mod:extra_functions"
+target = "includes/urb_engine.lua"
+position = "append"            # or "prepend"
+sources = ["extra_functions.lua"]

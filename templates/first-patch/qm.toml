@@ -1,0 +1,20 @@
+#:schema https://gamiseus.github.io/schemas/qm.schema.json
+# Example Mod: your first patch.
+# The patch finds the line  require "includes/directives"  in the game's main.lua and puts a
+# print after it, so the game's log says the mod loaded.
+# Change first: the payload. Give every patch an id that starts with your mod id.
+# Wiki: Part 4, Your first patch: https://gamiseus.github.io/wiki/changing-game-code/#your-first-patch
+# Try next: the Mod Engine's Patch Studio finds lines for you and shows the result.
+
+[manifest]
+version = "1.0.0"
+
+[[patches]]
+[patches.pattern]
+id = "example_mod:hello"
+target = "main.lua"                    # the game file to change
+pattern = 'require "includes/directives"'   # the line to find
+position = "after"                     # "before", "after", or "at" to replace it
+payload = '''
+print("[Example Mod] loaded")
+'''

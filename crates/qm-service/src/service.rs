@@ -63,6 +63,10 @@ pub(crate) struct Inner {
     /// and the profile write count (`testing::on_next_simulation_pass`).
     #[allow(clippy::type_complexity)]
     pub on_simulation_pass: Mutex<Option<Box<dyn FnOnce() + Send>>>,
+    /// The Mod Engine's session state (checks, the game's symbols).
+    pub engine: Mutex<crate::ops::engine::EngineState>,
+    /// Test seam: a Mod Engine delete removes the file instead of using the Recycle Bin.
+    pub engine_delete_for_good: AtomicBool,
 }
 
 /// Refresh job kinds whose passes wait; only tests hold one (`testing::hold_pass`).
@@ -159,6 +163,8 @@ impl Service {
                 fail_next_suggestions: AtomicBool::new(false),
                 on_suggestions_pass: Mutex::new(None),
                 on_simulation_pass: Mutex::new(None),
+                engine: Mutex::new(Default::default()),
+                engine_delete_for_good: AtomicBool::new(false),
             }),
             timings: WatchTimings::default(),
             net: NetPolicy::production(),

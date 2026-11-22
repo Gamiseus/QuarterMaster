@@ -1,0 +1,11 @@
+name = "Faction skills"
+part = 3
+order = 12
+section = "Skills: `[[skills]]`"
+summary = "A faction's class skills: one changed, one another class's, one removed, one at an earlier level, and a new one past level 3."
+open = "faction.toml"
+try_next = ["Draw the tungsten rounds' icon in icons/ (46 by 46, as the game's).", "Put the faction's ordnance on a skill: ordnance = \"<id>\" (template faction-grenades).", "Rename a class's three skills with the class's skills names (template faction-classes)."]
+[[examples]]
+section = "Skills: `[[skills]]`"
+block = 1
+file = "faction.toml"

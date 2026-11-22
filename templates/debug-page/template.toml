@@ -1,0 +1,11 @@
+name = "A debug-mode page"
+part = 10
+order = 1
+section = "Debug mode"
+summary = "A Mod Operations card and page for the mod's author, shown only in debug mode."
+open = "debug.lua"
+try_next = ["Show your mod's own state on the page."]
+[[examples]]
+section = "Debug mode"
+block = 1
+file = "debug.lua"

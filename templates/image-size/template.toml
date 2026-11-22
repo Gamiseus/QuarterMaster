@@ -1,0 +1,11 @@
+name = "Image sizes"
+part = 2
+order = 4
+section = "Image resolution and size"
+summary = "Three new images, each shown at a size you choose with a [sprites] rule."
+open = "qm.toml"
+try_next = ["Use the images from your own code, a patch or a faction.", "Try scale, like and size on your own image."]
+[[examples]]
+section = "Image resolution and size"
+block = 1
+file = "qm.toml"

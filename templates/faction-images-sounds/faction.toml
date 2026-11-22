@@ -1,0 +1,24 @@
+#:schema https://gamiseus.github.io/schemas/faction.schema.json
+# Example Mod: faction images and sounds.
+# While Example Army is active, the Allied parachute is misc/parachute.png, the first rank
+# stripe is misc/rank_1.png at its own shape, the soldier firing sits 2 pixels right and 1 up,
+# and the first air strike sound is misc/plane.wav (placeholders here). Unlike assets/, these
+# change only while the faction is picked.
+# mod.json lists "faction_sprite_sizes" in qm_features, for the size and the place (QuarterMaster
+# 2.2.0).
+# Change first: the files in misc/.
+# Wiki: Part 3, Other images and sounds:
+#   https://gamiseus.github.io/wiki/faction-mods/#other-images-and-sounds-sprites-sounds
+
+schema = 1
+id = "example_army"
+name = "Example Army"
+replaces = "allied"
+
+[sprites]
+parachuteAllied = "misc/parachute.png"
+rank_1 = { file = "misc/rank_1.png", size = [18, 22] }   # the game's is 32 by 20
+allied_fire = { offset = [2, -1] }                       # the soldier firing, 2 pixels right and 1 up
+
+[sounds]
+airStrike1 = "misc/plane.wav"

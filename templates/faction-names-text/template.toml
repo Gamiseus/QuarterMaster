@@ -1,0 +1,19 @@
+name = "Faction names and text"
+part = 3
+order = 2
+section = "Names: `[names]`"
+summary = "A faction's soldier names from text files, vehicle call signs, rank names, and a game text of its own."
+open = "faction.toml"
+try_next = ["Add a last name per line to names/last.txt.", "Find other text names in the game's includes/localisation.lua."]
+[[examples]]
+section = "Names: `[names]`"
+block = 2
+file = "faction.toml"
+[[examples]]
+section = "Text: `[text]`"
+block = 1
+file = "faction.toml"
+[[examples]]
+section = "Ranks: `[ranks]`"
+block = 1
+file = "faction.toml"

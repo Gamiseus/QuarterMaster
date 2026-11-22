@@ -1,0 +1,23 @@
+name = "Faction weapons"
+part = 3
+order = 4
+section = "Weapons: `[[weapons]]`"
+summary = "A weapon reskinned with new art, sound and stats, a new weapon based on another, and random pools."
+open = "faction.toml"
+try_next = ["Swap the placeholders in weapons/ for your art and sound.", "Give the new weapon a class (template faction-classes)."]
+[[examples]]
+section = "Weapons: `[[weapons]]`"
+block = 1
+file = "faction.toml"
+[[examples]]
+section = "Weapons: `[[weapons]]`"
+block = 2
+file = "faction.toml"
+[[examples]]
+section = "Random pools: `[pools.<pool>]`"
+block = 1
+file = "faction.toml"
+[[examples]]
+section = "Swapping a weapon everywhere: `[spawn_swap]`"
+block = 1
+file = "faction.toml"

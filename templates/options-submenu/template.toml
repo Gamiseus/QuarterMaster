@@ -1,0 +1,15 @@
+name = "Submenus and conditions"
+part = 6
+order = 2
+section = "Grouping options in a submenu"
+summary = "Options grouped in a submenu, and an option shown only when another has a certain value."
+open = "config.toml"
+try_next = ["Put a submenu inside a submenu."]
+[[examples]]
+section = "Grouping options in a submenu"
+block = 1
+file = "config.toml"
+[[examples]]
+section = "Showing an option only when it applies"
+block = 1
+file = "config.toml"

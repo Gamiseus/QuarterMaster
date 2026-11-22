@@ -1,0 +1,11 @@
+name = "A custom screen"
+part = 6
+order = 5
+section = "A fully custom screen"
+summary = "A screen you draw yourself, with its own buttons, opened from a Mod Operations card."
+open = "screen.lua"
+try_next = ["Draw your mod's own statistics on it."]
+[[examples]]
+section = "A fully custom screen"
+block = 1
+file = "screen.lua"

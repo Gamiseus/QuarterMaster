@@ -58,6 +58,12 @@ class GameStore {
     this.#set(e.status);
   }
 
+  /** The status a launch from elsewhere returned (the Mod Engine's test run). */
+  started(status: GameStatus): void {
+    this.#seq++;
+    this.#set(status);
+  }
+
   #set(status: GameStatus): void {
     this.status = status;
     if (status.stage.stage === "idle") this.banner = null;

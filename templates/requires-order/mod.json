@@ -1,0 +1,13 @@
+{
+  "$schema": "https://gamiseus.github.io/schemas/mod.schema.json",
+  "schema_version": 1,
+  "id": "example_mod",
+  "name": "Example Mod",
+  "version": "1.0.0",
+  "authors": [
+    "Your Name"
+  ],
+  "description": "Patches that need another patch, run after it, or put their code above or below other mods' at a shared line.",
+  "category": "Gameplay",
+  "game_version": ">=0.5.3"
+}

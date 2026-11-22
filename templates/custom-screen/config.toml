@@ -1,0 +1,10 @@
+# Example Mod: the card that opens the custom screen in screen.lua.
+
+name = "Example Mod"
+
+[[modes]]
+id = "example_stats"
+title = "Example Statistics"
+subtitle = "A screen of its own"
+priority = 50
+on_click = "ExampleMod.openStats"   # in screen.lua
