@@ -78,6 +78,15 @@ export function rowBadges(
   return out;
 }
 
+/** What a row badge means, for its tooltip. Badges that say it all (a patch count) have none. */
+export function badgeHint(text: string): string | undefined {
+  if (/^\d+ broken$/.test(text)) return "A patch of this mod cannot find its place in the game's code, so it does not apply.";
+  if (/^\d+ conflicts?$/.test(text)) return "This mod changes the same lines as another mod. Open the Patches tab to settle it.";
+  if (text === "Update") return "A newer version of this mod is available.";
+  if (/^\d+ patch(es)?$/.test(text)) return "Patches are this mod's changes to the game's code.";
+  return undefined;
+}
+
 /** Rows show at most this many badges; the rest fold into a "+N" badge. */
 export const MAX_ROW_BADGES = 2;
 

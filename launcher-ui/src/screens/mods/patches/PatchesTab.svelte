@@ -29,6 +29,14 @@
   import StackModeDialog from "./StackModeDialog.svelte";
   import StackView from "./StackView.svelte";
 
+  /** One line under the view switcher saying what the picked view is for. */
+  const VIEW_NOTES = {
+    changes: "Every game file your enabled mods change. Pick a file to see its changed lines and which mod made each change.",
+    order: "The order patches run in. A later patch works on the result of the earlier ones.",
+    fixes: "Your own changes that settle conflicts between mods. Review or undo any of them here.",
+    assets: "Images, sounds and other files that more than one mod replaces, and which mod's copy the game uses.",
+  } as const;
+
   let modFilter = $state("");
   /** The stacking mode being previewed before Apply. */
   let modeDraft = $state<StackMode>("dependencies");
@@ -150,12 +158,16 @@
   </div>
 {/snippet}
 
+{#snippet viewNote()}
+  <p class="qm-muted view-note">{VIEW_NOTES[patchView.view]}</p>
+{/snippet}
 {#if vanilla}
-  <EmptyState title="No patches" body="The Vanilla profile runs the game unmodded." />
+  <EmptyState title="No patches" body="The Vanilla profile runs the game without mods, so nothing is patched. Switch to a profile with mods to see their changes." />
 {:else if sim.status !== "ready" || stats.length === 0}
   <!-- No file to show yet, but the fixes (Waiting ones too) stay reachable. -->
   <div class="patches-wrap bare">
     {@render views(false)}
+    {@render viewNote()}
     {#if patchView.view === "fixes"}
       {@render waitingList()}
       <ScrollRegion label="Fixes"><FixesView {modNames} {canMutate} /></ScrollRegion>
@@ -170,7 +182,7 @@
       </Callout>
     {:else}
       {@render waitingList()}
-      <EmptyState title="No changed files" body="No game files are changed by the enabled mods." />
+      <EmptyState title="No changed files" body="A patch is a change a mod makes to the game's code. None of your enabled mods change any, so there is nothing to show." />
     {/if}
   </div>
 {:else}
@@ -181,6 +193,7 @@
     {#key modeKey}
       <Select
         label="Code at shared lines"
+        title="When several mods add code at the same line, this sets whose code goes first."
         items={STACK_MODES}
         bind:value={() => stacking.mode, (v) => pickMode(v)}
         disabled={!canMutate}
@@ -188,6 +201,7 @@
       />
     {/key}
   </div>
+  {@render viewNote()}
   {#if stacking.showNotice}
     <StackingNotice {modNames} {canMutate} />
   {/if}
@@ -290,6 +304,12 @@
   .patches-wrap.bare {
     gap: var(--qm-space-3);
     padding-top: var(--qm-space-3);
+  }
+
+  .view-note {
+    flex: none;
+    margin: var(--qm-space-2) 0 0;
+    font-size: var(--qm-text-12);
   }
 
   .pt-head {

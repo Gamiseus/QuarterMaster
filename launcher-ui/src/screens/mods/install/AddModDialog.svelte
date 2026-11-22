@@ -123,7 +123,12 @@
   }
 </script>
 
-<Dialog bind:open title="Add mod" size="lg">
+<Dialog
+  bind:open
+  title="Add mod"
+  description="Install a mod from a .zip file or a folder on your computer. It goes into QuarterMaster's library. You switch mods on and off in the mod list."
+  size="lg"
+>
   <div class="content">
     <div class={["zone", { dragging }]}>
       <p class="zone-text">Drop .zip files or folders here</p>

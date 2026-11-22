@@ -29,6 +29,7 @@
 <div class="security">
   <section>
     <StencilHeading level={3}>Static scan</StencilHeading>
+    <p class="qm-muted">QuarterMaster reads the mod's code, without running it, for anything that could affect your computer.</p>
     {#if report.has_high_risk}
       <p><Badge tone="danger">High risk</Badge> This mod uses capabilities that can affect your system.</p>
     {/if}
@@ -62,6 +63,7 @@
 
   <section>
     <StencilHeading level={3}>Integrity</StencilHeading>
+    <p class="qm-muted">Checks that the mod's files are still the ones that were installed.</p>
     {#if integrity.is_pristine}
       <p class="qm-muted">Files match the installed version.</p>
     {:else}

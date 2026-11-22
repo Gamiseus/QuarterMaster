@@ -80,6 +80,7 @@
 
   <section>
     <StencilHeading level={3}>Relationships</StencilHeading>
+    <p class="qm-muted">What the mod's author says it needs, works with or must load after.</p>
     {#if relationships.length === 0}
       <p class="qm-muted">No relationships declared.</p>
     {:else}

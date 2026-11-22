@@ -5,6 +5,8 @@
 
   interface Props {
     title: string;
+    /** One or two plain sentences under the heading saying what the screen is for. */
+    intro?: string;
     /** Buttons next to the heading. */
     actions?: Snippet;
     /**
@@ -16,7 +18,7 @@
     children?: Snippet;
   }
 
-  let { title, actions, scroll = true, class: className = "", children }: Props = $props();
+  let { title, intro, actions, scroll = true, class: className = "", children }: Props = $props();
 </script>
 
 <!-- A screen fills the window under the title bar; it never scrolls as a page. -->
@@ -25,6 +27,7 @@
     <StencilHeading level={1}>{title}</StencilHeading>
     {#if actions}<div class="actions">{@render actions()}</div>{/if}
   </header>
+  {#if intro}<p class="qm-muted intro">{intro}</p>{/if}
   {#if scroll}
     <ScrollRegion class="qm-screen-body scrolls">{@render children?.()}</ScrollRegion>
   {:else}
@@ -52,6 +55,14 @@
   .actions {
     display: flex;
     gap: var(--qm-space-2);
+  }
+
+  /* Sits close under the heading, which has its own bottom padding. */
+  .intro {
+    flex: none;
+    margin: calc(var(--qm-space-2) * -1) 0 var(--qm-space-3);
+    padding: 0 var(--qm-space-5);
+    font-size: var(--qm-text-13);
   }
 
   .qm-screen :global(.qm-screen-body) {

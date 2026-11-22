@@ -149,7 +149,11 @@
       {#if p.locked_vanilla}
         <Button disabled={startup !== null || busy} onclick={() => (unlockOpen = true)}>Unlock</Button>
       {:else}
-        <Button disabled={startup !== null || busy} onclick={lock}>Lock as vanilla</Button>
+        <Button
+          disabled={startup !== null || busy}
+          title="Refuses to launch a profile with mods on this slot, so its progress stays vanilla."
+          onclick={lock}>Lock as vanilla</Button
+        >
       {/if}
     {/if}
     {#if others.length > 0}

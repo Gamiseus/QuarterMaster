@@ -14,7 +14,11 @@
 </script>
 
 <!-- The slot strip across the top, the selected slot below it filling the rest (spec 7.1). -->
-<Screen title="Saves" scroll={false}>
+<Screen
+  title="Saves"
+  intro="Each profile plays on one save slot, so modded and vanilla progress stay apart. Pick a slot to see its progress, back it up or switch to it."
+  scroll={false}
+>
   <SlotStrip />
   <SlotDetail />
 </Screen>

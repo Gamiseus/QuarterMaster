@@ -190,7 +190,12 @@
 
 <!-- Two panes: the profiles on the left, the picked one's settings on the right, so the
      whole dialog fits the window. In a narrow window the panes stack. -->
-<Dialog bind:open title="Manage profiles" size="lg">
+<Dialog
+  bind:open
+  title="Manage profiles"
+  description="A profile is a set of turned-on mods with its own load order, mod options and save slot. Switch profiles from the title bar."
+  size="lg"
+>
   <div class="wrap">
   <div class="layout">
     <ul class="list" aria-label="Profiles">
@@ -226,7 +231,7 @@
           <Select label="Start the game with" items={METHODS} bind:value={method} disabled={!canEdit} />
         </div>
         <TextField label="Launch arguments" placeholder="-windowed -novid" bind:value={args} disabled={!canEdit} />
-        <p class="hint">Separate arguments with spaces. Quotes are not supported. The console is set in Settings for every profile.</p>
+        <p class="hint">Extra options passed to the game, separated by spaces. Quotes are not supported. The console window is one setting for all profiles, under Settings > Launch.</p>
         <div class="row end">
           <Button variant="primary" disabled={!canEdit || !settingsDirty} onclick={saveSettings}>Save settings</Button>
         </div>

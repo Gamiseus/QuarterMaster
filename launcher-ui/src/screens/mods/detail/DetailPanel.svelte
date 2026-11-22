@@ -105,7 +105,7 @@
 
 {#if !mod}
   <Panel>
-    <EmptyState title="Select a mod" body="Pick a mod in the list to see its details." />
+    <EmptyState title="Select a mod" body="Pick a mod in the list to read about it, change its options, see where it loads and what it changes." />
   </Panel>
 {:else}
   <Panel corners class="detail-panel">

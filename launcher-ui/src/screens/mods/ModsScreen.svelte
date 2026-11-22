@@ -46,7 +46,11 @@
 </script>
 
 <!-- Each tab lays out its own scroll regions, so the screen body does not scroll. -->
-<Screen title="Mods" scroll={false}>
+<Screen
+  title="Mods"
+  intro="Switch mods on or off, set the order they load in, and see what they change in the game."
+  scroll={false}
+>
   <Tabs
     bind:value={() => modsView.tab, (v) => (modsView.tab = v === "browse" || v === "patches" ? v : "installed")}
     tabs={TABS}

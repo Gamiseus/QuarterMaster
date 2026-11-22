@@ -191,12 +191,12 @@
   {/if}
 
   {#if body}
-    <Section title="Anchor">
+    <Section title="Anchor" description="The lines the patch looks for in the game's code.">
       <Inset><LuaCode code={body.pattern} label="Anchor" /></Inset>
     </Section>
   {/if}
   {#if body?.payload}
-    <Section title="Payload">
+    <Section title="Payload" description="The code it adds there.">
       <Inset><LuaCode code={body.payload} label="Payload" /></Inset>
     </Section>
   {/if}

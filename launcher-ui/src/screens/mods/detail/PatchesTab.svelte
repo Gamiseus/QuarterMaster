@@ -147,6 +147,7 @@
   {:else if list.length === 0}
     <p class="qm-muted">This mod has no patches.</p>
   {:else}
+    <p class="qm-muted">The changes this mod makes to the game's code. Switch one off to stop it applying.</p>
     <ul class="rows">
       <!-- A patch with several target files has a row per file: the file is part of the key. -->
       {#each sections as sec (sec.group ?? "")}

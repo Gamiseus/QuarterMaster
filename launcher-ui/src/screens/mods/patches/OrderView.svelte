@@ -160,6 +160,7 @@
 
 <div class="order-view">
   <p class="qm-muted summary" role="status">{summary}</p>
+  <p class="qm-muted summary">Drag a patch to change when it runs in this file. You see what the move changes before it is applied.</p>
   {#if rows === null}
     <div aria-busy="true" aria-label="Loading the order"><Skeleton lines={4} /></div>
   {:else}

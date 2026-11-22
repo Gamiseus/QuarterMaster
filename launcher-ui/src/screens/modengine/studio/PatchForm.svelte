@@ -71,9 +71,9 @@
     <div class="grid">
       <Select label="Where the code goes" items={POSITIONS} bind:value={() => d.position || "after", (v) => v && studio.update({ position: v })} />
       <TextField
-        label="Times"
+        label="Times to apply"
         type="number"
-        placeholder="Any"
+        placeholder="Every match"
         value={d.times === null ? "" : String(d.times)}
         oninput={(e: Event) => {
           const v = (e.currentTarget as HTMLInputElement).value;

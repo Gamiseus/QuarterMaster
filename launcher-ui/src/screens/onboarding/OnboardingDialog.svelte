@@ -144,6 +144,10 @@
         <li>Already have a folder of your own mods? Pick it with Browse. Any folder on any drive works.</li>
       </ul>
     {:else}
+      <p class="qm-muted intro">
+        This is how the Launch button starts the game. If you are not sure, keep the one chosen for you. After setup,
+        add mods on the Mods screen's Browse tab, then press Launch.
+      </p>
       <RadioGroup label="Default launch method" items={METHODS} bind:value={method} />
     {/if}
   </div>

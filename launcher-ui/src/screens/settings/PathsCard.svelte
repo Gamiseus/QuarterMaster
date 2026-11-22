@@ -7,7 +7,7 @@
 
   /** The game and save folders can be found automatically; a modder's workspace never is. */
   const DETECTED: { key: Exclude<PathKey, "workspace_mods_dir">; label: string; kind: "exe" | "dir" }[] = [
-    { key: "game_exe_path", label: "Game executable", kind: "exe" },
+    { key: "game_exe_path", label: "Game executable (mnb.exe)", kind: "exe" },
     { key: "save_dir_path", label: "Save folder", kind: "dir" },
   ];
 

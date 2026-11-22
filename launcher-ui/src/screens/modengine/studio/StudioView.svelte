@@ -53,7 +53,7 @@
       case "skipped":
         return { tone: "warn" as const, text: "Skipped" };
       case "refused":
-        return { tone: "danger" as const, text: "The engine refused it" };
+        return { tone: "danger" as const, text: "QuarterMaster would not accept it" };
       default:
         return { tone: "warn" as const, text: o.messages[0] ?? "The patch cannot be tried yet" };
     }

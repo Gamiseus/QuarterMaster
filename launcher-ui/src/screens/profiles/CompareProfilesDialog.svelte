@@ -81,7 +81,7 @@
         </Section>
       </div>
       {#if d.priority_diffs.length > 0}
-        <Section title="Priority differences">
+        <Section title="Priority differences" description="Mods are loaded in order of priority, lowest number first. Each line reads {nameOf(a)} / {nameOf(b)}.">
           <ul class="list" aria-label="Priority differences">
             {#each d.priority_diffs as [id, pa, pb] (id)}
               <li><span>{modName(id)}</span><span class="mono">{pa} / {pb}</span></li>

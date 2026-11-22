@@ -90,8 +90,16 @@
       </ul>
     </ScrollRegion>
     <div class="actions">
-      <Button disabled={!canRepair} onclick={() => (repairOpen = true)}>Repair DLL</Button>
-      <Button disabled={!canRestore} onclick={() => (restoreOpen = true)}>Restore clean game folder</Button>
+      <Button
+        disabled={!canRepair}
+        title="Put the game hook (winmm.dll) back if mods stop loading."
+        onclick={() => (repairOpen = true)}>Repair game hook</Button
+      >
+      <Button
+        disabled={!canRestore}
+        title="Remove QuarterMaster's files from the game folder so the game runs as if it were never modded."
+        onclick={() => (restoreOpen = true)}>Restore clean game folder</Button
+      >
       {#if game.isBusy}<span class="qm-muted reason">Close the game to repair, restore or clear.</span>{/if}
     </div>
   {/if}
@@ -100,8 +108,8 @@
 <SafeLaunchDialog bind:open={causeOpen} run={causeRun} />
 <ConfirmDialog
   bind:open={repairOpen}
-  title="Repair the hook DLL?"
-  body="The winmm.dll in the game folder is replaced with the one that ships with this launcher."
+  title="Repair the game hook?"
+  body="The winmm.dll in the game folder is replaced with the one that ships with this launcher. It is the small library that loads your mods when the game starts."
   confirmLabel="Repair"
   onconfirm={() => diagnostics.repairDll()}
 />

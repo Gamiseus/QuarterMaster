@@ -11,6 +11,7 @@
 </script>
 
 <div class="browse">
+  <p class="qm-muted intro">Mods published for Mud and Blood. Install adds a mod to your library. You switch mods on and off in the Installed tab.</p>
   <CatalogFilters />
   {#if catalog.result.status === "loading"}
     <div class="grid" aria-busy="true" aria-label="Loading the catalog">
@@ -57,6 +58,11 @@
     display: flex;
     flex-direction: column;
     gap: var(--qm-space-3);
+  }
+
+  .intro {
+    margin: 0;
+    font-size: var(--qm-text-13);
   }
 
   .grid {

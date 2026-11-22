@@ -45,7 +45,7 @@ class DiagnosticsStore {
 
   async repairDll(): Promise<void> {
     await call(commands.dllRepair());
-    toasts.info("The hook DLL was repaired.");
+    toasts.info("The game hook was repaired.");
   }
 
   /**

@@ -125,7 +125,7 @@
     <h2 class="qm-stencil title">Test run</h2>
     <Badge tone={STAGE[stage]?.tone ?? "info"}>{STAGE[stage]?.text ?? stage}</Badge>
     <span class="spacer"></span>
-    <Switch label="Every line" checked={all} onCheckedChange={(v: boolean) => (all = v)} />
+    <Switch label="Show every log line" checked={all} onCheckedChange={(v: boolean) => (all = v)} />
     <Button size="sm" variant="ghost" onclick={onclose}>Hide</Button>
   </header>
   {#if plan?.blocked}

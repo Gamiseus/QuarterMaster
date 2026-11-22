@@ -28,11 +28,23 @@
   }
 </script>
 
-<Screen title="Diagnostics" scroll={false}>
+<Screen
+  title="Diagnostics"
+  intro="Checks the game folder, lists crashes with the mod that likely caused them, and shows the live log. If something is wrong, you can report it from here."
+  scroll={false}
+>
   {#snippet actions()}
-    <Button onclick={() => (traceOpen = true)}>Trace globals...</Button>
-    <Button disabled={bundleRunning} onclick={bugReport}>Create bug report</Button>
-    <Button variant="primary" onclick={() => (setup.reportOpen = true)}>Report a problem...</Button>
+    <Button title="For mod makers: starts the game once and records which mod sets each global name." onclick={() => (traceOpen = true)}>Trace globals...</Button>
+    <Button
+      disabled={bundleRunning}
+      title="Saves a zip of your mod list, settings, logs and crash reports, and opens its folder. Nothing is sent."
+      onclick={bugReport}>Create bug report</Button
+    >
+    <Button
+      variant="primary"
+      title="Opens a new issue on GitHub with your description filled in. Nothing is sent until you press Create there."
+      onclick={() => (setup.reportOpen = true)}>Report a problem...</Button
+    >
   {/snippet}
   <div class="diag">
     <div class="top">

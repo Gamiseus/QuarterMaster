@@ -209,6 +209,11 @@
       onselectall={modItems.length > 1 ? selectAll : undefined}
     />
     <UpdatesNote />
+    {#if ready && modItems.length > 0 && selectedMods.length <= 1}
+      <p class="qm-muted hint">
+        Tick a mod to turn it on. Mods load from top to bottom: drag the grip to reorder them. A locked mod keeps its place when others move.
+      </p>
+    {/if}
     {#if selectedMods.length > 1}
       <div class="selection-bar" role="toolbar" aria-label="Selected mods">
         <span class="count">{selectedMods.length} mods selected</span>
@@ -232,9 +237,12 @@
           {/each}
         </div>
       {:else if modItems.length === 0}
-        <EmptyState title="No mods installed" body="Mods you install show up here in load order.">
+        <EmptyState
+          title="No mods installed"
+          body="Find mods on the Browse tab, or drop a .zip file or a folder anywhere on this window. Installed mods are listed here in the order the game loads them."
+        >
           {#snippet action()}
-            <Button variant="primary" disabled={!canMutate} onclick={onaddmod}>Add your first mod</Button>
+            <Button variant="primary" disabled={!canMutate} onclick={onaddmod}>Add a mod from a file</Button>
           {/snippet}
         </EmptyState>
       {:else}
@@ -357,6 +365,12 @@
     display: flex;
     flex-direction: column;
     gap: var(--qm-space-2);
+  }
+
+  .hint {
+    flex: none;
+    margin: 0;
+    font-size: var(--qm-text-12);
   }
 
   .none {

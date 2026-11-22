@@ -58,20 +58,24 @@
   }
 </script>
 
-<Screen title="Mod Engine" scroll={false}>
+<Screen
+  title="Mod Engine"
+  intro="For mod makers: edit the mods in your workspace folder, check and test them, and prepare a release."
+  scroll={false}
+>
   {#snippet actions()}
     {#if workspace}
       <div class="views" role="group" aria-label="View">
-        <button type="button" aria-pressed={engine.view === "files"} onclick={() => (engine.view = "files")}>Files</button>
-        <button type="button" aria-pressed={engine.view === "studio"} onclick={() => (engine.view = "studio")}>Patch Studio</button>
-        <button type="button" aria-pressed={engine.view === "sprites"} onclick={() => (engine.view = "sprites")}>Sprites</button>
-        <button type="button" aria-pressed={engine.view === "release"} onclick={() => (engine.view = "release")}>Release</button>
+        <button type="button" title="Edit the mod's files" aria-pressed={engine.view === "files"} onclick={() => (engine.view = "files")}>Files</button>
+        <button type="button" title="Build a patch to the game's code and preview the result" aria-pressed={engine.view === "studio"} onclick={() => (engine.view = "studio")}>Patch Studio</button>
+        <button type="button" title="Line a sprite up against the game's image it replaces" aria-pressed={engine.view === "sprites"} onclick={() => (engine.view = "sprites")}>Sprites</button>
+        <button type="button" title="Pack the mod and open its release page" aria-pressed={engine.view === "release"} onclick={() => (engine.view = "release")}>Release</button>
       </div>
       <Button size="sm" variant="primary" disabled={game.isBusy} title={engine.testPlan?.message ?? undefined} onclick={test}>Test in game</Button>
-      <Button size="sm" disabled={engine.linting} aria-busy={engine.linting} onclick={() => engine.runLint()}>
+      <Button size="sm" title="Looks for mistakes in the mod's files" disabled={engine.linting} aria-busy={engine.linting} onclick={() => engine.runLint()}>
         {engine.linting ? "Checking..." : "Check mod"}
       </Button>
-      <Button size="sm" variant="ghost" onclick={() => engine.openTemplates("add")}>Add example</Button>
+      <Button size="sm" variant="ghost" title="Add a small working example to this mod" onclick={() => engine.openTemplates("add")}>Add example</Button>
       <Button size="sm" variant="ghost" onclick={() => engine.reveal().catch(() => {})}>Open folder</Button>
     {/if}
   {/snippet}

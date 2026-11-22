@@ -76,6 +76,7 @@
     },
     {
       label: "New profile",
+      description: "With its own mods, load order and save slot",
       separatorBefore: true,
       disabled: !app.startupDone,
       disabledReason: app.startupDone ? undefined : notReady,
@@ -85,18 +86,21 @@
     },
     {
       label: "Manage profiles",
+      description: "Rename, clone, compare, share or delete",
       onselect: () => {
         manageOpen = true;
       },
     },
     {
       label: "Import modpack...",
+      description: "From a .qmpack file",
       disabled: !app.startupDone,
       disabledReason: app.startupDone ? undefined : notReady,
       onselect: () => void pickModpack(),
     },
     {
       label: "Import share code",
+      description: "From a code another player sent",
       disabled: !app.startupDone,
       disabledReason: app.startupDone ? undefined : notReady,
       onselect: () => {

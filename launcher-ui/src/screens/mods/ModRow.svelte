@@ -3,7 +3,7 @@
   import { IconGrip, IconLock, IconTrash, IconUnlock } from "../../components/icons";
   import { Badge, Checkbox, IconButton, Select, Tooltip } from "../../components/ui";
   import type { ModSummary } from "../../lib/bindings";
-  import { maxRowBadges, rowBadges, type ModStatus } from "../../lib/modlist/status";
+  import { badgeHint, maxRowBadges, rowBadges, type ModStatus } from "../../lib/modlist/status";
   import { app } from "../../lib/stores/app.svelte";
 
   interface Props {
@@ -53,7 +53,7 @@
 
   const tab = $derived(active ? 0 : -1);
   const movedText = $derived(
-    movedReasons && movedReasons.length > 0 ? movedReasons.join("; ") : "Moved by the load order solver.",
+    movedReasons && movedReasons.length > 0 ? movedReasons.join("; ") : "Moved from where you put it, to follow this mod's dependencies and load rules.",
   );
   const badges = $derived(status ? rowBadges(status, enabled, mod.kind, mod.faction) : []);
   const max = $derived(maxRowBadges(app.settings?.text_scale ?? 1));
@@ -123,7 +123,7 @@
   </div>
   <div role="gridcell" class="cell status">
     {#each shown as b (b.text)}
-      <Badge tone={b.tone}>{b.text}</Badge>
+      <Badge tone={b.tone} title={badgeHint(b.text)}>{b.text}</Badge>
     {/each}
     {#if folded.length > 0}
       {@const more = folded.map((b) => b.text).join(", ")}

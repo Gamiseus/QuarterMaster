@@ -9,7 +9,7 @@
 
 {#if slotId}
   <span class="chip">
-    <Badge data-testid="save-slot-chip">
+    <Badge data-testid="save-slot-chip" title="The save slot this profile plays on. Change it under Saves.">
       <span class="inner">
         <IconSaves />
         <span class="name">{saves.nameFor(slotId)}</span>

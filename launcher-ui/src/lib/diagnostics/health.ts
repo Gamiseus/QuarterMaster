@@ -13,7 +13,7 @@ export interface HealthRow {
 }
 
 function hookRow(r: HealthReport): HealthRow {
-  const label = "Hook DLL";
+  const label = "Game hook";
   if (!r.source_dll_ready) {
     return { label, tone: "danger", detail: "qm_winmm.dll is missing next to the launcher, so mods cannot be loaded." };
   }
@@ -24,7 +24,7 @@ function hookRow(r: HealthReport): HealthRow {
   if (!r.dll_matches_build) {
     return { label, tone: "warn", detail: "Installed, but from a different QuarterMaster build. Repair it to match." };
   }
-  return { label, tone: "ok", detail: "Installed and matches this build." };
+  return { label, tone: "ok", detail: "Installed and matches this build. This small library (winmm.dll) is what loads your mods when the game starts." };
 }
 
 function folderRow(r: HealthReport, busy: boolean): HealthRow {
@@ -182,7 +182,7 @@ export function healthRows(
       ? {
           label: "Overwrite files",
           tone: "warn",
-          detail: `${files} ${files === 1 ? "file" : "files"} in the overwrite folder.`,
+          detail: `${files} ${files === 1 ? "file" : "files"} in the overwrite folder: files the game or a mod wrote into the active profile's Mods folder.`,
           action: "clear_overwrite",
         }
       : { label: "Overwrite files", tone: "ok", detail: "None." },
